@@ -42,6 +42,8 @@ shippable. Each will earn its own spec when its time comes.
   (see §11.1 for the v2 design sketch), multi-agent orchestration,
   nutrition data, user preference modelling beyond the shelf-life
   user-correction loop.
+- Gmail auto-ingest connector for online grocery receipts (see §11.2 for
+  the v1.5/v2 design sketch).
 - Vercel deployment. A long-running scheduler is a poor fit for serverless;
   if Vercel ever becomes desirable, it requires splitting the bot webhook
   from the scheduler (Upstash QStash or similar). Out of scope here.
@@ -488,6 +490,7 @@ post-launch. Listed so we know *not* to build them now.
 | User wants household sharing | Multi-user spec: groups, per-group digests, conflict resolution for overlapping pantry items |
 | User wants recipes from expiring items + goal-driven shopping list | Build the **Recipe RAG + shopping-list** subsystem described in §11.1. Likely a separate service consuming the pantry DB read-only. |
 | User wants reminders outside Telegram | Notification-channel abstraction; pick one of email / WhatsApp / SignalCli to start |
+| User receives many grocery receipts by email (Instacart, Amazon Fresh, Walmart+, etc.) | Build the **Gmail auto-ingest connector** described in §11.2. Reuses the existing extraction pipeline; mostly capture + auth glue. |
 
 ### 11.1 Recipe RAG + goal-driven shopping list (v2 sketch)
 
@@ -577,6 +580,124 @@ loop — buy what you said you'd buy and the list cleans itself.
   auto-decrementing pantry rows is tempting but it's a new
   consumption-tracking subsystem. Defer until the basic shopping-list
   loop has been used for a few weeks.
+
+### 11.2 Gmail auto-ingest connector (v1.5/v2 sketch)
+
+Online grocery orders (Instacart, Amazon Fresh, Walmart+, Whole Foods,
+HelloFresh, …) arrive as emails — no photo needed, no manual scan.
+A Gmail connector pulls those receipts automatically, runs them through
+the **existing LLM extraction pipeline** with text-or-HTML input instead
+of image input, and writes `PantryItem` rows without the user ever
+opening Telegram. This closes the last manual capture step for anyone
+who shops online.
+
+This is positioned as v1.5 (not v2) specifically because most of the
+work is auth + capture glue — the extraction pipeline already exists.
+
+#### 11.2.1 Connection model
+
+Two real options. Pick **poll** first; upgrade only if latency matters.
+
+| Option | How it works | Trade-offs |
+|---|---|---|
+| **Poll (recommended)** | Cron job every 15–30 min in the existing APScheduler. List new Gmail messages since the last seen `historyId`, fetch, ingest. | No public webhook needed. No GCP Pub/Sub. Same long-running process. ~15-min latency, fine for groceries. |
+| **Push** | Gmail `watch` + Google Cloud Pub/Sub → webhook endpoint on the bot service → fetch + ingest. | Near-real-time. Requires public HTTPS endpoint (adds a tiny FastAPI route to `bin/run.py`) and one-time GCP setup. Worth it only if low latency is a felt need. |
+
+#### 11.2.2 Filtering — which emails count as receipts?
+
+Three layers, cheapest first:
+
+1. **Sender whitelist (per-user):** maintained via `/email_add_sender
+   receipts@instacart.com`. Free, deterministic, hits 90 % of real cases.
+2. **Label-based:** user applies a `food-manager-ingest` Gmail label;
+   connector processes only labelled threads. Zero ambiguity, requires
+   user discipline.
+3. **LLM classifier (fallback, opt-in):** for unrecognized senders, a
+   single cheap classification call asks "is this a grocery receipt?"
+   Small per-email cost; gated behind a user-toggleable flag so the
+   classifier doesn't quietly accrue spend.
+
+#### 11.2.3 Auth + scopes
+
+- OAuth2 via Google. `gmail.readonly` scope only — never modify mail.
+- **Refresh token stored encrypted at rest** in DB (column-level
+  encryption keyed off an env-var-supplied secret). Plain refresh
+  tokens in SQLite are a no.
+- `/connect_gmail` triggers the OAuth flow; bot replies with a one-time
+  link to a hosted consent page (a small FastAPI route bolted onto
+  `bin/run.py` for the OAuth callback).
+- `/disconnect_gmail` purges the integration row and revokes the token
+  via Google's revoke endpoint.
+
+#### 11.2.4 Ingest pipeline reuse
+
+```
+gmail_connector tick (poll, ~15 min)
+   │
+   ▼
+list_new_messages(user, since=last_history_id)
+   │
+   ▼  for each candidate:
+classify(sender, subject, label) → is_receipt?
+   │
+   ▼ yes
+extract_body(message) → text/plain or sanitized HTML
+   │
+   ▼
+ingest_service.ingest_text(user, body, source="email",
+                           source_id=msg_id, dedupe_key=msg_id)
+   │
+   ▼
+same LLM extraction → ParseResult → cache → PantryItem rows
+   │
+   ▼
+update last_history_id; record msg_id in seen-set
+```
+
+**Key win:** `ingest_service.ingest_text()` is the same function used by
+the `/add` text-ingest path and (later) by voice transcription. One
+extraction pipeline, many input modalities. **Adding a new modality
+means wiring its capture, not its parsing.** The case for this
+modularity in v1 pays off here.
+
+**De-duplication:** `dedupe_key=msg_id` ensures a re-processed email
+doesn't double-insert items. Same goes for the (`source`, `source_id`)
+composite — useful if a confirmation email and a separate receipt email
+both describe the same order; user can manually merge or we LLM-merge
+on detection.
+
+#### 11.2.5 New table
+
+```
+UserEmailIntegration(
+    user_id            FK → User,
+    provider           Literal["gmail"],
+    encrypted_refresh_token  bytes,
+    last_history_id    str | None,
+    last_polled_at     datetime | None,
+    enabled            bool = True,
+    sender_whitelist   JSON   # list[str]
+    label_filter       str | None,
+    llm_classifier_enabled bool = False,
+    connected_at       datetime,
+)
+```
+
+Plus a small addition to `Receipt`: optional `source: Literal["photo",
+"email", "text"] = "photo"` and `source_id: str | None` (the Gmail
+msg_id when relevant) so `/stats` can break down ingest paths.
+
+#### 11.2.6 Out of scope for the Gmail connector itself
+
+- **Other email providers** (Outlook, Yahoo, ProtonMail). Same shape,
+  different auth — separate spec per provider when there's demand.
+- **Two-way Gmail** (sending email digests, auto-labelling processed
+  messages). Read-only stays read-only.
+- **Calendar integration** ("you're cooking on Saturday — buy by
+  Friday"). Different product surface; defer.
+- **Receipt PDF attachments**. Some retailers attach a PDF rather than
+  inline a body. PDF → text is doable but adds a parsing dependency;
+  defer until measured demand.
 
 ## 12. Risks and open questions
 

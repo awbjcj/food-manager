@@ -38,8 +38,10 @@ shippable. Each will earn its own spec when its time comes.
 - Multi-user / household-group sharing.
 - Email / WhatsApp / WeChat / SMS notification channels.
 - Voice input (Telegram voice messages → Whisper).
-- Recipe recommender, multi-agent orchestration, nutrition data, user
-  preference modelling beyond the shelf-life user-correction loop.
+- Recipe recommender, recipe RAG corpus, goal-driven shopping list
+  (see §11.1 for the v2 design sketch), multi-agent orchestration,
+  nutrition data, user preference modelling beyond the shelf-life
+  user-correction loop.
 - Vercel deployment. A long-running scheduler is a poor fit for serverless;
   if Vercel ever becomes desirable, it requires splitting the bot webhook
   from the scheduler (Upstash QStash or similar). Out of scope here.
@@ -484,8 +486,97 @@ post-launch. Listed so we know *not* to build them now.
 | Cache hit rate stays < 70 % after 50 real receipts (`/stats`) | Smarter normalization: LLM-assisted merge on miss, or embedding similarity (whichever measurement suggests) |
 | User finds themselves typing `/add` more than scanning photos | Text-ingest via LLM (reuse the extraction pipeline minus the image) |
 | User wants household sharing | Multi-user spec: groups, per-group digests, conflict resolution for overlapping pantry items |
-| User wants recipes from expiring items | Separate "recipe" spec, likely a separate service consuming the pantry DB read-only |
+| User wants recipes from expiring items + goal-driven shopping list | Build the **Recipe RAG + shopping-list** subsystem described in §11.1. Likely a separate service consuming the pantry DB read-only. |
 | User wants reminders outside Telegram | Notification-channel abstraction; pick one of email / WhatsApp / SignalCli to start |
+
+### 11.1 Recipe RAG + goal-driven shopping list (v2 sketch)
+
+Triggered when the user wants the pantry to drive *action* (what to cook,
+what to buy), not just send reminders. Three coupled features that share
+data and only make sense together — splitting them into separate v1.5
+deltas would produce three half-features.
+
+#### 11.1.1 Recipe corpus + RAG index
+
+- **Corpus:** a recipe collection — either a curated personal cookbook
+  imported as JSON/Markdown, or a scraped + cleaned public dataset
+  (e.g. Recipe1M+, Food.com export). Each recipe is structured as
+  `{title, ingredients: [{name, qty, unit, optional}], steps,
+  tags: [cuisine, diet, time], approx_nutrition}`.
+- **Vector store:** embeddings of `title + ingredient names + tags`
+  indexed in a local store (sqlite-vec for the "stay-on-the-SQLite-file"
+  philosophy, or a hosted store like Turso/Pinecone if scale demands).
+- **Embedding model:** re-use whichever model the cache-hit decision
+  lands on (§11 first row) so we run one embedder, not two.
+- **Retrieval query:** "given my current pantry (weighted toward
+  soonest-to-expire) + my preference profile, return top-K recipes I
+  can mostly make." Re-ranking pass scores by `(pantry_coverage_ratio,
+  expiring_item_use_count, preference_match)`.
+
+#### 11.1.2 User preferences (new table)
+
+```
+UserPreference(user_id, liked_cuisines, disliked_ingredients,
+               dietary_restrictions, target_metric, max_cook_time_minutes,
+               updated_at)
+```
+
+- `target_metric` is the user-defined axis: `"healthier" | "faster" |
+  "tastier" | "cheaper"` or a free-text descriptor the LLM interprets.
+- Built up via `/like`, `/dislike`, `/prefer <text>` commands, plus
+  implicit signal: every recipe selected as a goal nudges the profile.
+
+#### 11.1.3 Recipe-as-goal + shopping list flow
+
+```
+/cook
+   └─► bot shows ranked recipes:
+          "Have 7/9 — missing eggs, parsley → Pasta Carbonara"
+          "Have 5/6 — missing thyme         → Roast Chicken"
+          [pick a recipe]
+              │
+              ▼
+       diff(pantry, recipe.requirements) → missing items
+              │
+              ▼
+       bot replies with toggleable buttons:
+          [ ] eggs ×2
+          [ ] parsley ×1
+          [✓ Add selected to list]   [Cancel]
+              │
+              ▼
+       chosen items → ShoppingListItem rows
+              │
+              ▼
+       /shop renders the current shopping list,
+            grouped by category, oldest-added first
+```
+
+**On next receipt scan:** `ingest_service` auto-fulfills shopping list
+rows when a matching `normalized_name` shows up. This closes a satisfying
+loop — buy what you said you'd buy and the list cleans itself.
+
+#### 11.1.4 New tables when this lands
+
+| Table | Purpose |
+|---|---|
+| `Recipe` | Recipe metadata (the corpus); may be paired with an external vector store for embeddings |
+| `UserPreference` | Per-user dietary/cuisine profile + chosen target metric |
+| `ShoppingListItem` | Pending items the user wants to buy: `(user_id, name, normalized_name, qty, unit, source_recipe_id, status: pending|fulfilled|removed, added_at, fulfilled_at)` |
+
+#### 11.1.5 What's still out of scope even in this v2
+
+- **Multi-agent orchestration of recipe ranking.** One LLM call with
+  structured output, fed (pantry, preferences, retrieved candidates),
+  can rank across the target metric just fine. Multi-agent revisited
+  only if a single-call ranker provably can't represent the user's
+  metric — same "measure before optimizing" stance as the cache.
+- **Auto-grocery-order integration** (Instacart, etc.). The list lives
+  in the bot; the buying happens elsewhere.
+- **Pantry deductions per recipe cook.** Marking a recipe as "made" and
+  auto-decrementing pantry rows is tempting but it's a new
+  consumption-tracking subsystem. Defer until the basic shopping-list
+  loop has been used for a few weeks.
 
 ## 12. Risks and open questions
 

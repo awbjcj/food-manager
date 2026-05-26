@@ -20,10 +20,10 @@ the bot's estimates improve over time.
 - One input modality: receipt photo via Telegram.
 - One reminder channel: Telegram, same chat as the bot.
 - One vision-LLM call per receipt; structured-JSON output.
-- Daily digest at user-configurable local hour, with `[Ate / Tossed / +2d]`
+- Daily digest at user-configurable local hour, with `[Ate / Tossed / Remind +2d]`
   inline buttons that edit the digest message in place.
 - Slash commands: `/start`, `/tz`, `/digest_at`, `/list [filter]`, `/add`,
-  `/correct`, `/stats`, `/help`.
+  `/ate`, `/toss`, `/snooze`, `/correct`, `/delete`, `/stats`, `/help`.
 - Persistent SQLite database on a mounted volume; long-running Python
   process deployed to Railway (or Fly.io / Render — choice deferred to
   implementation).
@@ -58,6 +58,7 @@ shippable. Each will earn its own spec when its time comes.
 | Language / runtime | Python 3.12 | `uv` for dependency management |
 | Telegram framework | `aiogram` (async, long-polling) | No public webhook URL required |
 | Database | SQLite + SQLModel | One file, no separate service |
+| Migrations | Alembic | Start with `0001_initial`; persistent SQLite still needs migrations |
 | Scheduler | APScheduler (`AsyncIOScheduler`) | In-process, shares the bot event loop |
 | Vision LLM | Anthropic Claude (`claude-sonnet-4-6`) | Default; swap to OpenAI is a one-file change in `llm.py` |
 | Hosting | Railway / Fly.io / Render | Long-running process, persistent volume |
@@ -111,6 +112,7 @@ shippable. Each will earn its own spec when its time comes.
 | `renderer.py` | Pure formatting: digest text + inline keyboard from a list of items | none |
 | `llm.py` | `extract_items_from_image(bytes) -> ParseResult` | anthropic SDK |
 | `normalization.py` | `normalize(raw: str) -> str`; `ALIASES` dict | none |
+| `shelf_life_defaults.py` | Conservative fallback days for manual `/add` cache misses | none |
 | `cache.py` | Read/write `ShelfLifeCache` rows with user-correction priority | `db` |
 | `db.py`, `models.py` | SQLModel models, session factory | sqlite |
 | `bin/run.py` | Process entry point: builds Bot, registers handlers, starts scheduler + dispatcher | everything |
@@ -129,10 +131,15 @@ though v1 is single-user — costs one column, prevents a migration when
 groups arrive.
 
 ```python
+Category = Literal[
+    "dairy", "produce", "meat", "seafood", "bakery",
+    "pantry", "frozen", "beverage", "other",
+]
+
 class User(SQLModel, table=True):
     telegram_id: int = Field(primary_key=True)   # also our auth
-    chat_id: int                                 # where digests get sent
-    tz: str = "Asia/Singapore"                   # IANA name; for digest local time
+    chat_id: int                                 # private chat where digests get sent
+    tz: str = "America/Detroit"                  # IANA name; for digest local time
     digest_hour: int = 8                         # 0–23
     created_at: datetime
 
@@ -141,13 +148,17 @@ class PantryItem(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.telegram_id", index=True)
     raw_name: str                                # what the LLM said: "Whole Milk 1 gal"
     normalized_name: str = Field(index=True)     # "whole milk"
-    category: str | None = Field(default=None, index=True)  # for /list <category>
+    category: Category | None = Field(default=None, index=True)  # for /list <category>
     qty: float = 1.0
-    unit: str | None = None                      # "gal", "lb", "ct", None
+    unit: str | None = None                      # "gal", "lb", "oz", "g", "kg", "ml", "l", "ct", etc.
     purchased_on: date                           # from receipt or scan day
+    shelf_life_days: int                         # chosen estimate used for expires_on
+    shelf_life_source: Literal["cache","llm","manual_fallback","user_correction"]  # current value source
+    ingest_shelf_life_source: Literal["cache","llm","manual_fallback","manual_user_hint"]  # original insert source
     expires_on: date = Field(index=True)         # purchased_on + days
-    status: Literal["active","eaten","tossed","snoozed"] = "active"
+    status: Literal["active","eaten","tossed","removed"] = "active"
     snoozed_until: date | None = None
+    created_via: Literal["receipt","manual"]
     source_receipt_id: int | None = Field(default=None, foreign_key="receipt.id")
     created_at: datetime
 
@@ -155,13 +166,16 @@ class Receipt(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="user.telegram_id", index=True)
     photo_file_id: str            # Telegram file_id — re-fetch on demand, no blob in DB
+    purchase_date: date
+    purchase_date_source: Literal["receipt","scan_fallback"]
     scanned_at: datetime
-    llm_cost_cents: int | None    # for /stats
+    llm_cost_micros_usd: int | None    # total LLM cost for this ingestion
 
 class ShelfLifeCache(SQLModel, table=True):
+    user_id: int = Field(foreign_key="user.telegram_id", primary_key=True)
     normalized_name: str = Field(primary_key=True)
     days: int
-    category: str | None = None
+    category: Category | None = None
     confidence: float                                # LLM-reported 0..1
     learned_at: datetime
     source: Literal["llm","user_correction"] = "llm"
@@ -171,14 +185,49 @@ class ShelfLifeCache(SQLModel, table=True):
 
 - **No `Food` master table.** `ShelfLifeCache` IS the growing knowledge
   base. Promote to a typed taxonomy only if v2 demands it.
+- **No merging of same-name items.** Separate purchases of the same food
+  remain separate `PantryItem` rows with separate item IDs, purchase dates,
+  and expiry dates.
+- **Creation channel is explicit.** `created_via="receipt"` requires
+  `source_receipt_id`; `created_via="manual"` requires `source_receipt_id
+  is None`. v1 enforces this in service code/tests rather than SQLite check
+  constraints.
+- **Quantity is display metadata.** Quantity does not directly affect shelf
+  life in v1. If package form changes shelf life, that distinction should
+  appear in the item name before normalization/cache lookup.
 - **`status` enum + `snoozed_until`** lets the daily digest query be one
-  clean SELECT. Eaten/tossed rows are retained for stats (waste rate).
-- **`photo_file_id`, not bytes.** Telegram retains the photo; re-fetch by
-  ID if ever needed.
-- **`source: "user_correction"`** outranks `"llm"` in `cache.get()`. This
-  is the entire learning loop — five lines of code, no ML.
+  clean SELECT. Eaten/tossed rows are retained for consumption and waste
+  stats; removed rows are retained only for audit/debug cleanup.
+- **Snoozed items stay `active`.** `snoozed_until` temporarily suppresses
+  reminders; it is not a separate item status.
+- **`photo_file_id`, not bytes.** v1 does not archive receipt images. The
+  Telegram file ID supports best-effort re-fetch while Telegram still makes
+  the file available; durable image archival is out of scope.
+- **Duplicate receipt guard.** Before extraction, ingestion checks whether
+  the same user already has a `Receipt` with the same `photo_file_id`. If
+  so, the bot replies that the receipt was already logged and does not
+  insert duplicate pantry items. `Receipt` also has a DB-level unique
+  constraint on `(user_id, photo_file_id)` to protect against races.
+- **Receipt LLM cost includes retries.** `llm_cost_micros_usd` is the total
+  API cost consumed by the receipt ingestion, including malformed-JSON
+  correction retries and retry-after-error calls that reached the API.
+- **`source: "user_correction"`** outranks `"llm"` in `cache.get(user_id,
+  normalized_name)`. This is the entire learning loop — five lines of code,
+  no ML. Cache rows are scoped per user from v1 so future household or
+  multi-user support does not inherit another user's kitchen assumptions.
 - **`category` denormalized onto `PantryItem`** (not joined via cache) so
   `/list dairy` is a single indexed query.
+
+### Constraints and indexes
+
+- `Receipt` has a unique constraint on `(user_id, photo_file_id)`.
+- `PantryItem` is indexed for digest/list queries by `(user_id, status,
+  expires_on)`.
+- `PantryItem` is indexed for category lists by `(user_id, status, category,
+  expires_on)`.
+- `PantryItem.source_receipt_id` is indexed for receipt-item lookups and
+  debugging.
+- `ShelfLifeCache` uses `(user_id, normalized_name)` as its primary key.
 
 ## 6. Ingestion pipeline
 
@@ -205,16 +254,26 @@ End-to-end on photo receipt:
 SYSTEM_PROMPT = """You parse grocery receipt photos.
 Return ONLY valid JSON matching the schema. No prose.
 
-For each line item:
+Receipt-level fields:
+  - purchase_date: YYYY-MM-DD date shown on the receipt, or null if unreadable
+  - purchase_date_confidence: 0.0-1.0 how sure you are about purchase_date
+
+Return all recognizable purchased line items, excluding store metadata,
+subtotals, totals, taxes, discounts, coupons, and payment lines. For each
+returned line item:
+  - is_food: true if this is a pantry-relevant food item, false for purchased
+    non-food items such as paper towels or bags
   - name: clean human-readable name ("Whole Milk 1 gal"), expand abbreviations
-  - qty:  numeric quantity (1.0 if ambiguous)
-  - unit: "gal"|"lb"|"oz"|"ct"|"bunch"|"each"|null
-  - category: "dairy"|"produce"|"meat"|"seafood"|"bakery"|"pantry"|"frozen"|"other"
-  - est_shelf_life_days: refrigerated shelf life from purchase date.
+  - qty:  display-oriented purchased quantity (1.0 if ambiguous)
+  - unit: "gal"|"lb"|"oz"|"g"|"kg"|"ml"|"l"|"ct"|"bunch"|"each"|null
+  - category: "dairy"|"produce"|"meat"|"seafood"|"bakery"|"pantry"|"frozen"|"beverage"|"other"
+  - est_shelf_life_days: expected shelf life from purchase date under the
+      item's normal storage assumption; use frozen shelf life for frozen items.
+      Must be an integer from 1 to 730.
       Use conservative estimates. Examples:
         whole milk = 7, fresh chicken = 2, bananas = 5,
         canned beans = 365, fresh bread = 4, eggs = 28
-  - confidence: 0.0–1.0 how sure you are this is a food item
+  - confidence: 0.0–1.0 how sure you are about the parsed food item fields
 """
 ```
 
@@ -226,31 +285,35 @@ Pydantic models for the response:
 
 ```python
 class ParsedItem(BaseModel):
+    is_food: bool
     name: str
     qty: float = 1.0
     unit: str | None = None
-    category: str | None = None
-    est_shelf_life_days: int
+    category: Category | None = None
+    est_shelf_life_days: int = Field(ge=1, le=730)
     confidence: float
 
 class ParseResult(BaseModel):
+    purchase_date: date | None = None
+    purchase_date_confidence: float = 0.0
     items: list[ParsedItem]
 ```
 
 ### 6.2 Normalization + cache
 
 ```python
-def compute_days(parsed: ParsedItem) -> int:
+def compute_days(user: User, parsed: ParsedItem) -> int:
     norm = normalize(parsed.name)
-    cached = cache.get(norm)
+    cached = cache.get(user.telegram_id, norm)
     if cached and cached.source == "user_correction":
         return cached.days                    # user overrides always win
     if cached:
         return cached.days                    # prior LLM estimate
-    cache.put(norm, parsed.est_shelf_life_days,
-              source="llm",
-              category=parsed.category,
-              confidence=parsed.confidence)
+    if parsed.confidence >= 0.6:
+        cache.put(user.telegram_id, norm, parsed.est_shelf_life_days,
+                  source="llm",
+                  category=parsed.category,
+                  confidence=parsed.confidence)
     return parsed.est_shelf_life_days
 ```
 
@@ -260,13 +323,28 @@ size suffixes (`1 gal`, `12 oz`, `dozen`) → apply small hand-curated
 `ALIASES` dict. The exact rules are a TODO marker for the user (see §10);
 the function signature and tests are scaffolded by the implementation.
 
+Cache update policy: the first LLM estimate for a `(user_id,
+normalized_name)` is kept until the user provides a shelf-life correction.
+Later LLM estimates do not overwrite an existing cache row.
+`learned_at` means when the current cache value was learned; `/correct`
+updates it to the correction time.
+
 ### 6.3 Error handling
 
 | Failure | Response |
 |---|---|
 | Anthropic 4xx/5xx or timeout | Retry 2× with exponential backoff; on final fail, bot replies "couldn't read that one, try a clearer photo or `/add <items>` manually" |
-| LLM returns malformed JSON | One retry with corrective system message; on second fail, same user-facing message |
-| LLM returns `confidence < 0.3` items | Drop silently from inserts; bot reply notes "skipped N unclear items" |
+| LLM returns malformed JSON or fails schema validation | One retry with corrective system message summarizing validation errors; on second fail, same user-facing message |
+| LLM returns zero items | One corrective retry; on second empty result, bot replies no food found |
+| LLM returns `is_food == false` items | Drop from inserts; do not count as unclear skipped food |
+| LLM returns food items with `confidence < 0.3` | Drop from inserts; bot reply notes "skipped N unclear items" and includes recognizable skipped names, capped to a few lines |
+| LLM returns food items with `0.3 <= confidence < 0.6` | Insert the pantry item, but do not create a new LLM shelf-life cache row from it |
+| Receipt date missing or `purchase_date_confidence < 0.7` | Use scan date as the assumed purchase date and make that assumption visible in the bot reply |
+
+`Receipt` rows are created only after extraction yields at least one inserted
+pantry item. Receipt, item, and cache writes for a successful ingestion are
+committed in one transaction. If no food items are inserted, no `Receipt`
+row is created; the bot replies with no food found / skipped-item context.
 
 No circuit breakers, no dead-letter queue. Single user.
 
@@ -274,11 +352,22 @@ No circuit breakers, no dead-letter queue. Single user.
 
 ```
 ✅ Logged 8 items from this receipt:
-   • Whole Milk 1 gal — exp May 31 (7d)
-   • Bananas ×6 — exp May 27 (3d)
+   • #42 Whole Milk 1 gal — exp May 31 (7d)
+   • #43 Bananas ×6 — exp May 27 (3d)
    • ... (6 more)
 Cost: $0.018
 ```
+
+Whenever a pantry item name is displayed to the user, include its item ID
+so command-based corrections and deletions have a visible reference.
+User-facing item names use `raw_name`; `normalized_name` is internal to
+lookup, grouping, and cache behavior.
+The ingest reply includes purchase-date context only when useful: show
+`Purchase date: <date>` when the receipt date differs from scan date, or
+`Purchase date assumed: <date>` when scan-date fallback was used.
+If any inserted food items had `0.3 <= confidence < 0.6`, the reply includes
+a capped "Low confidence" note with item IDs so the user can `/delete` or
+`/correct` them.
 
 ## 7. Scheduler & digest UX
 
@@ -305,16 +394,31 @@ intentionally not replayed (yesterday's "expiring today" is stale).
 
 ### 7.2 Digest query
 
+The scheduler computes `today = datetime.now(ZoneInfo(user.tz)).date()` in
+Python and passes that explicit date into the query. SQLite `DATE('now')`
+is not used for digest bucketing because it depends on server time rather
+than the user's configured timezone.
+
+The reminder window is through the next 7 calendar days, inclusive of both
+today and the date exactly 7 days from today.
+Expired active items remain in every daily digest until they are marked
+eaten/tossed or snoozed.
+
 ```sql
 SELECT * FROM pantryitem
 WHERE user_id = ?
   AND status = 'active'
-  AND (snoozed_until IS NULL OR snoozed_until <= DATE('now'))
-  AND expires_on <= DATE('now', '+7 days')
+  AND (snoozed_until IS NULL OR snoozed_until <= :today)
+  AND expires_on <= :today_plus_7
 ORDER BY expires_on ASC;
 ```
 
-Bucketed by the renderer into `expired`, `today`, `tomorrow`, `this_week`.
+Bucketed by the renderer into:
+- `expired`: `expires_on < today`
+- `today`: `expires_on == today`
+- `tomorrow`: `expires_on == today + 1`
+- `this_week`: `today + 2 <= expires_on <= today + 7`
+
 Empty result ⇒ no message is sent (silent days).
 
 ### 7.3 Digest message
@@ -323,35 +427,49 @@ Empty result ⇒ no message is sent (silent days).
 🍅 Pantry digest — Tue May 27
 
 ❗ Expired (1)
-   • Spinach (yesterday)
+   • #41 Spinach (yesterday)
 
 🔥 Today (2)
-   • Whole Milk 1 gal
-   • Bananas (×6)
+   • #42 Whole Milk 1 gal
+   • #43 Bananas (×6)
 
 📅 Tomorrow (1)
-   • Sliced Bread
+   • #44 Sliced Bread
 
 📆 This week (3)
-   • Greek Yogurt — Fri
-   • Chicken Thighs — Sat
-   • Strawberries — Sun
+   • #45 Greek Yogurt — Fri
+   • #46 Chicken Thighs — Sat
+   • #47 Strawberries — Sun
 ```
 
 One row of inline buttons per item, callback data `act:{verb}:{item_id}`:
 
 ```
-[✓ Ate]  [🗑 Tossed]  [⏰ +2d]
+[✓ Ate]  [🗑 Tossed]  [⏰ Remind +2d]
 ```
 
-If item count exceeds 20, truncate and append `[show all]` button that
-sends a paged follow-up.
+If more than 20 matching pantry items would be actionable, render at most
+20 item rows with inline buttons, note how many additional items were
+omitted, and append a `[show all]` button. The follow-up can be paged text
+rather than another 20-button digest.
 
 On button tap:
-1. Service applies the mutation (status / snoozed_until).
-2. Renderer rebuilds the message body.
-3. Handler calls `bot.edit_message_text()` — same message, updated. No
+1. Handler resolves the Telegram user and rejects the action unless the
+   pantry item belongs to that user.
+2. Service applies the mutation (status / snoozed_until).
+3. Renderer rebuilds the message body.
+4. Handler calls `bot.edit_message_text()` — same message, updated. No
    chat-spam from confirmations.
+
+`Remind +2d` only sets `snoozed_until = today + 2`; it does not change
+`expires_on` or learned shelf life. If the item is still expired when the
+snooze ends, it returns to the expired bucket.
+Callback actions are idempotent: repeated eaten/tossed actions against
+already non-active items are harmless no-ops with an updated/already-updated
+callback answer. Snooze against non-active items is rejected or treated as a
+no-op.
+Any terminal status change to `eaten`, `tossed`, or `removed` clears
+`snoozed_until`.
 
 The exact wording, emoji, and grouping headers in the digest are a TODO
 marker for the user (see §10).
@@ -360,17 +478,73 @@ marker for the user (see §10).
 
 | Command | Behaviour |
 |---|---|
-| `/start` | Creates User row, captures `chat_id`, prompts for `/tz` |
-| `/tz Asia/Singapore` | Sets timezone (IANA); reschedules digest job |
+| `/start` | For the authorized Telegram user only, creates User row, captures `chat_id`, shows the default timezone and how to change it |
+| `/tz America/Detroit` | Sets timezone (IANA); reschedules digest job |
 | `/digest_at 8` | Sets digest hour 0–23; reschedules |
-| `/list` | All active items, sorted by `expires_on` |
-| `/list <category>` | Filter by category (`dairy`, `produce`, …) |
+| `/list` | All active items with item IDs, sorted by `expires_on` |
+| `/list <category>` | Filter by category (`dairy`, `produce`, `meat`, `seafood`, `bakery`, `pantry`, `frozen`, `beverage`, `other`) |
 | `/list week` | Items expiring in next 7 days |
 | `/list expired` | Items past expiry, still active |
-| `/add 2 lb chicken, dozen eggs` | Manual text-ingest, regex parser; falls back to telling user to send a photo if it can't parse |
-| `/correct <item_id> <days>` | Adjusts item's `expires_on` AND writes `ShelfLifeCache` row with `source="user_correction"` |
-| `/stats` | Last-30-day: receipt count, item count, cache-hit %, total LLM spend cents |
-| `/help` | Lists the above |
+| `/add 2 lb chicken, dozen eggs` | Manual text-ingest, regex parser; accepts optional trailing shelf-life hints like `milk 7d`; uses normalization/cache for shelf life, but does not create LLM cache rows; on cache miss without an explicit hint, uses conservative built-in fallback if available or asks the user to `/correct` after adding |
+| `/ate <item_id>` | Marks an active item eaten using the same mutation as the digest button |
+| `/toss <item_id>` | Marks an active item tossed using the same mutation as the digest button |
+| `/snooze <item_id> [days]` | Snoozes reminders for an active item; default is 2 days, allowed range 1–30 |
+| `/correct <item_id> <shelf_life_days>` | Sets item's `shelf_life_days`, `expires_on` from its purchase date, and `shelf_life_source="user_correction"`; also writes a user-scoped `ShelfLifeCache` row with `source="user_correction"` |
+| `/delete <item_id>` | Marks an incorrect or duplicate item as `removed` without counting it as eaten or tossed |
+| `/stats` | Last-30-day: receipt count, tracked item count excluding `removed`, removed item count, cache-hit %, successful-receipt LLM spend, waste rate as `tossed / (eaten + tossed)` |
+| `/help` | Lists the above, including that `/correct <id> <shelf_life_days>` teaches future estimates and `/delete <id>` is for wrong or duplicate imports |
+
+All message and callback handlers enforce `ALLOWED_TELEGRAM_USER_ID`; other
+Telegram users receive a generic not-authorized response and cannot create
+users or mutate pantry items.
+v1 supports private chat only. `telegram_id` remains identity/auth, while
+`chat_id` records where replies and digests are sent; group chats are
+rejected even if the authorized user is present.
+Any authorized private-chat interaction auto-creates the `User` row if it
+does not already exist, using `America/Detroit` and `digest_hour=8`.
+Auto-creation immediately schedules the user's digest job through the same
+schedule/replace path used by `/tz` and `/digest_at`. `/start` is a friendly
+setup/status command rather than a required gate.
+The default timezone is `America/Detroit`. `/tz` accepts valid IANA
+timezone names only; ambiguous aliases such as `EST` are rejected with
+examples. `/digest_at` accepts whole hours only, 0-23. `digest_hour` is a
+wall-clock hour in the current timezone, so changing `/tz` keeps the same
+hour number and reschedules the next digest in the new timezone.
+
+`/correct` is allowed for `active`, `eaten`, and `tossed` pantry items, but
+rejected for `removed` items so import-cleanup rows cannot teach the cache.
+Commands that take an item ID accept either `42` or `#42`.
+User-supplied shelf-life days from `/correct` and manual `/add` hints must
+be in the same `1..730` range as LLM estimates.
+`/ate`, `/toss`, and `/snooze` only transition active items; already
+terminal items return an already-updated/not-active response rather than
+changing status.
+For manual `/add`, an explicit trailing shelf-life hint such as `7d` sets
+`shelf_life_source="user_correction"`,
+`ingest_shelf_life_source="manual_user_hint"`, and writes the user-scoped
+cache. Manual adds use `purchased_on = today` in the user's configured
+timezone; v1 does not parse backdated manual-add dates. Multiple
+comma-separated manual items are parsed independently, so explicit `7d`
+hints apply only to the item they trail, and parse failures are reported
+without blocking successfully parsed items. Other separators are not
+accepted; failed parses tell the user to separate items with commas.
+Trailing shelf-life hints are not included in `raw_name`.
+
+`/list` with no filter and `/list <category>` include all active items,
+including expired active items, sorted oldest expiry first. Date-relative
+commands, including `/list week` and `/list expired`, compute
+`today` in the user's configured timezone. `/list week` uses the same
+inclusive window as the digest: `today <= expires_on <= today + 7`. Snooze
+only suppresses scheduled digest reminders; explicit `/list` commands still
+show snoozed active items when they match the requested filter.
+
+`/stats` LLM spend includes only successful receipt ingestions with stored
+`Receipt` rows. Failed attempts that consumed LLM cost are logged but not
+included in v1 stats. Cache-hit percentage is computed among pantry items
+created from receipt ingestion in the last 30 days, excluding non-food,
+skipped, manual-add, and `removed` items; a hit means shelf life came from
+an existing cache row instead of the current LLM estimate, tracked via
+`PantryItem.ingest_shelf_life_source`.
 
 ### 7.5 Scheduler error handling
 
@@ -406,6 +580,7 @@ food-manager/
 │   ├── scheduler.py
 │   ├── llm.py
 │   ├── normalization.py
+│   ├── shelf_life_defaults.py
 │   ├── renderer.py
 │   ├── cache.py
 │   ├── db.py
@@ -414,6 +589,7 @@ food-manager/
 ├── bin/
 │   ├── run.py              # entry point: starts bot + scheduler in one loop
 │   └── eval_receipts.py
+├── migrations/             # Alembic migrations, starting with 0001_initial
 ├── pyproject.toml          # uv-managed
 ├── Dockerfile              # python:3.12-slim
 ├── railway.toml            # service + volume config
@@ -426,6 +602,12 @@ food-manager/
 Single Docker container, single Python process: `python bin/run.py`. The
 process owns both the aiogram dispatcher (long-polling) and the
 APScheduler instance.
+On startup, `bin/run.py` runs Alembic `upgrade head` before starting the bot
+or scheduler; migration failure is fatal. If the SQLite DB already exists,
+startup first creates a local timestamped SQLite `.backup` copy before
+running migrations, retaining the latest 5 local migration backups. If the
+pre-migration backup fails for an existing DB, startup fails before running
+the migration.
 
 Persistent volume mounted at `/data`; SQLite file at `/data/food.db`.
 
@@ -442,6 +624,7 @@ Retain 14 daily snapshots. Backblaze B2 free tier covers it.
 
 ```
 TELEGRAM_BOT_TOKEN=...
+ALLOWED_TELEGRAM_USER_ID=...
 ANTHROPIC_API_KEY=...
 DATABASE_PATH=/data/food.db   # or ./food.db locally
 LOG_LEVEL=INFO
@@ -459,19 +642,28 @@ Telegram bot is used so dev traffic doesn't collide with prod.
 
 ## 10. User-authored TODO markers
 
-The implementation will scaffold four files with TODO blocks for the user
+The implementation will scaffold five files with TODO blocks for the user
 to fill in. These are decisions where the user's domain knowledge / taste
 matters more than the implementation's:
 
 1. **`app/normalization.py:normalize()` + `ALIASES`** — the exact rules
    for converting cleaned LLM names into cache lookup keys. Determines
-   cache hit rate.
+   cache hit rate. v1 should generally remove marketing/quality adjectives
+   that do not materially change shelf life (`organic`, `fresh`, `large`)
+   and preserve form/state words that do (`frozen`, `cut`, `sliced`,
+   `cooked`, `raw`), with tests for the user's preferred edge cases.
 2. **`app/llm.py:SYSTEM_PROMPT`** — the shelf-life examples block, tuned
    to the user's actual kitchen (banana ripeness preference, freezer
    habits, etc.).
-3. **`app/renderer.py:render_digest()`** — the digest template wording,
+3. **`app/shelf_life_defaults.py`** — conservative fallback shelf-life
+   values used by manual `/add` when no cache entry or explicit hint exists.
+   Lookup order is exact normalized-name default, then conservative category
+   default, then a user-facing prompt to add a `7d` hint or use `/correct`.
+   Defaults may return both days and optional category; v1 does not include
+   a separate category parser for manual text.
+4. **`app/renderer.py:render_digest()`** — the digest template wording,
    emoji, and grouping headers. Read every morning by the user.
-4. **`app/bot.py` `/list` filter dispatcher** — the exact filter tokens
+5. **`app/bot.py` `/list` filter dispatcher** — the exact filter tokens
    (`week`, `expired`, plus categories) and behaviour ordering.
 
 Each TODO block ships with a clear signature, surrounding context,

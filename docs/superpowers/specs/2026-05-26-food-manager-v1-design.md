@@ -19,7 +19,8 @@ the bot's estimates improve over time.
 - Single user (the author).
 - One input modality: receipt photo via Telegram.
 - One reminder channel: Telegram, same chat as the bot.
-- One vision-LLM call per receipt; structured-JSON output.
+- One primary vision-LLM call per receipt; bounded retries only for failures
+  or schema correction; structured-JSON output.
 - Daily digest at user-configurable local hour, with `[Ate / Tossed / Remind +2d]`
   inline buttons that edit the digest message in place.
 - Slash commands: `/start`, `/tz`, `/digest_at`, `/list [filter]`, `/add`,
@@ -60,10 +61,18 @@ shippable. Each will earn its own spec when its time comes.
 | Database | SQLite + SQLModel | One file, no separate service |
 | Migrations | Alembic | Start with `0001_initial`; persistent SQLite still needs migrations |
 | Scheduler | APScheduler (`AsyncIOScheduler`) | In-process, shares the bot event loop |
-| Vision LLM | Anthropic Claude (`claude-sonnet-4-6`) | Default; swap to OpenAI is a one-file change in `llm.py` |
+| Vision LLM | Anthropic Claude | Provider locked for v1; exact model comes from `ANTHROPIC_MODEL`, defaulting to `claude-sonnet-4-6` |
 | Hosting | Railway / Fly.io / Render | Long-running process, persistent volume |
 | Settings / secrets | `pydantic-settings` from env / `.env` | Never logged |
 | Logging | stdlib `logging` to stdout; JSON in prod | Railway tails it natively |
+
+Key log event names: `receipt_ingest_started`,
+`receipt_ingest_succeeded`, `receipt_ingest_failed`, `digest_sent`,
+`digest_send_failed`, `item_action_applied`, and
+`unauthorized_update_rejected`.
+Production logs avoid pantry item names and raw LLM payloads; log counts,
+IDs, user ID, receipt ID, and error classes. Dev debug logs may include
+parsed payloads only when explicitly enabled.
 
 ## 4. Architecture
 
@@ -77,14 +86,14 @@ shippable. Each will earn its own spec when its time comes.
                ▼                               │
         ┌─────────────────────────────────────────────┐
         │  bot.py (aiogram dispatcher, long-polling)  │
-        │  handlers: /start, /list, photo, callback   │
+        │  handlers: commands, photo, callback        │
         └─────┬───────────────────────────┬───────────┘
               │                           │
               ▼                           ▼
    ┌──────────────────────┐    ┌───────────────────────┐
    │  ingest_service.py   │    │  pantry_service.py    │
    │  photo → items + ttl │    │  list, mark eaten,    │
-   │   (1 LLM vision call)│    │  snooze, delete       │
+   │ (1 primary LLM call)│      │  snooze, delete       │
    └────┬────────────┬────┘    └──────────┬────────────┘
         │            │                    │
         ▼            ▼                    ▼
@@ -107,10 +116,10 @@ shippable. Each will earn its own spec when its time comes.
 |---|---|---|
 | `bot.py` | Telegram I/O, command + callback routing, user-facing error messages | services |
 | `ingest_service.py` | Orchestrates photo → items → DB write; normalization + cache use | `llm`, `cache`, `db` |
-| `pantry_service.py` | Non-ingest mutations: list, mark eaten/tossed, snooze, correct, stats | `db` |
+| `pantry_service.py` | Non-ingest mutations: list, mark eaten/tossed, snooze, correct, delete, stats | `db` |
 | `scheduler.py` | Cron-style ticks, builds digest, sends via `Bot` instance | `pantry_service`, `renderer`, `Bot` |
 | `renderer.py` | Pure formatting: digest text + inline keyboard from a list of items | none |
-| `llm.py` | `extract_items_from_image(bytes) -> ParseResult` | anthropic SDK |
+| `llm.py` | `extract_items_from_image(bytes) -> LLMResult` | anthropic SDK |
 | `normalization.py` | `normalize(raw: str) -> str`; `ALIASES` dict | none |
 | `shelf_life_defaults.py` | Conservative fallback days for manual `/add` cache misses | none |
 | `cache.py` | Read/write `ShelfLifeCache` rows with user-correction priority | `db` |
@@ -120,13 +129,14 @@ shippable. Each will earn its own spec when its time comes.
 ### 4.3 Abstraction layer (intentionally minimal)
 
 Two Protocols only — `LLMClient` (`llm.py`) and `BotClient` (a thin facade
-around `aiogram.Bot` used by `scheduler.py` and `pantry_service.py` for
-send/edit). These exist *only* so tests can inject fakes; not for runtime
-polymorphism. No other abstractions are introduced "for flexibility."
+around `aiogram.Bot` used where messages are sent or edited, such as
+`scheduler.py` and bot callback handlers). These exist *only* so tests can
+inject fakes; not for runtime polymorphism. No other abstractions are
+introduced "for flexibility."
 
 ## 5. Data model
 
-Three SQLModel tables. SQLite. `user_id` carried on owned tables even
+Four SQLModel tables. SQLite. `user_id` carried on owned tables even
 though v1 is single-user — costs one column, prevents a migration when
 groups arrive.
 
@@ -210,7 +220,8 @@ class ShelfLifeCache(SQLModel, table=True):
   constraint on `(user_id, photo_file_id)` to protect against races.
 - **Receipt LLM cost includes retries.** `llm_cost_micros_usd` is the total
   API cost consumed by the receipt ingestion, including malformed-JSON
-  correction retries and retry-after-error calls that reached the API.
+  correction retries and retry-after-error calls that reached the API. If
+  cost cannot be computed, it is stored as `None` and shown as unavailable.
 - **`source: "user_correction"`** outranks `"llm"` in `cache.get(user_id,
   normalized_name)`. This is the entire learning loop — five lines of code,
   no ML. Cache rows are scoped per user from v1 so future household or
@@ -239,16 +250,16 @@ End-to-end on photo receipt:
                                                 ▼
                           ┌─────────────────────────────────────┐
                           │  1. download bytes from Telegram     │
-                          │  2. llm.extract_items_from_image()   │  ◄── 1 API call
+                          │  2. llm.extract_items_from_image()   │  ◄── 1 primary API call
                           │  3. for each item:                   │
                           │       normalized = normalize(raw)    │
-                          │       days = compute_days(parsed)    │
+                          │       compute shelf-life decision     │
                           │  4. insert PantryItem rows           │
                           │  5. return summary for bot reply     │
                           └─────────────────────────────────────┘
 ```
 
-### 6.1 The single LLM call
+### 6.1 The primary LLM call
 
 ```python
 SYSTEM_PROMPT = """You parse grocery receipt photos.
@@ -297,24 +308,34 @@ class ParseResult(BaseModel):
     purchase_date: date | None = None
     purchase_date_confidence: float = 0.0
     items: list[ParsedItem]
+
+class LLMResult(BaseModel):
+    parse: ParseResult
+    cost_micros_usd: int | None = None
+    provider_usage: dict[str, Any] | None = None  # dev/debug only; not logged in prod
 ```
 
 ### 6.2 Normalization + cache
 
 ```python
-def compute_days(user: User, parsed: ParsedItem) -> int:
+class ShelfLifeDecision(BaseModel):
+    days: int
+    source: Literal["cache","llm"]
+    cache_was_hit: bool
+
+def compute_shelf_life(user: User, parsed: ParsedItem) -> ShelfLifeDecision:
     norm = normalize(parsed.name)
     cached = cache.get(user.telegram_id, norm)
     if cached and cached.source == "user_correction":
-        return cached.days                    # user overrides always win
+        return ShelfLifeDecision(days=cached.days, source="cache", cache_was_hit=True)
     if cached:
-        return cached.days                    # prior LLM estimate
+        return ShelfLifeDecision(days=cached.days, source="cache", cache_was_hit=True)
     if parsed.confidence >= 0.6:
         cache.put(user.telegram_id, norm, parsed.est_shelf_life_days,
                   source="llm",
                   category=parsed.category,
                   confidence=parsed.confidence)
-    return parsed.est_shelf_life_days
+    return ShelfLifeDecision(days=parsed.est_shelf_life_days, source="llm", cache_was_hit=False)
 ```
 
 `normalize()` is the cache-hit-rate-determining function. v1 baseline:
@@ -368,6 +389,7 @@ The ingest reply includes purchase-date context only when useful: show
 If any inserted food items had `0.3 <= confidence < 0.6`, the reply includes
 a capped "Low confidence" note with item IDs so the user can `/delete` or
 `/correct` them.
+If LLM cost cannot be computed, the ingest reply says `Cost: unavailable`.
 
 ## 7. Scheduler & digest UX
 
@@ -491,7 +513,7 @@ marker for the user (see §10).
 | `/snooze <item_id> [days]` | Snoozes reminders for an active item; default is 2 days, allowed range 1–30 |
 | `/correct <item_id> <shelf_life_days>` | Sets item's `shelf_life_days`, `expires_on` from its purchase date, and `shelf_life_source="user_correction"`; also writes a user-scoped `ShelfLifeCache` row with `source="user_correction"` |
 | `/delete <item_id>` | Marks an incorrect or duplicate item as `removed` without counting it as eaten or tossed |
-| `/stats` | Last-30-day: receipt count, tracked item count excluding `removed`, removed item count, cache-hit %, successful-receipt LLM spend, waste rate as `tossed / (eaten + tossed)` |
+| `/stats` | Last-30-day: receipt count, tracked item count excluding `removed`, removed item count, cache-hit %, total and average successful-receipt LLM spend over known-cost receipts, unknown-cost receipt count, waste rate as `tossed / (eaten + tossed)` |
 | `/help` | Lists the above, including that `/correct <id> <shelf_life_days>` teaches future estimates and `/delete <id>` is for wrong or duplicate imports |
 
 All message and callback handlers enforce `ALLOWED_TELEGRAM_USER_ID`; other
@@ -558,14 +580,19 @@ an existing cache row instead of the current LLM estimate, tracked via
 
 | Layer | What's tested | Tooling | Count target |
 |---|---|---|---|
-| Unit | `normalize()`, `compute_days()`, `render_digest()`, query builders | `pytest` + parametrize | 30–40 |
+| Unit | `normalize()`, `compute_shelf_life()`, `render_digest()`, query builders | `pytest` + parametrize | 30–40 |
 | Integration | services against `:memory:` SQLite, `FakeLLMClient` injected | `pytest`, factory fixtures | 10–15 |
+| Migration | Alembic upgrade on temp SQLite DB; verify tables, indexes, constraints | `pytest` + Alembic | 1–2 |
 | Bot smoke | One end-to-end per handler with aiogram test helpers + `FakeLLMClient` | `pytest-asyncio` | 5–6 |
 | Manual | Real photos against a `@food_manager_dev_bot` private chat | the user | ongoing |
 | Golden-receipt eval | `bin/eval_receipts.py` runs ~5 fixture photos through the *real* LLM, diffs against expected JSON | weekly | n/a |
 
 No mocking of Anthropic in unit tests — Protocol-based fakes only. Golden
 eval is the only place that hits the real API, and it's manual / weekly.
+Golden eval asserts parse shape and key item/shelf-life fields, not cost.
+Real receipt photos stay out of git by default; use a gitignored local
+`tests/fixtures/private_receipts/` directory. Expected JSON fixtures may be
+committed only if sanitized.
 
 ## 9. Deployment
 
@@ -608,6 +635,10 @@ startup first creates a local timestamped SQLite `.backup` copy before
 running migrations, retaining the latest 5 local migration backups. If the
 pre-migration backup fails for an existing DB, startup fails before running
 the migration.
+Startup order is: load settings, open DB/session factory, create local
+pre-migration backup if needed, run migrations, create bot/dispatcher,
+register scheduler jobs from `User`, start scheduler, then start dispatcher
+polling.
 
 Persistent volume mounted at `/data`; SQLite file at `/data/food.db`.
 
@@ -626,6 +657,7 @@ Retain 14 daily snapshots. Backblaze B2 free tier covers it.
 TELEGRAM_BOT_TOKEN=...
 ALLOWED_TELEGRAM_USER_ID=...
 ANTHROPIC_API_KEY=...
+ANTHROPIC_MODEL=claude-sonnet-4-6
 DATABASE_PATH=/data/food.db   # or ./food.db locally
 LOG_LEVEL=INFO
 ENV=prod                      # dev|prod
@@ -633,6 +665,8 @@ ENV=prod                      # dev|prod
 
 Loaded via `pydantic-settings.BaseSettings`. Never logged. `.env`
 gitignored; `.env.example` committed with placeholders.
+`.gitignore` covers `.env`, `food.db*`, local migration backups, and
+`tests/fixtures/private_receipts/`.
 
 ### 9.5 Local dev
 
@@ -682,7 +716,7 @@ post-launch. Listed so we know *not* to build them now.
 | User wants household sharing | Multi-user spec: groups, per-group digests, conflict resolution for overlapping pantry items |
 | User wants recipes from expiring items + goal-driven shopping list | Build the **Recipe RAG + shopping-list** subsystem described in §11.1. Likely a separate service consuming the pantry DB read-only. |
 | User wants reminders outside Telegram | Notification-channel abstraction; pick one of email / WhatsApp / SignalCli to start |
-| User receives many grocery receipts by email (Instacart, Amazon Fresh, Walmart+, etc.) | Build the **Gmail auto-ingest connector** described in §11.2. Reuses the existing extraction pipeline; mostly capture + auth glue. |
+| User receives many grocery receipts by email (Instacart, Amazon Fresh, Walmart+, etc.) | Build the **Gmail auto-ingest connector** described in §11.2. Extends the extraction pipeline for text/HTML input; mostly capture + auth glue. |
 
 ### 11.1 Recipe RAG + goal-driven shopping list (v2 sketch)
 
@@ -777,11 +811,10 @@ loop — buy what you said you'd buy and the list cleans itself.
 
 Online grocery orders (Instacart, Amazon Fresh, Walmart+, Whole Foods,
 HelloFresh, …) arrive as emails — no photo needed, no manual scan.
-A Gmail connector pulls those receipts automatically, runs them through
-the **existing LLM extraction pipeline** with text-or-HTML input instead
-of image input, and writes `PantryItem` rows without the user ever
-opening Telegram. This closes the last manual capture step for anyone
-who shops online.
+A Gmail connector pulls those receipts automatically and extends the LLM
+extraction pipeline to accept text-or-HTML input instead of image input.
+It then writes `PantryItem` rows without the user ever opening Telegram.
+This closes the last manual capture step for anyone who shops online.
 
 This is positioned as v1.5 (not v2) specifically because most of the
 work is auth + capture glue — the extraction pipeline already exists.
@@ -846,11 +879,11 @@ same LLM extraction → ParseResult → cache → PantryItem rows
 update last_history_id; record msg_id in seen-set
 ```
 
-**Key win:** `ingest_service.ingest_text()` is the same function used by
-the `/add` text-ingest path and (later) by voice transcription. One
-extraction pipeline, many input modalities. **Adding a new modality
-means wiring its capture, not its parsing.** The case for this
-modularity in v1 pays off here.
+**Key win:** `ingest_service.ingest_text()` becomes the shared LLM-backed
+text extraction path for Gmail and later voice transcription. v1 `/add`
+remains a simple regex/manual parser; it is not the Gmail parser. One
+extraction pipeline can still serve future modalities once text ingestion
+is introduced.
 
 **De-duplication:** `dedupe_key=msg_id` ensures a re-processed email
 doesn't double-insert items. Same goes for the (`source`, `source_id`)
@@ -896,6 +929,7 @@ msg_id when relevant) so `/stats` can break down ingest paths.
 | Risk | Mitigation |
 |---|---|
 | Vision LLM cost runs higher than expected | `/stats` exposes per-day spend; alert-by-eyeball; cap by adding a daily budget check before LLM calls if needed |
+| LLM pricing table becomes stale | Cost display is advisory; unknown models report unavailable; update the small pricing table when changing `ANTHROPIC_MODEL` |
 | Anthropic model deprecation breaks JSON shape | Weekly golden-receipt eval catches regressions before user sees them |
 | Railway free tier no longer enough | Fly.io or Render are interchangeable; Dockerfile + `bin/run.py` are platform-agnostic |
 | SQLite corruption on volume failure | Daily B2 backups (§9.3); restore = `rclone copy` + restart |
@@ -903,13 +937,13 @@ msg_id when relevant) so `/stats` can break down ingest paths.
 
 ## 13. Definition of done for v1
 
-- Bot deployed to Railway, responds to `/start`.
+- Bot deployed to the chosen long-running host, responds to `/start`.
 - Sending a real receipt photo produces correct `PantryItem` rows and a
   bot reply within 15 s.
 - Daily digest fires at the configured local hour, shows correct buckets,
   buttons update the message in place.
-- `/correct` writes a `user_correction` row that overrides future LLM
-  estimates for that item.
+- `/correct` writes a user-scoped `user_correction` row that overrides
+  future estimates for the same normalized food.
 - All listed commands work and are documented in `/help`.
 - Test suite passes; golden-receipt eval has been run at least once.
 - README explains: setup, deploy, daily-use commands, backup/restore.

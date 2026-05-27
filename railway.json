@@ -1,0 +1,15 @@
+{
+  "build": {
+    "builder": "dockerfile"
+  },
+  "deploy": {
+    "startCommand": "uv run --no-sync python bin/run.py",
+    "restartPolicyMaxRetries": 5
+  },
+  "volumes": [
+    {
+      "name": "food-data",
+      "path": "/data"
+    }
+  ]
+}

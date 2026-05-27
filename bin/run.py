@@ -120,7 +120,7 @@ async def _amain(settings: Settings) -> None:
 
 
 def main() -> None:
-    settings = Settings()
+    settings = Settings()  # type: ignore[call-arg]
     _configure_logging(settings.env, settings.log_level)
     asyncio.run(_amain(settings))
 

@@ -61,7 +61,7 @@ async def _evaluate_one(client: AnthropicLLMClient, photo: Path) -> tuple[bool, 
 
 
 async def _amain() -> int:
-    settings = Settings()
+    settings = Settings.load()
     sdk = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     client = AnthropicLLMClient(sdk=sdk, model=settings.anthropic_model)
 

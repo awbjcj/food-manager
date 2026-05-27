@@ -1,5 +1,9 @@
+from typing import Any, TypeVar, cast
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+SettingsT = TypeVar("SettingsT", bound="Settings")
 
 
 class Settings(BaseSettings):
@@ -14,3 +18,7 @@ class Settings(BaseSettings):
     database_path: str = Field(default="./food.db", alias="DATABASE_PATH")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     env: str = Field(default="dev", alias="ENV")
+
+    @classmethod
+    def load(cls: type[SettingsT]) -> SettingsT:
+        return cast(Any, cls)()

@@ -210,7 +210,10 @@ def apply_correct(
     if category_change is not None:
         item.category = category_change["new"]
     if days_change is not None:
-        item.shelf_life_days = days_change["new"]
+        new_days = int(days_change["new"])
+        if not (1 <= new_days <= 730):
+            raise ValueError(f"shelf_life_days {new_days} out of range [1, 730]")
+        item.shelf_life_days = new_days
         item.shelf_life_source = "user_correction"
     if expires_change is not None:
         item.expires_on = date.fromisoformat(expires_change["new"])
@@ -283,11 +286,13 @@ async def propose_add(
         if parsed.explicit_user_expiry:
             if parsed.shelf_life_days is not None:
                 days = parsed.shelf_life_days
+                expires_on = today + timedelta(days=days)
             elif parsed.expires_on is not None:
-                days = max(1, min(730, (parsed.expires_on - today).days))
+                expires_on = parsed.expires_on
+                days = max(1, min(730, (expires_on - today).days))
             else:
                 days = CONSERVATIVE_FALLBACK_DAYS
-            expires_on = today + timedelta(days=days)
+                expires_on = today + timedelta(days=days)
             shelf_life_source = "user_correction"
             ingest_source = "manual_user_hint"
         else:

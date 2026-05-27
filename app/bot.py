@@ -309,7 +309,16 @@ async def handle_add(
             keyboard = to_aiogram_keyboard(
                 build_apply_cancel_keyboard(pending_id=pending.id)
             )
-            sent = await msg.answer(text, reply_markup=keyboard)
+            try:
+                sent = await msg.answer(text, reply_markup=keyboard)
+            except Exception as exc:
+                log.warning(
+                    "add_send_failed",
+                    extra={"pending_id": pending.id, "error_class": type(exc).__name__},
+                )
+                mark_cancelled(session, pending=pending)
+                session.commit()
+                continue
             set_message_id(session, pending=pending, message_id=sent.message_id)
 
 
@@ -481,8 +490,8 @@ async def handle_correct(
         if item is None or item.user_id != user.telegram_id:
             await msg.answer(f"no item #{item_id}")
             return
-        if item.status == "removed":
-            await msg.answer(f"#{item_id} is removed; cannot correct")
+        if item.status != "active":
+            await msg.answer(f"#{item_id} is {item.status}; cannot correct")
             return
         today = now_provider(user.tz).date()
         try:
@@ -532,7 +541,16 @@ async def handle_correct(
         keyboard = to_aiogram_keyboard(
             build_apply_cancel_keyboard(pending_id=pending.id)
         )
-        sent = await msg.answer(text, reply_markup=keyboard)
+        try:
+            sent = await msg.answer(text, reply_markup=keyboard)
+        except Exception as exc:
+            log.warning(
+                "correct_send_failed",
+                extra={"pending_id": pending.id, "error_class": type(exc).__name__},
+            )
+            mark_cancelled(session, pending=pending)
+            session.commit()
+            return
         set_message_id(session, pending=pending, message_id=sent.message_id)
 
 
@@ -786,6 +804,18 @@ async def _handle_pending_callback(
                 )
             await cb.answer("item gone")
             return
+        if item.status != "active":
+            mark_cancelled(session, pending=pending)
+            session.commit()
+            try:
+                await cb.message.edit_text("Item is no longer active - proposal cancelled.")
+            except Exception as exc:
+                log.warning(
+                    "pending_message_edit_failed",
+                    extra={"error_class": type(exc).__name__},
+                )
+            await cb.answer("item no longer active")
+            return
         expire_for_item(
             session,
             user_id=cb.from_user.id,
@@ -815,6 +845,10 @@ async def _handle_pending_callback(
         await cb.answer("applied")
         return
 
+    if pending.action_type != "add":
+        log.warning("unknown_pending_action_type", extra={"action_type": pending.action_type})
+        await cb.answer("unknown action")
+        return
     payload = add_payload_from_json(pending.proposed_json)
     new_id = apply_add(session, user_id=cb.from_user.id, payload=payload, today=today)
     mark_applied(session, pending=pending)

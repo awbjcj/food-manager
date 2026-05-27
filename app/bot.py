@@ -95,6 +95,11 @@ def _noop_user_created(user: User) -> None:
     pass
 
 
+def _require_user(user: User | None) -> User:
+    assert user is not None
+    return user
+
+
 async def _guard(
     msg,
     session: Session,
@@ -115,9 +120,10 @@ async def _guard(
         )
         await msg.answer(decision.reason)
         return None
+    user = _require_user(decision.user)
     if decision.created:
-        on_user_created(decision.user)
-    return decision.user
+        on_user_created(user)
+    return user
 
 
 async def handle_start(
@@ -141,12 +147,13 @@ async def handle_start(
             )
             await msg.answer(decision.reason)
             return
+        user = _require_user(decision.user)
         if decision.created:
-            on_user_created(decision.user)
+            on_user_created(user)
         await msg.answer(
             "Pantry bot ready.\n"
-            f"Timezone: {decision.user.tz} (change with /tz <IANA>)\n"
-            f"Daily digest hour: {decision.user.digest_hour}:00 "
+            f"Timezone: {user.tz} (change with /tz <IANA>)\n"
+            f"Daily digest hour: {user.digest_hour}:00 "
             "(change with /digest_at <0..23>)\n"
             "Type /help to see all commands."
         )
@@ -210,7 +217,7 @@ async def handle_list(
         if user is None:
             return
         try:
-            list_filter = parse_list_filter((msg.text or "").split()[1:])
+            list_filter = parse_list_filter(list((msg.text or "").split()[1:]))
         except CommandError as exc:
             await msg.answer(str(exc))
             return
@@ -273,17 +280,19 @@ async def _terminal_cmd(
         if len(parts) != 2:
             await msg.answer(f"usage: /{action_word} <item_id>")
             return
+        item_id: int
         try:
             item_id = parse_item_id_arg(parts[1].strip())
+        except CommandError as exc:
+            await msg.answer(str(exc))
+            return
+        try:
             result = fn(
                 session,
                 user_id=user.telegram_id,
                 item_id=item_id,
                 today=now_provider(user.tz).date(),
             )
-        except CommandError as exc:
-            await msg.answer(str(exc))
-            return
         except NotOwnerOrMissing:
             await msg.answer(f"no item #{item_id}")
             return
@@ -359,8 +368,13 @@ async def handle_snooze(
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
+        item_id: int
         try:
-            item_id, days = parse_snooze_args((msg.text or "").split()[1:])
+            item_id, days = parse_snooze_args(list((msg.text or "").split()[1:]))
+        except CommandError as exc:
+            await msg.answer(str(exc))
+            return
+        try:
             result = snooze_item(
                 session,
                 user_id=user.telegram_id,
@@ -368,9 +382,6 @@ async def handle_snooze(
                 today=now_provider(user.tz).date(),
                 days=days,
             )
-        except CommandError as exc:
-            await msg.answer(str(exc))
-            return
         except NotOwnerOrMissing:
             await msg.answer(f"no item #{item_id}")
             return
@@ -398,8 +409,13 @@ async def handle_correct(
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
+        item_id: int
         try:
-            item_id, days = parse_correct_args((msg.text or "").split()[1:])
+            item_id, days = parse_correct_args(list((msg.text or "").split()[1:]))
+        except CommandError as exc:
+            await msg.answer(str(exc))
+            return
+        try:
             pantry_item = correct_item(
                 session,
                 user_id=user.telegram_id,
@@ -407,9 +423,6 @@ async def handle_correct(
                 days=days,
                 today=now_provider(user.tz).date(),
             )
-        except CommandError as exc:
-            await msg.answer(str(exc))
-            return
         except NotOwnerOrMissing:
             await msg.answer(f"no item #{item_id}")
             return
@@ -561,20 +574,22 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             await cb.answer("sent full digest list")
             return
 
+        item_id = action.item_id
+        assert item_id is not None
         try:
             if action.verb == "ate":
                 result = mark_eaten(
-                    session, user_id=cb.from_user.id, item_id=action.item_id, today=today
+                    session, user_id=cb.from_user.id, item_id=item_id, today=today
                 )
             elif action.verb == "toss":
                 result = mark_tossed(
-                    session, user_id=cb.from_user.id, item_id=action.item_id, today=today
+                    session, user_id=cb.from_user.id, item_id=item_id, today=today
                 )
             elif action.verb == "snooze2":
                 result = snooze_item(
                     session,
                     user_id=cb.from_user.id,
-                    item_id=action.item_id,
+                    item_id=item_id,
                     today=today,
                     days=2,
                 )
@@ -589,15 +604,13 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
                 "item_action_applied",
                 extra={
                     "user_id": cb.from_user.id,
-                    "item_id": action.item_id,
+                    "item_id": item_id,
                     "action": action.verb,
                 },
             )
             await _refresh_digest_message(cb, session, user.telegram_id, today)
         await cb.answer(
-            f"#{action.item_id} -> {action.verb}"
-            if result.applied
-            else f"#{action.item_id} already updated"
+            f"#{item_id} -> {action.verb}" if result.applied else f"#{item_id} already updated"
         )
 
 
@@ -650,7 +663,11 @@ def build_dispatcher(
 
     async def downloader(file_id: str) -> bytes:
         telegram_file = await bot.get_file(file_id)
+        if telegram_file.file_path is None:
+            raise RuntimeError("telegram file path missing")
         downloaded = await bot.download_file(telegram_file.file_path)
+        if downloaded is None:
+            raise RuntimeError("telegram download returned no file object")
         return downloaded.read()
 
     async def on_start(message):

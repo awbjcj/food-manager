@@ -7,7 +7,8 @@ from typing import Literal, Optional
 from sqlmodel import Session, col, select
 
 from app.cache import write_user_correction
-from app.models import PantryItem, Receipt
+from app.models import PantryItem, PendingCorrection, Receipt
+from app.pending_service import expire_for_item
 
 
 ALLOWED_CATEGORIES = frozenset({
@@ -82,6 +83,8 @@ def _set_terminal(session: Session, pantry_item: PantryItem, status: str) -> Mut
         return MutationResult(applied=False, was_already=True)
     pantry_item.status = status
     pantry_item.snoozed_until = None
+    assert pantry_item.id is not None
+    expire_for_item(session, user_id=pantry_item.user_id, item_id=pantry_item.id)
     session.add(pantry_item)
     session.commit()
     return MutationResult(applied=True, was_already=False)
@@ -101,6 +104,8 @@ def mark_removed(session: Session, *, user_id: int, item_id: int, today: date) -
         return MutationResult(applied=False, was_already=True)
     pantry_item.status = "removed"
     pantry_item.snoozed_until = None
+    assert pantry_item.id is not None
+    expire_for_item(session, user_id=pantry_item.user_id, item_id=pantry_item.id)
     session.add(pantry_item)
     session.commit()
     return MutationResult(applied=True, was_already=False)
@@ -125,6 +130,8 @@ def snooze_item(
     if pantry_item.status != "active":
         return MutationResult(applied=False, was_already=True)
     pantry_item.snoozed_until = today + timedelta(days=days)
+    assert pantry_item.id is not None
+    expire_for_item(session, user_id=pantry_item.user_id, item_id=pantry_item.id)
     session.add(pantry_item)
     session.commit()
     return MutationResult(applied=True, was_already=False)
@@ -145,6 +152,8 @@ def correct_item(
     pantry_item.shelf_life_days = days
     pantry_item.shelf_life_source = "user_correction"
     pantry_item.expires_on = pantry_item.purchased_on + timedelta(days=days)
+    assert pantry_item.id is not None
+    expire_for_item(session, user_id=pantry_item.user_id, item_id=pantry_item.id)
     session.add(pantry_item)
     write_user_correction(
         session,
@@ -152,10 +161,21 @@ def correct_item(
         pantry_item.normalized_name,
         days=days,
         category=pantry_item.category,
+        commit=False,
     )
     session.commit()
     session.refresh(pantry_item)
     return pantry_item
+
+
+@dataclass(frozen=True)
+class TextLLMCost:
+    correction_proposal_count: int
+    correction_cost_micros: int
+    correction_unknown_cost_count: int
+    add_proposal_count: int
+    add_cost_micros: int
+    add_unknown_cost_count: int
 
 
 @dataclass(frozen=True)
@@ -168,6 +188,14 @@ class Stats:
     avg_cost_micros_usd: Optional[int]
     unknown_cost_receipt_count: int
     waste_rate_percent: Optional[float]
+    text_llm: TextLLMCost = TextLLMCost(
+        correction_proposal_count=0,
+        correction_cost_micros=0,
+        correction_unknown_cost_count=0,
+        add_proposal_count=0,
+        add_cost_micros=0,
+        add_unknown_cost_count=0,
+    )
 
 
 def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
@@ -215,6 +243,29 @@ def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
     tossed = sum(1 for item in items_30d if item.status == "tossed")
     waste_rate = tossed * 100.0 / (eaten + tossed) if eaten + tossed else None
 
+    pending_rows = list(
+        session.exec(
+            select(PendingCorrection).where(
+                PendingCorrection.user_id == user_id,
+                PendingCorrection.created_at >= since,
+            )
+        ).all()
+    )
+    correction_rows = [row for row in pending_rows if row.action_type == "correct"]
+    add_rows = [row for row in pending_rows if row.action_type == "add"]
+    text_llm = TextLLMCost(
+        correction_proposal_count=len(correction_rows),
+        correction_cost_micros=sum(row.llm_cost_micros_usd or 0 for row in correction_rows),
+        correction_unknown_cost_count=sum(
+            1 for row in correction_rows if row.llm_cost_micros_usd is None
+        ),
+        add_proposal_count=len(add_rows),
+        add_cost_micros=sum(row.llm_cost_micros_usd or 0 for row in add_rows),
+        add_unknown_cost_count=sum(
+            1 for row in add_rows if row.llm_cost_micros_usd is None
+        ),
+    )
+
     return Stats(
         receipt_count=len(receipts),
         tracked_item_count=len(tracked),
@@ -226,4 +277,5 @@ def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
             1 for receipt in receipts if receipt.llm_cost_micros_usd is None
         ),
         waste_rate_percent=waste_rate,
+        text_llm=text_llm,
     )

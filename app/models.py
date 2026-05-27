@@ -18,6 +18,9 @@ IngestShelfLifeSource = Literal["cache", "llm", "manual_fallback", "manual_user_
 CreatedVia = Literal["receipt", "manual"]
 PurchaseDateSource = Literal["receipt", "scan_fallback"]
 CacheSource = Literal["llm", "user_correction"]
+PendingActionType = Literal["correct", "add"]
+PendingStatus = Literal["pending", "applied", "cancelled", "expired", "stale"]
+CacheAction = Literal["move", "add_new", "leave"]
 
 
 class User(SQLModel, table=True):
@@ -79,3 +82,23 @@ class ShelfLifeCache(SQLModel, table=True):
     confidence: float
     learned_at: datetime
     source: str = "llm"
+
+
+class PendingCorrection(SQLModel, table=True):
+    __table_args__ = (
+        Index("ix_pending_user_status_created", "user_id", "status", "created_at"),
+        Index("ix_pending_item", "item_id"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.telegram_id", index=True)
+    action_type: str
+    item_id: Optional[int] = Field(default=None, foreign_key="pantryitem.id")
+    proposed_json: str
+    original_snapshot_json: Optional[str] = None
+    llm_cost_micros_usd: Optional[int] = None
+    chat_id: int
+    message_id: Optional[int] = None
+    status: str = "pending"
+    created_at: datetime
+    expires_at: datetime

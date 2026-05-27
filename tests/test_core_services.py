@@ -13,7 +13,6 @@ from app.ingest_service import (
     DuplicateReceipt,
     compute_shelf_life,
     ingest_photo,
-    ingest_text,
 )
 from app.llm import AnthropicLLMClient, LLMResult, ParseResult, ParsedItem
 from app.models import PantryItem, Receipt, ShelfLifeCache, User
@@ -53,6 +52,7 @@ def test_settings_load_from_env(monkeypatch):
     assert settings.telegram_bot_token == "test-token"
     assert settings.allowed_telegram_user_id == 12345
     assert settings.anthropic_model == "claude-sonnet-4-6"
+    assert settings.anthropic_text_model == "claude-haiku-4-5-20251001"
 
 
 def test_make_engine_and_session_factory(tmp_path):
@@ -212,22 +212,6 @@ async def test_ingest_photo_confidence_and_purchase_date_fallback(session):
     assert summary.inserted_food_count == 1
     assert summary.skipped_low_confidence_names == ["Mystery"]
     assert len(summary.low_confidence_inserted_ids) == 1
-
-
-def test_ingest_text_defaults_hints_and_failures(session):
-    summary = ingest_text(
-        session,
-        user_id=1,
-        text="whole milk 5d, bananas, dragonfruit, whole milk 999d",
-        today=date(2026, 5, 26),
-    )
-    assert summary.inserted_count == 2
-    assert summary.failed_parts == ["dragonfruit", "whole milk 999d"]
-    assert "1..730" in summary.failed_reasons[1]
-    milk = session.exec(select(PantryItem).where(PantryItem.normalized_name == "whole milk")).first()
-    assert milk.shelf_life_days == 5
-    cached = get_cached(session, 1, "whole milk")
-    assert cached is not None and cached.days == 5
 
 
 def _item(session, name, days_from_today, *, today=date(2026, 5, 26), status="active",

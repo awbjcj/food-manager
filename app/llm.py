@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 from datetime import date
 from typing import Any, Literal, Optional, Protocol
@@ -37,6 +38,31 @@ class LLMResult(BaseModel):
     provider_usage: Optional[dict[str, Any]] = None
 
 
+CacheAction = Literal["move", "add_new", "leave"]
+
+
+class CorrectionDiff(BaseModel):
+    name: Optional[str] = None
+    category: Optional[Category] = None
+    expires_on: Optional[date] = None
+    shelf_life_days: Optional[int] = Field(default=None, ge=1, le=730)
+    cache_action: CacheAction = "leave"
+    rationale: str
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
+class ProposedAddItem(BaseModel):
+    name: str
+    category: Optional[Category] = None
+    qty: float = 1.0
+    unit: Optional[str] = None
+    explicit_user_expiry: bool
+    shelf_life_days: Optional[int] = Field(default=None, ge=1, le=730)
+    expires_on: Optional[date] = None
+    estimated_shelf_life_days: Optional[int] = Field(default=None, ge=1, le=730)
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
 class LLMClient(Protocol):
     async def extract_items_from_image(
         self,
@@ -44,6 +70,25 @@ class LLMClient(Protocol):
         *,
         image_media_type: str | None = None,
     ) -> LLMResult: ...
+
+
+class TextLLMClient(Protocol):
+    async def parse_correct(
+        self,
+        *,
+        item_snapshot: dict[str, Any],
+        cache_snapshot: Optional[dict[str, Any]],
+        user_text: str,
+        today: date,
+    ) -> tuple[CorrectionDiff, Optional[int]]: ...
+
+    async def parse_add(
+        self,
+        *,
+        user_text: str,
+        today: date,
+        tz: str,
+    ) -> tuple[list[ProposedAddItem], Optional[int]]: ...
 
 
 log = logging.getLogger(__name__)
@@ -81,6 +126,7 @@ _PARSE_RECEIPT_TOOL = {
 
 _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "claude-sonnet-4-6": {"input": 3, "output": 15},
+    "claude-haiku-4-5-20251001": {"input": 1, "output": 5},
 }
 
 
@@ -175,6 +221,184 @@ class AnthropicLLMClient(LLMClient):
             parse=parsed,
             cost_micros_usd=cost,
         )
+
+
+CORRECTION_SYSTEM_PROMPT = """You parse a user-supplied correction for a single pantry item.
+Return ONLY valid JSON matching the CorrectionDiff schema. No prose.
+
+You receive (in the user message):
+  - item_snapshot: {id, raw_name, normalized_name, category, qty, unit,
+                    purchased_on, shelf_life_days, expires_on, status}
+  - cache_snapshot: null OR {normalized_name, days, category,
+                              source, confidence, learned_at}
+  - today: YYYY-MM-DD in the user's local timezone
+  - user_text: free-form correction message
+
+Rules:
+  - Set ONLY the fields the user actually wants to change. Leave the
+    others null.
+  - Never set both shelf_life_days and expires_on; prefer the one
+    the user stated more explicitly.
+  - cache_action="move" when the user clarifies a misidentified item.
+    "add_new" when both names are legitimate but distinct. "leave" when
+    only date/category/days changes, or when uncertain.
+  - rationale: one short clause explaining the change.
+  - confidence: 0.0-1.0 of your parse, not of the food domain.
+
+TODO(user): tune the move-vs-add_new boundary and category mapping to
+the user's typical correction patterns.
+"""
+
+
+ADD_SYSTEM_PROMPT = """You parse a user-supplied "add to pantry" message into one or
+more discrete items. Return ONLY valid JSON: a list of items matching
+the ProposedAddItem schema.
+
+For each item:
+  - name: clean, expanded ("Oat Milk", not "OM 1/2 gal").
+  - category: one of dairy|produce|meat|seafood|bakery|pantry|frozen|
+              beverage|other. Null if unsure.
+  - qty / unit: as the user stated; default qty=1.0; unit may be null.
+  - explicit_user_expiry: true if the user explicitly stated a shelf
+                          life ("keeps 10 days", "expires June 5"),
+                          else false.
+  - shelf_life_days: integer 1..730 ONLY if explicit_user_expiry is
+                     true. Null otherwise.
+  - expires_on: YYYY-MM-DD if the user stated an absolute date.
+  - estimated_shelf_life_days: conservative food-domain estimate
+                under normal storage, even when the user did not
+                state expiry. Null only if genuinely unknown.
+  - confidence: 0.0-1.0 of your parse.
+
+Comma, semicolon, "and", and newline are valid item separators. Do
+NOT invent items the user didn't mention.
+
+TODO(user): tune separator handling and the "do not invent" guidance
+against the user's typical /add patterns.
+"""
+
+
+def _extract_json_text(message) -> str:
+    chunks: list[str] = []
+    for block in message.content:
+        if getattr(block, "type", None) == "text":
+            chunks.append(block.text)
+    if not chunks:
+        raise ValueError("no text block in text-LLM response")
+    text = "\n".join(chunks).strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    return text
+
+
+class AnthropicTextLLMClient(TextLLMClient):
+    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
+        self._sdk = sdk
+        self._model = model
+        self._sleep = sleep
+
+    async def _create_message(self, system: str, user_content):
+        for attempt in range(3):
+            try:
+                return await self._sdk.messages.create(
+                    model=self._model,
+                    max_tokens=1024,
+                    system=system,
+                    messages=[{"role": "user", "content": user_content}],
+                )
+            except Exception as exc:
+                if attempt == 2:
+                    log.warning(
+                        "text_llm_transport_failed_final",
+                        extra={"error_class": type(exc).__name__},
+                    )
+                    raise
+                log.warning(
+                    "text_llm_transport_failed_retrying",
+                    extra={"error_class": type(exc).__name__},
+                )
+                await self._sleep(2 ** attempt)
+        raise RuntimeError("unreachable")
+
+    async def _call_with_schema(self, system: str, user_text: str, parse_fn):
+        user_content = [{"type": "text", "text": user_text}]
+        total_cost = 0
+        unknown_cost = False
+        for attempt in (0, 1):
+            message = await self._create_message(system, user_content)
+            cost = _cost_micros(message, self._model)
+            if cost is None:
+                unknown_cost = True
+            else:
+                total_cost += cost
+            text = _extract_json_text(message)
+            try:
+                return parse_fn(text), None if unknown_cost else total_cost
+            except Exception as exc:
+                if attempt == 1:
+                    log.warning(
+                        "text_llm_schema_failed_final",
+                        extra={"error_class": type(exc).__name__},
+                    )
+                    raise
+                user_content = [
+                    *user_content,
+                    {
+                        "type": "text",
+                        "text": (
+                            "Your last response did not match the schema "
+                            f"(error: {type(exc).__name__}). Return ONLY valid "
+                            "JSON matching the schema."
+                        ),
+                    },
+                ]
+        raise RuntimeError("unreachable")
+
+    async def parse_correct(
+        self,
+        *,
+        item_snapshot,
+        cache_snapshot,
+        user_text,
+        today,
+    ) -> tuple[CorrectionDiff, Optional[int]]:
+        user_msg = json.dumps({
+            "item_snapshot": item_snapshot,
+            "cache_snapshot": cache_snapshot,
+            "today": today.isoformat(),
+            "user_text": user_text,
+        })
+
+        def _parse(text: str) -> CorrectionDiff:
+            return CorrectionDiff.model_validate(json.loads(text))
+
+        return await self._call_with_schema(CORRECTION_SYSTEM_PROMPT, user_msg, _parse)
+
+    async def parse_add(
+        self,
+        *,
+        user_text,
+        today,
+        tz,
+    ) -> tuple[list[ProposedAddItem], Optional[int]]:
+        user_msg = json.dumps({
+            "today": today.isoformat(),
+            "tz": tz,
+            "user_text": user_text,
+        })
+
+        def _parse(text: str) -> list[ProposedAddItem]:
+            data = json.loads(text)
+            if not isinstance(data, list):
+                raise ValueError("parse_add expected a JSON array")
+            return [ProposedAddItem.model_validate(item) for item in data]
+
+        return await self._call_with_schema(ADD_SYSTEM_PROMPT, user_msg, _parse)
 
 
 def _detect_media_type(image_bytes: bytes) -> str:

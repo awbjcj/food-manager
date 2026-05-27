@@ -67,6 +67,7 @@ def _item(session_factory) -> int:
         db.add(item)
         db.commit()
         db.refresh(item)
+        assert item.id is not None
         return item.id
 
 
@@ -95,6 +96,7 @@ def _pending_correct(session_factory) -> tuple[int, int]:
             chat_id=99,
             now=datetime.now(timezone.utc),
         )
+        assert pending.id is not None
         return pending.id, item_id
 
 

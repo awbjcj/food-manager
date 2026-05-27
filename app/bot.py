@@ -305,6 +305,7 @@ async def handle_add(
                 chat_id=msg.chat.id,
                 now=datetime.now(timezone.utc),
             )
+            assert pending.id is not None
             text = render_add_diff(pending_id=pending.id, payload=proposal.payload)
             keyboard = to_aiogram_keyboard(
                 build_apply_cancel_keyboard(pending_id=pending.id)
@@ -532,6 +533,7 @@ async def handle_correct(
             chat_id=msg.chat.id,
             now=datetime.now(timezone.utc),
         )
+        assert pending.id is not None
         text = render_correction_diff(
             pending_id=pending.id,
             payload=payload,
@@ -816,6 +818,7 @@ async def _handle_pending_callback(
                 )
             await cb.answer("item no longer active")
             return
+        assert item.id is not None
         expire_for_item(
             session,
             user_id=cb.from_user.id,

@@ -81,8 +81,11 @@ def test_pending_create_load_terminal_expire_and_sweep(session):
 
     stored_now = now.replace(tzinfo=None)
     assert pending.expires_at == stored_now + timedelta(minutes=PENDING_TTL_MINUTES)
+    assert pending.id is not None
     assert load_pending(session, user_id=2, pending_id=pending.id) is None
-    assert load_pending(session, user_id=1, pending_id=pending.id).id == pending.id
+    found = load_pending(session, user_id=1, pending_id=pending.id)
+    assert found is not None
+    assert found.id == pending.id
 
     mark_applied(session, pending=pending)
     session.commit()
@@ -146,7 +149,9 @@ async def test_propose_correct_back_computes_days_and_snapshot(session):
     )
 
     assert payload.back_computed_days is True
+    assert payload.diff["shelf_life_days"] is not None
     assert payload.diff["shelf_life_days"]["new"] == 10
+    assert payload.diff["expires_on"] is not None
     assert payload.diff["expires_on"]["new"] == "2026-06-05"
     assert cost == 100
     assert '"raw_name": "Milk"' in item_snapshot_to_json(item)
@@ -211,7 +216,9 @@ def test_apply_correct_cache_actions(session):
     assert item.normalized_name == "heavy cream"
     assert item.shelf_life_source == "user_correction"
     assert get_cached(session, 1, "milk") is None
-    assert get_cached(session, 1, "heavy cream").days == 10
+    heavy_cream_cache = get_cached(session, 1, "heavy cream")
+    assert heavy_cream_cache is not None
+    assert heavy_cream_cache.days == 10
 
     category_only = CorrectPayload(
         diff={
@@ -226,7 +233,9 @@ def test_apply_correct_cache_actions(session):
     )
     apply_correct(session, user_id=1, item=item, payload=category_only)
     session.commit()
-    assert get_cached(session, 1, "heavy cream").category == "beverage"
+    updated_cache = get_cached(session, 1, "heavy cream")
+    assert updated_cache is not None
+    assert updated_cache.category == "beverage"
 
 
 @pytest.mark.asyncio
@@ -284,7 +293,9 @@ async def test_propose_add_payload_roundtrip_and_apply(session):
     )
     session.commit()
     assert session.get(PantryItem, new_id).normalized_name == "basil"
-    assert get_cached(session, 1, "basil").source == "user_correction"
+    basil_cache = get_cached(session, 1, "basil")
+    assert basil_cache is not None
+    assert basil_cache.source == "user_correction"
 
 
 def test_pantry_mutation_marks_pending_stale_and_stats_include_text_cost(session):
@@ -312,6 +323,7 @@ def test_pantry_mutation_marks_pending_stale_and_stats_include_text_cost(session
         now=datetime.now(timezone.utc),
     )
 
+    assert item.id is not None
     mark_eaten(session, user_id=1, item_id=item.id, today=date(2026, 5, 27))
     session.refresh(pending)
     assert pending.status == "stale"

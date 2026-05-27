@@ -1,0 +1,12 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "uv run python bin/run.py"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+[[deploy.volumes]]
+mountPath = "/data"
+name = "food-data"

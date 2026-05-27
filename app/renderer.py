@@ -43,7 +43,7 @@ def render_ingest_reply(summary: IngestSummary, *, today: date) -> str:
 
     if summary.purchase_date is not None and summary.purchase_date != today:
         lines.append(f"Purchase date: {_fmt_date(summary.purchase_date)}")
-    if summary.purchase_date_assumed:
+    if summary.purchase_date_assumed and summary.purchase_date is not None:
         lines.append(f"Purchase date assumed: {_fmt_date(summary.purchase_date)}")
 
     if summary.low_confidence_inserted_ids:

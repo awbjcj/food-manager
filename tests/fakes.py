@@ -1,11 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Iterator, Optional
 
-from app.llm import LLMResult
+from app.llm import LLMClient, LLMResult
 
 
 @dataclass
-class FakeLLMClient:
+class FakeLLMClient(LLMClient):
     canned: Optional[LLMResult] = None
     canned_sequence: Optional[Iterator[LLMResult]] = None
     calls: list[bytes] = field(default_factory=list)

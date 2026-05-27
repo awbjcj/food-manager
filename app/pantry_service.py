@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Literal, Optional
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.cache import write_user_correction
 from app.models import PantryItem, Receipt
@@ -37,12 +37,12 @@ def list_active(session: Session, *, user_id: int, f: ListFilter, today: date) -
         query = query.where(PantryItem.category == f.category)
     if f.window == "week":
         query = query.where(
-            PantryItem.expires_on >= today,
-            PantryItem.expires_on <= today + timedelta(days=7),
+            col(PantryItem.expires_on) >= today,
+            col(PantryItem.expires_on) <= today + timedelta(days=7),
         )
     elif f.window == "expired":
-        query = query.where(PantryItem.expires_on < today)
-    query = query.order_by(PantryItem.expires_on.asc())
+        query = query.where(col(PantryItem.expires_on) < today)
+    query = query.order_by(col(PantryItem.expires_on).asc())
     return list(session.exec(query).all())
 
 
@@ -50,9 +50,12 @@ def list_digest_due(session: Session, *, user_id: int, today: date) -> list[Pant
     query = (
         select(PantryItem)
         .where(PantryItem.user_id == user_id, PantryItem.status == "active")
-        .where((PantryItem.snoozed_until.is_(None)) | (PantryItem.snoozed_until <= today))
-        .where(PantryItem.expires_on <= today + timedelta(days=7))
-        .order_by(PantryItem.expires_on.asc())
+        .where(
+            col(PantryItem.snoozed_until).is_(None)
+            | (col(PantryItem.snoozed_until) <= today)
+        )
+        .where(col(PantryItem.expires_on) <= today + timedelta(days=7))
+        .order_by(col(PantryItem.expires_on).asc())
     )
     return list(session.exec(query).all())
 

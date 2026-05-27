@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal, Optional, Sequence, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.pantry_service import (
@@ -50,7 +50,7 @@ def parse_item_id_arg(arg: str) -> int:
         raise CommandError(f"expected item id like 42 or #42, got {arg!r}") from exc
 
 
-def parse_snooze_args(args: list[str]) -> tuple[int, int]:
+def parse_snooze_args(args: Sequence[str]) -> tuple[int, int]:
     if not args or len(args) > 2:
         raise CommandError("usage: /snooze <item_id> [days]")
     item_id = parse_item_id_arg(args[0])
@@ -65,7 +65,7 @@ def parse_snooze_args(args: list[str]) -> tuple[int, int]:
     return item_id, days
 
 
-def parse_correct_args(args: list[str]) -> tuple[int, int]:
+def parse_correct_args(args: Sequence[str]) -> tuple[int, int]:
     if len(args) != 2:
         raise CommandError("usage: /correct <item_id> <shelf_life_days>")
     item_id = parse_item_id_arg(args[0])
@@ -80,14 +80,14 @@ def parse_correct_args(args: list[str]) -> tuple[int, int]:
     return item_id, days
 
 
-def parse_list_filter(args: list[str]) -> ListFilter:
+def parse_list_filter(args: Sequence[str]) -> ListFilter:
     if not args:
         return ListFilter.default()
     if len(args) > 1:
         raise CommandError("usage: /list [category|week|expired]")
     token = args[0].lower()
     if token in {"week", "expired"}:
-        return ListFilter(window=token)
+        return ListFilter(window=cast(Literal["week", "expired"], token))
     if token in ALLOWED_CATEGORIES:
         return ListFilter(category=token)
     raise CommandError(

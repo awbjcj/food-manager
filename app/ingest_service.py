@@ -164,6 +164,7 @@ async def ingest_photo(
             )
             session.add(pantry_item)
             session.flush()
+            assert pantry_item.id is not None
             summary.inserted_item_ids.append(pantry_item.id)
             summary.inserted_item_names.append(pantry_item.raw_name)
             summary.inserted_item_expires_on.append(pantry_item.expires_on)
@@ -290,6 +291,7 @@ def ingest_text(
         )
         session.add(pantry_item)
         session.flush()
+        assert pantry_item.id is not None
         summary.inserted_ids.append(pantry_item.id)
         summary.inserted_names.append(pantry_item.raw_name)
         summary.inserted_count += 1

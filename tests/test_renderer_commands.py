@@ -56,8 +56,8 @@ def test_callback_parser():
         parse_callback("act:nope:1")
 
 
-def _summary(**kwargs):
-    values = dict(
+def _summary(**kwargs) -> IngestSummary:
+    values: dict = dict(
         receipt_id=1,
         inserted_food_count=2,
         inserted_item_ids=[42, 43],
@@ -73,7 +73,7 @@ def _summary(**kwargs):
         cost_micros_usd=18000,
     )
     values.update(kwargs)
-    return IngestSummary(**values)
+    return IngestSummary(**values)  # type: ignore[arg-type]
 
 
 def test_render_ingest_reply_variants():

@@ -49,7 +49,7 @@ def test_settings_load_from_env(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setenv("ALLOWED_TELEGRAM_USER_ID", "12345")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-api-key")
-    settings = Settings()
+    settings = Settings()  # type: ignore[call-arg]
     assert settings.telegram_bot_token == "test-token"
     assert settings.allowed_telegram_user_id == 12345
     assert settings.anthropic_model == "claude-sonnet-4-6"
@@ -105,16 +105,19 @@ def test_cache_user_correction_priority_and_scope(session):
     assert get_cached(session, 1, "whole milk") is None
     put_cached(session, 1, "whole milk", days=7, category="dairy", confidence=0.9)
     put_cached(session, 1, "whole milk", days=10, category="dairy", confidence=0.7)
-    assert get_cached(session, 1, "whole milk").days == 7
+    cached = get_cached(session, 1, "whole milk")
+    assert cached is not None and cached.days == 7
     write_user_correction(session, 1, "whole milk", days=5)
-    assert get_cached(session, 1, "whole milk").source == "user_correction"
+    cached = get_cached(session, 1, "whole milk")
+    assert cached is not None and cached.source == "user_correction"
     session.add(User(telegram_id=2, chat_id=2, created_at=datetime.now(timezone.utc)))
     session.commit()
     assert get_cached(session, 2, "whole milk") is None
 
 
 def test_shelf_life_defaults():
-    assert lookup_default("whole milk").days == 7
+    default = lookup_default("whole milk")
+    assert default is not None and default.days == 7
     assert lookup_default("kefir lime leaves") is None
 
 
@@ -130,7 +133,7 @@ def _parsed_item(name="Whole Milk 1 gal", days=7, conf=0.95, is_food=True):
     )
 
 
-def _llm_result(items, *, purchase_date=date(2026, 5, 26), confidence=0.9, cost=18000):
+def _llm_result(items, *, purchase_date: date | None = date(2026, 5, 26), confidence=0.9, cost=18000):
     return LLMResult(
         parse=ParseResult(
             purchase_date=purchase_date,
@@ -150,7 +153,8 @@ def test_fake_llm_client_returns_canned_result():
 def test_compute_shelf_life_cache_policy(session):
     decision = compute_shelf_life(session, user_id=1, parsed=_parsed_item())
     assert decision.days == 7 and decision.source == "llm"
-    assert get_cached(session, 1, "whole milk").days == 7
+    cached = get_cached(session, 1, "whole milk")
+    assert cached is not None and cached.days == 7
     write_user_correction(session, 1, "whole milk", days=5)
     decision = compute_shelf_life(session, user_id=1, parsed=_parsed_item(days=10))
     assert decision.days == 5 and decision.source == "cache"
@@ -222,12 +226,13 @@ def test_ingest_text_defaults_hints_and_failures(session):
     assert "1..730" in summary.failed_reasons[1]
     milk = session.exec(select(PantryItem).where(PantryItem.normalized_name == "whole milk")).first()
     assert milk.shelf_life_days == 5
-    assert get_cached(session, 1, "whole milk").days == 5
+    cached = get_cached(session, 1, "whole milk")
+    assert cached is not None and cached.days == 5
 
 
 def _item(session, name, days_from_today, *, today=date(2026, 5, 26), status="active",
           category="produce", snoozed_until=None, created_via="manual",
-          ingest_source="llm"):
+          ingest_source="llm") -> PantryItem:
     pantry_item = PantryItem(
         user_id=1,
         raw_name=name,
@@ -248,6 +253,7 @@ def _item(session, name, days_from_today, *, today=date(2026, 5, 26), status="ac
     session.add(pantry_item)
     session.commit()
     session.refresh(pantry_item)
+    assert pantry_item.id is not None
     return pantry_item
 
 
@@ -269,6 +275,7 @@ def test_pantry_list_filters_and_digest_due(session):
 def test_pantry_mutations_and_correction(session):
     today = date(2026, 5, 26)
     pantry_item = _item(session, "Whole Milk", 7, today=today, category="dairy")
+    assert pantry_item.id is not None
     snooze_item(session, user_id=1, item_id=pantry_item.id, today=today, days=2)
     session.refresh(pantry_item)
     assert pantry_item.snoozed_until == today + timedelta(days=2)
@@ -279,6 +286,7 @@ def test_pantry_mutations_and_correction(session):
     session.refresh(pantry_item)
     assert pantry_item.expires_on == today + timedelta(days=5)
     removed = _item(session, "Bad Import", 3, status="active")
+    assert removed.id is not None
     mark_removed(session, user_id=1, item_id=removed.id, today=today)
     with pytest.raises(ValueError):
         correct_item(session, user_id=1, item_id=removed.id, days=5, today=today)

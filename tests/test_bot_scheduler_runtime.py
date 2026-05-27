@@ -108,6 +108,7 @@ def test_authorize_and_get_user(session):
     )
     assert decision.allowed is True
     assert decision.created is True
+    assert decision.user is not None
     assert decision.user.tz == "America/Detroit"
     assert decision.user.digest_hour == 8
 
@@ -152,6 +153,7 @@ async def test_act_ate_callback_edits_digest_in_place(session, monkeypatch):
     )
     assert session.get(PantryItem, eaten_id).status == "eaten"
     cb.message.edit_text.assert_awaited_once()
+    assert cb.message.edit_text.await_args is not None
     edited_text = cb.message.edit_text.await_args.args[0]
     assert "Bread" in edited_text
     assert "Milk" not in edited_text
@@ -170,6 +172,7 @@ async def test_act_callback_clears_digest_when_no_items_remain(session, monkeypa
         now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
     )
     cb.message.edit_text.assert_awaited_once()
+    assert cb.message.edit_text.await_args is not None
     assert "clear" in cb.message.edit_text.await_args.args[0].lower()
 
 
@@ -231,14 +234,14 @@ def test_scheduler_payload_and_registration(session):
 
     scheduler = AsyncIOScheduler()
     user = session.get(User, 1)
-    schedule_user_digest(scheduler, user, send=lambda user_id: None)
+    schedule_user_digest(scheduler, user, send=AsyncMock())
     user.digest_hour = 9
-    schedule_user_digest(scheduler, user, send=lambda user_id: None)
+    schedule_user_digest(scheduler, user, send=AsyncMock())
     jobs = scheduler.get_jobs()
     assert len(jobs) == 1
     assert jobs[0].id == "digest:1"
     assert jobs[0].trigger.fields[jobs[0].trigger.FIELD_NAMES.index("hour")].expressions[0].first == 9
-    register_all_user_digests(scheduler, session_factory=lambda: session, send=lambda user_id: None)
+    register_all_user_digests(scheduler, session_factory=lambda: session, send=AsyncMock())
     assert {job.id for job in scheduler.get_jobs()} == {"digest:1"}
 
 

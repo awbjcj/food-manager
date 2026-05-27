@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.cache import get_cached, put_cached, write_user_correction
@@ -173,6 +174,9 @@ async def ingest_photo(
                 summary.low_confidence_inserted_ids.append(pantry_item.id)
             summary.inserted_food_count += 1
         session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise DuplicateReceipt(f"Receipt already logged (concurrent insert for file_id={photo_file_id})")
     except Exception:
         session.rollback()
         raise
@@ -196,6 +200,7 @@ _QTY_PREFIX_RE = re.compile(
     r"(gal|gallon|gallons|oz|lb|lbs|g|kg|ml|l|ct|count|pk|pack|bunch|dozen)?\s+",
     flags=re.IGNORECASE,
 )
+_DOZEN_PREFIX_RE = re.compile(r"^\s*dozen\s+", flags=re.IGNORECASE)
 
 
 def _parse_text_part(raw: str) -> tuple[str, Optional[int], float, Optional[str], Optional[str]]:
@@ -211,8 +216,13 @@ def _parse_text_part(raw: str) -> tuple[str, Optional[int], float, Optional[str]
 
     qty = 1.0
     unit: Optional[str] = None
-    qty_match = _QTY_PREFIX_RE.match(text)
-    if qty_match:
+    dozen_match = _DOZEN_PREFIX_RE.match(text)
+    qty_match = None if dozen_match else _QTY_PREFIX_RE.match(text)
+    if dozen_match:
+        qty = 12.0
+        unit = "ct"
+        text = text[dozen_match.end():]
+    elif qty_match:
         qty = float(qty_match.group(1))
         unit = qty_match.group(2).lower() if qty_match.group(2) else None
         if unit == "dozen":

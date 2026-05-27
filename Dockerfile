@@ -18,4 +18,4 @@ COPY alembic.ini ./
 ENV DATABASE_PATH=/data/food.db
 RUN mkdir -p /data
 
-CMD ["uv", "run", "python", "bin/run.py"]
+CMD ["uv", "run", "--no-sync", "python", "bin/run.py"]

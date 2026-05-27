@@ -152,12 +152,12 @@ class AnthropicLLMClient:
             text = _extract_json_text(message)
             try:
                 parsed = ParseResult.model_validate(json.loads(text))
-                if not parsed.items:
-                    raise ValueError("empty items")
-                return LLMResult(
-                    parse=parsed,
-                    cost_micros_usd=None if unknown_cost else total_cost,
-                )
+                if parsed.items or attempt == 1:
+                    return LLMResult(
+                        parse=parsed,
+                        cost_micros_usd=None if unknown_cost else total_cost,
+                    )
+                raise ValueError("empty items")
             except Exception as exc:
                 if attempt == 1:
                     log.warning(

@@ -1,2 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.uv-cache/
+.pytest_cache/
+*.egg-info/
+
+# Secrets & local state
+.env
+food.db
+food.db*
+
+# SQLite migration backups
+*.db.backup-*
+
+# Private test fixtures
+tests/fixtures/private_receipts/
+
+# Local workspace state
 .omc/
 .worktrees/
+
+# IDE
+.vscode/
+.idea/
+*.swp

@@ -43,7 +43,6 @@ from app.renderer import (
     render_stats,
 )
 
-
 DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8
 ALLOWED_TELEGRAM_USER_ID: int = 0
@@ -222,7 +221,9 @@ async def handle_list(
             await msg.answer(str(exc))
             return
         today = now_provider(user.tz).date()
-        items = list_active(session, user_id=user.telegram_id, f=list_filter, today=today)
+        items = list_active(
+            session, user_id=user.telegram_id, f=list_filter, today=today
+        )
         await msg.answer(render_list(items, today=today))
 
 
@@ -299,7 +300,11 @@ async def _terminal_cmd(
         if result.applied:
             log.info(
                 "item_action_applied",
-                extra={"user_id": user.telegram_id, "item_id": item_id, "action": action_word},
+                extra={
+                    "user_id": user.telegram_id,
+                    "item_id": item_id,
+                    "action": action_word,
+                },
             )
             await msg.answer(f"#{item_id} marked {action_word}")
         elif result.was_already:
@@ -391,7 +396,11 @@ async def handle_snooze(
         if result.applied:
             log.info(
                 "item_action_applied",
-                extra={"user_id": user.telegram_id, "item_id": item_id, "action": "snooze"},
+                extra={
+                    "user_id": user.telegram_id,
+                    "item_id": item_id,
+                    "action": "snooze",
+                },
             )
             await msg.answer(f"#{item_id} snoozed for {days}d")
         else:
@@ -432,7 +441,7 @@ async def handle_correct(
         await msg.answer(
             f"#{item_id} {pantry_item.raw_name}: shelf life set to {days}d, "
             f"expires {pantry_item.expires_on}. Future estimates for "
-            f"\"{pantry_item.normalized_name}\" will use this value."
+            f'"{pantry_item.normalized_name}" will use this value.'
         )
 
 
@@ -610,7 +619,9 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             )
             await _refresh_digest_message(cb, session, user.telegram_id, today)
         await cb.answer(
-            f"#{item_id} -> {action.verb}" if result.applied else f"#{item_id} already updated"
+            f"#{item_id} -> {action.verb}"
+            if result.applied
+            else f"#{item_id} already updated"
         )
 
 
@@ -619,7 +630,9 @@ async def _refresh_digest_message(cb, session, user_id: int, today) -> None:
     if remaining:
         rendered = render_digest(remaining, today=today)
         keyboard = to_aiogram_keyboard(
-            build_digest_keyboard(rendered.rendered_item_ids, has_more=rendered.has_more)
+            build_digest_keyboard(
+                rendered.rendered_item_ids, has_more=rendered.has_more
+            )
         )
         try:
             await cb.message.edit_text(rendered.text, reply_markup=keyboard)
@@ -642,7 +655,9 @@ def to_aiogram_keyboard(rows: list[list[CallbackButton]]) -> InlineKeyboardMarku
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text=button.text, callback_data=button.callback_data)
+                InlineKeyboardButton(
+                    text=button.text, callback_data=button.callback_data
+                )
                 for button in row
             ]
             for row in rows
@@ -681,7 +696,9 @@ def build_dispatcher(
         await handle_tz(message, session_factory=session_factory, reschedule=reschedule)
 
     async def on_digest_at(message):
-        await handle_digest_at(message, session_factory=session_factory, reschedule=reschedule)
+        await handle_digest_at(
+            message, session_factory=session_factory, reschedule=reschedule
+        )
 
     async def on_list(message):
         await handle_list(
@@ -765,7 +782,9 @@ def build_dispatcher(
         )
 
     async def on_callback(callback):
-        await handle_callback(callback, session_factory=session_factory, now_provider=now_provider)
+        await handle_callback(
+            callback, session_factory=session_factory, now_provider=now_provider
+        )
 
     dispatcher.message.register(on_start, Command("start"))
     dispatcher.message.register(on_tz, Command("tz"))

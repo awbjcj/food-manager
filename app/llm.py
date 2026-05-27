@@ -109,7 +109,7 @@ def _cost_micros(message, model: str) -> int | None:
         return None
 
 
-class AnthropicLLMClient:
+class AnthropicLLMClient(LLMClient):
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
         self._sdk = sdk
         self._model = model

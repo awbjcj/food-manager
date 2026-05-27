@@ -21,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import anthropic
+from anthropic import AsyncAnthropic
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -29,9 +29,10 @@ import app.bot as bot_mod
 from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
 from app.db import make_engine, make_session_factory
-from app.llm import AnthropicLLMClient
+from app.llm import AnthropicLLMClient, AnthropicTextLLMClient
 from app.scheduler import (
     register_all_user_digests,
+    register_sweep_expired_pendings,
     schedule_user_digest,
     send_digest_with_retry,
 )
@@ -81,8 +82,9 @@ async def _amain(settings: Settings) -> None:
     log.info("migration_ok")
 
     bot = Bot(token=settings.telegram_bot_token)
-    sdk = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    sdk = AsyncAnthropic(api_key=settings.anthropic_api_key)
     llm = AnthropicLLMClient(sdk=sdk, model=settings.anthropic_model)
+    text_llm = AnthropicTextLLMClient(sdk=sdk, model=settings.anthropic_text_model)
     bot_mod.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
 
     scheduler = AsyncIOScheduler()
@@ -96,6 +98,7 @@ async def _amain(settings: Settings) -> None:
         )
 
     register_all_user_digests(scheduler, session_factory=session_factory, send=send)
+    register_sweep_expired_pendings(scheduler, session_factory=session_factory)
 
     def reschedule(user) -> None:
         schedule_user_digest(scheduler, user, send=send)
@@ -104,6 +107,7 @@ async def _amain(settings: Settings) -> None:
         bot=bot,
         session_factory=session_factory,
         llm=llm,
+        text_llm=text_llm,
         now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
         on_user_created=reschedule,
         reschedule=reschedule,

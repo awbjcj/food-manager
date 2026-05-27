@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Awaitable, Callable, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -13,6 +13,7 @@ from sqlmodel import Session, select
 from app.bot import to_aiogram_keyboard
 from app.models import PantryItem, User
 from app.pantry_service import list_digest_due
+from app.pending_service import sweep_expired
 from app.renderer import build_digest_keyboard, render_digest
 
 
@@ -152,3 +153,30 @@ def register_all_user_digests(
         users = list(session.exec(select(User)).all())
     for user in users:
         schedule_user_digest(scheduler, user, send=send)
+
+
+def _sweep_job(session_factory: SessionFactory) -> None:
+    try:
+        with session_factory() as session:
+            swept = sweep_expired(session, now=datetime.now(timezone.utc))
+            if swept:
+                log.info("pending_swept", extra={"count": swept})
+    except Exception as exc:
+        log.warning(
+            "pending_sweep_failed",
+            extra={"error_class": type(exc).__name__},
+        )
+
+
+def register_sweep_expired_pendings(
+    scheduler: AsyncIOScheduler, *, session_factory: SessionFactory
+) -> None:
+    scheduler.add_job(
+        _sweep_job,
+        "cron",
+        minute="*/5",
+        timezone="UTC",
+        args=[session_factory],
+        id="sweep_expired_pendings",
+        replace_existing=True,
+    )

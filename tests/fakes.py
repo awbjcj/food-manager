@@ -12,7 +12,12 @@ class FakeLLMClient:
     raise_n_times: int = 0
     _raises: int = 0
 
-    async def extract_items_from_image(self, image_bytes: bytes) -> LLMResult:
+    async def extract_items_from_image(
+        self,
+        image_bytes: bytes,
+        *,
+        image_media_type: str | None = None,
+    ) -> LLMResult:
         self.calls.append(image_bytes)
         if self._raises < self.raise_n_times:
             self._raises += 1

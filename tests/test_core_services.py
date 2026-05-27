@@ -1,10 +1,10 @@
 import asyncio
 import base64
-import json
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 from sqlmodel import SQLModel, Session, create_engine, select
 
 from app.cache import get_cached, put_cached, write_user_correction
@@ -329,14 +329,14 @@ def test_compute_stats(session):
 
 
 class _StubMessage:
-    def __init__(self, text: str, usage: dict):
-        self.content = [MagicMock(type="text", text=text)]
+    def __init__(self, tool_input: dict, usage: dict):
+        self.content = [MagicMock(type="tool_use", input=tool_input)]
         self.usage = MagicMock(input_tokens=usage["in"], output_tokens=usage["out"])
 
 
 @pytest.mark.asyncio
 async def test_anthropic_client_parse_retry_transport_retry_and_unknown_cost():
-    good = json.dumps({
+    good = {
         "purchase_date": "2026-05-26",
         "purchase_date_confidence": 0.9,
         "items": [{
@@ -348,22 +348,62 @@ async def test_anthropic_client_parse_retry_transport_retry_and_unknown_cost():
             "est_shelf_life_days": 7,
             "confidence": 0.95,
         }],
-    })
+    }
     sdk = MagicMock()
     sdk.messages.create = AsyncMock(side_effect=[
         RuntimeError("temporary"),
-        _StubMessage("not json", {"in": 100, "out": 10}),
         _StubMessage(good, {"in": 100, "out": 10}),
     ])
     sleep = AsyncMock()
     client = AnthropicLLMClient(sdk=sdk, model="claude-sonnet-4-6", sleep=sleep)
-    result = await client.extract_items_from_image(b"\xff\xd8jpeg")
+    result = await client.extract_items_from_image(b"\xff\xd8\xffjpeg")
     assert result.parse.items[0].name == "Whole Milk 1 gal"
-    assert result.cost_micros_usd == 900
+    assert result.cost_micros_usd == 450
     assert sleep.await_count == 1
     content = sdk.messages.create.call_args.kwargs["messages"][0]["content"]
-    assert content[0]["source"]["data"] == base64.b64encode(b"\xff\xd8jpeg").decode()
+    assert content[0]["source"]["data"] == base64.b64encode(b"\xff\xd8\xffjpeg").decode()
+    assert content[0]["source"]["media_type"] == "image/jpeg"
 
     sdk2 = MagicMock()
     sdk2.messages.create = AsyncMock(return_value=_StubMessage(good, {"in": 100, "out": 10}))
     assert (await AnthropicLLMClient(sdk2, "future-model").extract_items_from_image(b"x")).cost_micros_usd is None
+
+
+@pytest.mark.asyncio
+async def test_anthropic_client_validates_purchase_date_confidence():
+    bad_confidence = {
+        "purchase_date": "2026-05-26",
+        "purchase_date_confidence": 85,
+        "items": [{
+            "is_food": True,
+            "name": "Whole Milk 1 gal",
+            "qty": 1.0,
+            "unit": "gal",
+            "category": "dairy",
+            "est_shelf_life_days": 7,
+            "confidence": 0.95,
+        }],
+    }
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(return_value=_StubMessage(bad_confidence, {"in": 100, "out": 10}))
+
+    with pytest.raises(ValidationError):
+        await AnthropicLLMClient(sdk=sdk, model="claude-sonnet-4-6").extract_items_from_image(b"\xff\xd8\xffjpeg")
+
+
+@pytest.mark.asyncio
+async def test_anthropic_client_preserves_png_media_type():
+    good = {
+        "purchase_date": None,
+        "purchase_date_confidence": 0.0,
+        "items": [],
+    }
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(return_value=_StubMessage(good, {"in": 100, "out": 10}))
+
+    await AnthropicLLMClient(sdk=sdk, model="claude-sonnet-4-6").extract_items_from_image(
+        b"\x89PNG\r\n\x1a\npng",
+    )
+
+    content = sdk.messages.create.call_args.kwargs["messages"][0]["content"]
+    assert content[0]["source"]["media_type"] == "image/png"

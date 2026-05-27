@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import logging
 from datetime import date
 from typing import Any, Literal, Optional, Protocol
@@ -28,7 +27,7 @@ class ParsedItem(BaseModel):
 
 class ParseResult(BaseModel):
     purchase_date: Optional[date] = None
-    purchase_date_confidence: float = 0.0
+    purchase_date_confidence: float = Field(ge=0.0, le=1.0, default=0.0)
     items: list[ParsedItem]
 
 
@@ -39,7 +38,12 @@ class LLMResult(BaseModel):
 
 
 class LLMClient(Protocol):
-    async def extract_items_from_image(self, image_bytes: bytes) -> LLMResult: ...
+    async def extract_items_from_image(
+        self,
+        image_bytes: bytes,
+        *,
+        image_media_type: str | None = None,
+    ) -> LLMResult: ...
 
 
 log = logging.getLogger(__name__)
@@ -69,15 +73,24 @@ returned line item:
 TODO(user): tune the example shelf-life values above to your kitchen.
 """
 
+_PARSE_RECEIPT_TOOL = {
+    "name": "parse_receipt",
+    "description": "Submit the parsed receipt data.",
+    "input_schema": ParseResult.model_json_schema(),
+}
 
 _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "claude-sonnet-4-6": {"input": 3, "output": 15},
 }
 
 
-def _extract_json_text(message) -> str:
-    parts = [b.text for b in message.content if getattr(b, "type", None) == "text"]
-    return "".join(parts).strip()
+def _extract_tool_input(message) -> dict:
+    for block in message.content:
+        if getattr(block, "type", None) == "tool_use":
+            return block.input  # type: ignore[return-value]
+    raise ValueError(
+        f"no tool_use block in response; stop_reason={getattr(message, 'stop_reason', '?')}"
+    )
 
 
 def _cost_micros(message, model: str) -> int | None:
@@ -109,6 +122,8 @@ class AnthropicLLMClient:
                     model=self._model,
                     max_tokens=2048,
                     system=SYSTEM_PROMPT,
+                    tools=[_PARSE_RECEIPT_TOOL],
+                    tool_choice={"type": "tool", "name": "parse_receipt"},
                     messages=[{"role": "user", "content": user_content}],
                 )
             except Exception as exc:
@@ -125,55 +140,48 @@ class AnthropicLLMClient:
                 await self._sleep(2 ** attempt)
         raise RuntimeError("unreachable")
 
-    async def extract_items_from_image(self, image_bytes: bytes) -> LLMResult:
+    async def extract_items_from_image(
+        self,
+        image_bytes: bytes,
+        *,
+        image_media_type: str | None = None,
+    ) -> LLMResult:
         encoded = base64.b64encode(image_bytes).decode()
         user_content = [
             {
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": "image/jpeg",
+                    "media_type": image_media_type or _detect_media_type(image_bytes),
                     "data": encoded,
                 },
             },
             {"type": "text", "text": "Parse this receipt."},
         ]
 
-        total_cost = 0
-        unknown_cost = False
-        for attempt in (0, 1):
-            message = await self._create_message(user_content)
-            cost = _cost_micros(message, self._model)
-            if cost is None:
-                unknown_cost = True
-            else:
-                total_cost += cost
+        message = await self._create_message(user_content)
+        cost = _cost_micros(message, self._model)
 
-            text = _extract_json_text(message)
-            try:
-                parsed = ParseResult.model_validate(json.loads(text))
-                if parsed.items or attempt == 1:
-                    return LLMResult(
-                        parse=parsed,
-                        cost_micros_usd=None if unknown_cost else total_cost,
-                    )
-                raise ValueError("empty items")
-            except Exception as exc:
-                if attempt == 1:
-                    log.warning(
-                        "llm_json_validation_failed_final",
-                        extra={"error_class": type(exc).__name__},
-                    )
-                    raise
-                user_content = [
-                    *user_content,
-                    {
-                        "type": "text",
-                        "text": (
-                            "Your last response did not match the schema "
-                            f"(error: {type(exc).__name__}). "
-                            "Return ONLY valid JSON matching the schema."
-                        ),
-                    },
-                ]
-        raise RuntimeError("unreachable")
+        try:
+            parsed = ParseResult.model_validate(_extract_tool_input(message))
+        except Exception as exc:
+            log.warning(
+                "llm_json_validation_failed_final",
+                extra={"error_class": type(exc).__name__, "error": str(exc)},
+            )
+            raise
+
+        return LLMResult(
+            parse=parsed,
+            cost_micros_usd=cost,
+        )
+
+
+def _detect_media_type(image_bytes: bytes) -> str:
+    if image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/jpeg"

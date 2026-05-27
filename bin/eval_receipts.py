@@ -24,13 +24,25 @@ FIXTURES = Path("tests/fixtures/private_receipts")
 EXPECTED = Path("tests/fixtures/expected")
 
 
+def _guess_media_type(photo: Path) -> str:
+    suffix = photo.suffix.lower()
+    if suffix == ".png":
+        return "image/png"
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    return "image/jpeg"
+
+
 async def _evaluate_one(client: AnthropicLLMClient, photo: Path) -> tuple[bool, str]:
     expected_path = EXPECTED / (photo.stem + ".json")
     if not expected_path.exists():
         return False, f"no expected file at {expected_path}"
     expected = json.loads(expected_path.read_text())
 
-    result = await client.extract_items_from_image(photo.read_bytes())
+    result = await client.extract_items_from_image(
+        photo.read_bytes(),
+        image_media_type=_guess_media_type(photo),
+    )
     actual_items = [
         {"name": item.name, "est_shelf_life_days": item.est_shelf_life_days}
         for item in result.parse.items

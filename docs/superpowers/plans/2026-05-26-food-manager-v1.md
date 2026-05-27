@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship a single-user Telegram bot that ingests grocery receipt photos via a vision LLM, tracks expiry, and sends a daily digest with one-tap action buttons — deployable to Railway as one long-running Python process.
+**Goal:** Ship a single-user Telegram bot that ingests grocery receipt photos via a vision LLM, tracks expiry, and sends a daily digest with one-tap action buttons — deployable as one long-running Python process.
 
-**Architecture:** One process. aiogram (long-polling) + APScheduler (`AsyncIOScheduler`) share the event loop. SQLModel over SQLite on a mounted volume; Alembic for migrations. One vision call to Claude per receipt with structured-JSON output via Pydantic schema. Two thin Protocols (`LLMClient`, `BotClient`) exist solely so tests inject fakes — no other abstractions.
+**Architecture:** One process. aiogram (long-polling) + APScheduler (`AsyncIOScheduler`) share the event loop. SQLModel over SQLite on a mounted volume; Alembic for migrations. One primary vision call to Claude per receipt, with bounded retries for transport/schema failures, returns structured JSON validated by Pydantic. Two thin Protocols (`LLMClient`, `BotClient`) exist solely so tests inject fakes — no other abstractions.
 
-**Tech Stack:** Python 3.12 / uv · aiogram 3.x · SQLModel + SQLAlchemy 2.x (async sessions) · Alembic · APScheduler 3.x · Anthropic Python SDK · pydantic-settings · pytest + pytest-asyncio.
+**Tech Stack:** Python 3.12 / uv · aiogram 3.x · SQLModel + SQLAlchemy 2.x (sync sessions) · Alembic · APScheduler 3.x · Anthropic Python SDK · pydantic-settings · pytest + pytest-asyncio.
 
 **Reference spec:** `docs/superpowers/specs/2026-05-26-food-manager-v1-design.md` — every locked decision, table column, command, and confidence threshold cited below comes from there.
 
@@ -49,7 +49,6 @@ dependencies = [
     "pydantic>=2.7,<3.0",
     "pydantic-settings>=2.4,<3.0",
     "sqlmodel>=0.0.22",
-    "aiosqlite>=0.20",
 ]
 
 [dependency-groups]
@@ -82,10 +81,10 @@ __pycache__/
 # Secrets & local state
 .env
 food.db
-food.db-*
+food.db*
 
 # SQLite migration backups
-food.db.backup-*
+*.db.backup-*
 
 # Private test fixtures
 tests/fixtures/private_receipts/
@@ -335,9 +334,9 @@ Expected: ImportError on `from app.models import ...`.
 # app/models.py
 from __future__ import annotations
 from datetime import date, datetime
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
-from sqlalchemy import Column, Index, UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -370,7 +369,7 @@ class Receipt(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.telegram_id", index=True)
     photo_file_id: str
     purchase_date: date
-    purchase_date_source: PurchaseDateSource
+    purchase_date_source: str
     scanned_at: datetime
     llm_cost_micros_usd: Optional[int] = None
 
@@ -391,12 +390,12 @@ class PantryItem(SQLModel, table=True):
     unit: Optional[str] = None
     purchased_on: date
     shelf_life_days: int
-    shelf_life_source: ShelfLifeSource
-    ingest_shelf_life_source: IngestShelfLifeSource
+    shelf_life_source: str
+    ingest_shelf_life_source: str
     expires_on: date
-    status: Status = "active"
+    status: str = "active"
     snoozed_until: Optional[date] = None
-    created_via: CreatedVia
+    created_via: str
     source_receipt_id: Optional[int] = Field(default=None, foreign_key="receipt.id")
     created_at: datetime
 
@@ -408,7 +407,7 @@ class ShelfLifeCache(SQLModel, table=True):
     category: Optional[str] = None
     confidence: float
     learned_at: datetime
-    source: CacheSource = "llm"
+    source: str = "llm"
 ```
 
 - [ ] **Step 4: Run tests, expect PASS**
@@ -425,14 +424,15 @@ git commit -m "feat(models): SQLModel tables for User, Receipt, PantryItem, Shel
 - per-user composite PK on ShelfLifeCache
 - (user_id, photo_file_id) unique on Receipt
 - digest/list/category compound indexes on PantryItem
-- explicit Literal types per spec §5
+- explicit allowed-value aliases/constants per spec §5; SQLModel table
+  columns use mappable `str` fields
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 1.2 — DB session factory (sync + async)
+### Task 1.2 — DB session factory (sync)
 
 **Files:**
 - Create: `app/db.py`
@@ -608,13 +608,22 @@ def test_alembic_upgrade_creates_all_tables(tmp_path, monkeypatch):
     ).fetchall()}
     assert {"user", "receipt", "pantryitem", "shelflifecache"}.issubset(tables)
 
-    # uniqueness on Receipt(user_id, photo_file_id)
-    indexes = {r[0] for r in cur.execute(
-        "SELECT name FROM sqlite_master WHERE type='index'"
+    indexes = {r[1]: bool(r[2]) for r in cur.execute(
+        "PRAGMA index_list('receipt')"
     ).fetchall()}
-    assert "uq_receipt_user_photo" in indexes
-    assert "ix_pantry_user_status_expires" in indexes
-    assert "ix_pantry_user_status_category_expires" in indexes
+    unique_indexes = [name for name, is_unique in indexes.items() if is_unique]
+    unique_columns = {
+        tuple(r[2] for r in cur.execute(f"PRAGMA index_info('{name}')").fetchall())
+        for name in unique_indexes
+    }
+    assert ("user_id", "photo_file_id") in unique_columns
+
+    pantry_indexes = {r[0] for r in cur.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='pantryitem'"
+    ).fetchall()}
+    assert "ix_pantry_user_status_expires" in pantry_indexes
+    assert "ix_pantry_user_status_category_expires" in pantry_indexes
+    assert "ix_pantry_source_receipt" in pantry_indexes
     con.close()
 ```
 
@@ -623,7 +632,7 @@ def test_alembic_upgrade_creates_all_tables(tmp_path, monkeypatch):
 Run: `uv run pytest tests/test_migrations.py -v`
 Expected: 1 passed.
 
-If autogenerate missed the named index/unique constraint names, hand-edit `migrations/versions/0001_initial.py` to add them with the names the test asserts.
+If autogenerate missed the named PantryItem indexes, hand-edit `migrations/versions/0001_initial.py` to add them. Do not assert the SQLite auto-index name for `Receipt(user_id, photo_file_id)`; SQLite may expose that unique constraint as `sqlite_autoindex_*`.
 
 - [ ] **Step 7: Commit**
 
@@ -1128,6 +1137,7 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```python
 # tests/test_llm_anthropic.py
 import base64
+import asyncio
 import json
 import pytest
 from unittest.mock import AsyncMock, MagicMock
@@ -1202,6 +1212,72 @@ async def test_anthropic_client_gives_up_after_one_correction():
     with pytest.raises(Exception):
         await client.extract_items_from_image(b"img")
     assert sdk.messages.create.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_anthropic_client_retries_empty_items_once():
+    empty = json.dumps({
+        "purchase_date": None,
+        "purchase_date_confidence": 0.0,
+        "items": [],
+    })
+    good = json.dumps({
+        "purchase_date": None,
+        "purchase_date_confidence": 0.0,
+        "items": [{"is_food": True, "name": "Milk", "qty": 1.0,
+                   "unit": None, "category": "dairy",
+                   "est_shelf_life_days": 7, "confidence": 0.9}],
+    })
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(side_effect=[
+        _StubMessage(empty, {"in": 100, "out": 10}),
+        _StubMessage(good, {"in": 100, "out": 10}),
+    ])
+    client = AnthropicLLMClient(sdk=sdk, model="claude-sonnet-4-6")
+    res = await client.extract_items_from_image(b"img")
+    assert res.parse.items[0].name == "Milk"
+    assert sdk.messages.create.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_anthropic_client_retries_transport_errors_twice():
+    good = json.dumps({
+        "purchase_date": None,
+        "purchase_date_confidence": 0.0,
+        "items": [{"is_food": True, "name": "Milk", "qty": 1.0,
+                   "unit": None, "category": "dairy",
+                   "est_shelf_life_days": 7, "confidence": 0.9}],
+    })
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(side_effect=[
+        RuntimeError("temporary"),
+        RuntimeError("still temporary"),
+        _StubMessage(good, {"in": 100, "out": 10}),
+    ])
+    sleep = AsyncMock()
+    client = AnthropicLLMClient(sdk=sdk, model="claude-sonnet-4-6", sleep=sleep)
+    res = await client.extract_items_from_image(b"img")
+    assert res.parse.items[0].name == "Milk"
+    assert sdk.messages.create.call_count == 3
+    assert sleep.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_unknown_model_cost_is_unavailable():
+    good = json.dumps({
+        "purchase_date": None,
+        "purchase_date_confidence": 0.0,
+        "items": [{"is_food": True, "name": "Milk", "qty": 1.0,
+                   "unit": None, "category": "dairy",
+                   "est_shelf_life_days": 7, "confidence": 0.9}],
+    })
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(
+        return_value=_StubMessage(good, {"in": 100, "out": 10})
+    )
+    client = AnthropicLLMClient(sdk=sdk, model="future-model")
+    res = await client.extract_items_from_image(b"img")
+    assert res.cost_micros_usd is None
 ```
 
 - [ ] **Step 2: Run test, expect FAIL**
@@ -1213,6 +1289,7 @@ Expected: ImportError on `AnthropicLLMClient`.
 
 ```python
 # append at end of app/llm.py
+import asyncio
 import base64
 import json
 import logging
@@ -1246,10 +1323,11 @@ TODO(user): tune the example shelf-life values above to your kitchen.
 """
 
 
-# Anthropic message pricing (micros USD per token) — claude-sonnet-4-6.
-# TODO(user): update if pricing changes. Used only for /stats accounting.
-_PRICE_IN_MICROS_PER_TOKEN = 3
-_PRICE_OUT_MICROS_PER_TOKEN = 15
+# Anthropic message pricing (micros USD per token), keyed by model.
+# TODO(user): update if pricing changes. Used only for advisory /stats accounting.
+_PRICE_MICROS_PER_TOKEN_BY_MODEL = {
+    "claude-sonnet-4-6": {"input": 3, "output": 15},
+}
 
 
 def _extract_json_text(message) -> str:
@@ -1257,21 +1335,42 @@ def _extract_json_text(message) -> str:
     return "".join(parts).strip()
 
 
-def _cost_micros(message) -> int | None:
+def _cost_micros(message, model: str) -> int | None:
+    price = _PRICE_MICROS_PER_TOKEN_BY_MODEL.get(model)
+    if price is None:
+        return None
     u = getattr(message, "usage", None)
     if u is None:
         return None
     try:
-        return (u.input_tokens * _PRICE_IN_MICROS_PER_TOKEN
-                + u.output_tokens * _PRICE_OUT_MICROS_PER_TOKEN)
+        return (u.input_tokens * price["input"]
+                + u.output_tokens * price["output"])
     except Exception:
         return None
 
 
 class AnthropicLLMClient:
-    def __init__(self, sdk, model: str):
+    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
         self._sdk = sdk
         self._model = model
+        self._sleep = sleep
+
+    async def _create_message(self, user_content):
+        for attempt in range(3):
+            try:
+                return await self._sdk.messages.create(
+                    model=self._model, max_tokens=2048,
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": user_content}],
+                )
+            except Exception as e:
+                if attempt == 2:
+                    log.warning("llm_transport_failed_final",
+                                extra={"error_class": type(e).__name__})
+                    raise
+                log.warning("llm_transport_failed_retrying",
+                            extra={"error_class": type(e).__name__})
+                await self._sleep(2 ** attempt)
 
     async def extract_items_from_image(self, image_bytes: bytes) -> LLMResult:
         b64 = base64.b64encode(image_bytes).decode()
@@ -1282,22 +1381,23 @@ class AnthropicLLMClient:
         ]
 
         total_cost = 0
+        unknown_cost = False
         for attempt in (0, 1):
-            msg = await self._sdk.messages.create(
-                model=self._model, max_tokens=2048,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_content}],
-            )
-            c = _cost_micros(msg)
+            msg = await self._create_message(user_content)
+            c = _cost_micros(msg, self._model)
             if c is not None:
                 total_cost += c
+            else:
+                unknown_cost = True
 
             text = _extract_json_text(msg)
             try:
                 data = json.loads(text)
                 parse = ParseResult.model_validate(data)
+                if not parse.items:
+                    raise ValueError("empty items")
                 return LLMResult(parse=parse,
-                                 cost_micros_usd=total_cost or None)
+                                 cost_micros_usd=None if unknown_cost else total_cost)
             except Exception as e:
                 if attempt == 1:
                     log.warning("llm_json_validation_failed_final",
@@ -1316,18 +1416,18 @@ class AnthropicLLMClient:
 - [ ] **Step 4: Run tests, expect PASS**
 
 Run: `uv run pytest tests/test_llm_anthropic.py -v`
-Expected: 3 passed.
+Expected: 6 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add app/llm.py tests/test_llm_anthropic.py
-git commit -m "feat(llm): AnthropicLLMClient with one corrective retry on bad JSON
+git commit -m "feat(llm): AnthropicLLMClient with bounded transport and schema retries
 
-Single vision call returning structured JSON parsed against
-ParseResult. On malformed/invalid output, retries once with a
-correction message appended; gives up after the second failure
-per spec §6.3.
+Primary vision call returns structured JSON parsed against ParseResult.
+Transport/API failures retry twice with backoff. Malformed, invalid, or
+empty-item output retries once with a correction message appended. Cost
+is advisory and unavailable for unknown model pricing.
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
@@ -1698,54 +1798,55 @@ async def ingest_photo(session: Session, llm: LLMClient, *,
     if not to_insert:
         return summary
 
-    # Atomic write: Receipt + PantryItems + cache rows.
-    receipt = Receipt(
-        user_id=user_id, photo_file_id=photo_file_id,
-        purchase_date=purchase_date,
-        purchase_date_source=purchase_date_source,
-        scanned_at=datetime.now(timezone.utc),
-        llm_cost_micros_usd=llm_result.cost_micros_usd,
-    )
-    session.add(receipt)
-    session.flush()  # populate receipt.id without committing
-
-    for item, is_low_conf in to_insert:
-        decision = compute_shelf_life(session, user_id=user_id, parsed=item)
-        ingest_source = "cache" if decision.cache_was_hit else (
-            "llm" if not is_low_conf else "llm"
+    try:
+        # Atomic write: Receipt + PantryItems + cache rows.
+        receipt = Receipt(
+            user_id=user_id, photo_file_id=photo_file_id,
+            purchase_date=purchase_date,
+            purchase_date_source=purchase_date_source,
+            scanned_at=datetime.now(timezone.utc),
+            llm_cost_micros_usd=llm_result.cost_micros_usd,
         )
-        # Per spec: medium confidence items are inserted but DO NOT
-        # create a new LLM cache row; the cache write was suppressed
-        # inside compute_shelf_life (confidence < 0.6).
-        norm = normalize(item.name)
-        pi = PantryItem(
-            user_id=user_id,
-            raw_name=item.name,
-            normalized_name=norm,
-            category=item.category,
-            qty=item.qty,
-            unit=item.unit,
-            purchased_on=purchase_date,
-            shelf_life_days=decision.days,
-            shelf_life_source="cache" if decision.cache_was_hit else "llm",
-            ingest_shelf_life_source="cache" if decision.cache_was_hit else "llm",
-            expires_on=_add_days(purchase_date, decision.days),
-            status="active",
-            created_via="receipt",
-            source_receipt_id=receipt.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        session.add(pi)
-        session.flush()
-        summary.inserted_item_ids.append(pi.id)
-        summary.inserted_item_names.append(pi.raw_name)
-        summary.inserted_item_expires_on.append(pi.expires_on)
-        summary.inserted_item_shelf_life_days.append(pi.shelf_life_days)
-        if is_low_conf:
-            summary.low_confidence_inserted_ids.append(pi.id)
-        summary.inserted_food_count += 1
+        session.add(receipt)
+        session.flush()  # populate receipt.id without committing
 
-    session.commit()
+        for item, is_low_conf in to_insert:
+            decision = compute_shelf_life(session, user_id=user_id, parsed=item)
+            # Per spec: medium confidence items are inserted but DO NOT
+            # create a new LLM cache row; the cache write was suppressed
+            # inside compute_shelf_life (confidence < 0.6).
+            norm = normalize(item.name)
+            pi = PantryItem(
+                user_id=user_id,
+                raw_name=item.name,
+                normalized_name=norm,
+                category=item.category,
+                qty=item.qty,
+                unit=item.unit,
+                purchased_on=purchase_date,
+                shelf_life_days=decision.days,
+                shelf_life_source="cache" if decision.cache_was_hit else "llm",
+                ingest_shelf_life_source="cache" if decision.cache_was_hit else "llm",
+                expires_on=_add_days(purchase_date, decision.days),
+                status="active",
+                created_via="receipt",
+                source_receipt_id=receipt.id,
+                created_at=datetime.now(timezone.utc),
+            )
+            session.add(pi)
+            session.flush()
+            summary.inserted_item_ids.append(pi.id)
+            summary.inserted_item_names.append(pi.raw_name)
+            summary.inserted_item_expires_on.append(pi.expires_on)
+            summary.inserted_item_shelf_life_days.append(pi.shelf_life_days)
+            if is_low_conf:
+                summary.low_confidence_inserted_ids.append(pi.id)
+            summary.inserted_food_count += 1
+
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     summary.receipt_id = receipt.id
     return summary
 
@@ -1839,6 +1940,15 @@ def test_multiple_items_separated_by_commas(session):
                           today=date(2026, 5, 26))
     assert summary.inserted_count == 2
     assert summary.failed_parts == ["dragonfruit"]
+
+
+def test_invalid_explicit_hint_reports_failure(session):
+    summary = ingest_text(session, user_id=1,
+                          text="whole milk 999d",
+                          today=date(2026, 5, 26))
+    assert summary.inserted_count == 0
+    assert summary.failed_parts == ["whole milk 999d"]
+    assert "1..730" in summary.failed_reasons[0]
 ```
 
 - [ ] **Step 2: Run test, expect FAIL**
@@ -1865,7 +1975,7 @@ class TextIngestSummary:
     failed_reasons: list[str] = field(default_factory=list)
 
 
-_HINT_RE = re.compile(r"\s+(\d{1,3})\s*d\s*$", flags=re.IGNORECASE)
+_HINT_RE = re.compile(r"\s+(\d+)\s*d\s*$", flags=re.IGNORECASE)
 _QTY_PREFIX_RE = re.compile(
     r"^\s*(\d+(?:\.\d+)?)\s*"
     r"(gal|gallon|gallons|oz|lb|lbs|g|kg|ml|l|ct|count|pk|pack|bunch|dozen)?\s+",
@@ -1873,8 +1983,8 @@ _QTY_PREFIX_RE = re.compile(
 )
 
 
-def _parse_text_part(raw: str) -> tuple[str, Optional[int], float, Optional[str]]:
-    """Return (item_text_without_hint, hint_days_or_None, qty, unit_or_None)."""
+def _parse_text_part(raw: str) -> tuple[str, Optional[int], float, Optional[str], Optional[str]]:
+    """Return (item_text_without_hint, hint_days_or_None, qty, unit_or_None, error)."""
     s = raw.strip()
     hint = None
     m = _HINT_RE.search(s)
@@ -1883,6 +1993,8 @@ def _parse_text_part(raw: str) -> tuple[str, Optional[int], float, Optional[str]
         if 1 <= d <= 730:
             hint = d
             s = s[:m.start()].rstrip()
+        else:
+            return s[:m.start()].strip(), None, 1.0, None, "shelf life days must be 1..730"
 
     qty = 1.0
     unit: Optional[str] = None
@@ -1898,7 +2010,7 @@ def _parse_text_part(raw: str) -> tuple[str, Optional[int], float, Optional[str]
             unit = "ct"
         s = s[m2.end():]
 
-    return s.strip(), hint, qty, unit
+    return s.strip(), hint, qty, unit, None
 
 
 def ingest_text(session: Session, *, user_id: int, text: str,
@@ -1911,7 +2023,11 @@ def ingest_text(session: Session, *, user_id: int, text: str,
         return summary
 
     for raw in parts:
-        item_text, hint_days, qty, unit = _parse_text_part(raw)
+        item_text, hint_days, qty, unit, parse_error = _parse_text_part(raw)
+        if parse_error is not None:
+            summary.failed_parts.append(raw)
+            summary.failed_reasons.append(parse_error)
+            continue
         if not item_text:
             summary.failed_parts.append(raw)
             summary.failed_reasons.append("empty after stripping hint/qty")
@@ -1968,7 +2084,7 @@ def ingest_text(session: Session, *, user_id: int, text: str,
 - [ ] **Step 4: Run tests, expect PASS**
 
 Run: `uv run pytest tests/test_ingest_text.py -v`
-Expected: 4 passed.
+Expected: 5 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -2005,7 +2121,7 @@ import pytest
 from sqlmodel import SQLModel, Session, create_engine
 from app.models import User, PantryItem
 from app.pantry_service import (
-    list_active, ListFilter, ALLOWED_CATEGORIES,
+    list_active, list_digest_due, ListFilter, ALLOWED_CATEGORIES,
 )
 
 
@@ -2085,6 +2201,17 @@ def test_allowed_categories_match_spec():
     assert "dairy" in ALLOWED_CATEGORIES
     assert "beverage" in ALLOWED_CATEGORIES
     assert "wine" not in ALLOWED_CATEGORIES
+
+
+def test_digest_due_excludes_snoozed_but_includes_expired(session):
+    today = date(2026, 5, 26)
+    _item(session, "expired", -1, today=today)
+    _item(session, "due", 3, today=today)
+    _item(session, "future", 8, today=today)
+    _item(session, "snoozed", 3, today=today,
+          snoozed_until=today + timedelta(days=2))
+    res = list_digest_due(session, user_id=1, today=today)
+    assert [r.raw_name for r in res] == ["expired", "due"]
 ```
 
 - [ ] **Step 2: Run test, expect FAIL**
@@ -2137,12 +2264,29 @@ def list_active(session: Session, *, user_id: int, f: ListFilter,
         q = q.where(PantryItem.expires_on < today)
     q = q.order_by(PantryItem.expires_on.asc())
     return list(session.exec(q).all())
+
+
+def list_digest_due(session: Session, *, user_id: int,
+                    today: date) -> list[PantryItem]:
+    """Items visible in the scheduled digest and [show all] follow-up."""
+    q = (
+        select(PantryItem)
+        .where(PantryItem.user_id == user_id,
+               PantryItem.status == "active")
+        .where(
+            (PantryItem.snoozed_until.is_(None))
+            | (PantryItem.snoozed_until <= today)
+        )
+        .where(PantryItem.expires_on <= today + timedelta(days=7))
+        .order_by(PantryItem.expires_on.asc())
+    )
+    return list(session.exec(q).all())
 ```
 
 - [ ] **Step 4: Run tests, expect PASS**
 
 Run: `uv run pytest tests/test_pantry_list.py -v`
-Expected: 6 passed.
+Expected: 7 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -3466,8 +3610,8 @@ def parse_tz(arg: str) -> str:
         ZoneInfo(arg)
     except (ZoneInfoNotFoundError, ValueError) as e:
         raise CommandError(
-            f"unknown IANA timezone {arg!r}. Examples: America/Detroit, "
-            f"Europe/London, Asia/Singapore"
+            f"unknown IANA timezone {arg!r}. Examples: "
+            f"America/Detroit, America/New_York"
         )
     return arg
 
@@ -3698,6 +3842,16 @@ def _msg(text: str, *, user_id=1, chat_id=1, chat_type="private"):
     return m
 
 
+def _cb(data: str, *, user_id=1):
+    c = MagicMock()
+    c.from_user = MagicMock(id=user_id)
+    c.data = data
+    c.answer = AsyncMock()
+    c.message = MagicMock()
+    c.message.answer = AsyncMock()
+    return c
+
+
 @pytest.mark.asyncio
 async def test_start_replies_with_setup_text(session, monkeypatch):
     monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
@@ -3719,6 +3873,19 @@ async def test_list_empty(session, monkeypatch):
                       now_provider=lambda tz: datetime(2026, 5, 26, tzinfo=timezone.utc))
     msg.answer.assert_awaited()
     assert "no items" in msg.answer.await_args.args[0].lower()
+
+
+@pytest.mark.asyncio
+async def test_list_auto_create_schedules_digest(session, monkeypatch):
+    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    session.delete(session.get(User, 1)); session.commit()
+    created = []
+    factory: _SessionFactory = lambda: session
+    msg = _msg("/list")
+    await handle_list(msg, session_factory=factory,
+                      now_provider=lambda tz: datetime(2026, 5, 26, tzinfo=timezone.utc),
+                      on_user_created=created.append)
+    assert created and created[0].tz == "America/Detroit"
 
 
 @pytest.mark.asyncio
@@ -3763,6 +3930,28 @@ async def test_unauthorized_user_rejected(session, monkeypatch):
                       now_provider=lambda tz: datetime(2026,5,26, tzinfo=timezone.utc))
     text = msg.answer.await_args.args[0].lower()
     assert "not authorized" in text or "private" in text
+
+
+@pytest.mark.asyncio
+async def test_show_all_callback_sends_due_items_followup(session, monkeypatch):
+    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    for i in range(25):
+        session.add(PantryItem(
+            user_id=1, raw_name=f"Item {i}", normalized_name=f"item {i}",
+            category="other", qty=1.0, unit=None,
+            purchased_on=date(2026,5,26), shelf_life_days=2,
+            shelf_life_source="llm", ingest_shelf_life_source="llm",
+            expires_on=date(2026,5,28), status="active",
+            created_via="manual",
+            created_at=datetime.now(timezone.utc),
+        ))
+    session.commit()
+    factory: _SessionFactory = lambda: session
+    cb = _cb("show:all")
+    await handle_callback(cb, session_factory=factory,
+                          now_provider=lambda tz: datetime(2026,5,26, tzinfo=timezone.utc))
+    cb.message.answer.assert_awaited_once()
+    assert "Item 24" in cb.message.answer.await_args.args[0]
 ```
 
 - [ ] **Step 2: Run test, expect FAIL**
@@ -3776,6 +3965,7 @@ Expected: ImportError on `handle_start`, etc.
 # add to app/bot.py
 from __future__ import annotations
 from datetime import datetime, timezone
+import logging
 from typing import Awaitable, Callable
 from zoneinfo import ZoneInfo
 from sqlmodel import Session
@@ -3789,7 +3979,7 @@ from app.ingest_service import (
 from app.llm import LLMClient
 from app.models import User, PantryItem
 from app.pantry_service import (
-    compute_stats, correct_item, list_active, mark_eaten,
+    compute_stats, correct_item, list_active, list_digest_due, mark_eaten,
     mark_removed, mark_tossed, snooze_item, NotOwnerOrMissing,
 )
 from app.renderer import (
@@ -3803,6 +3993,7 @@ NowProvider = Callable[[str], datetime]   # str = tz name
 
 # Patched at runtime from settings; tests override via monkeypatch.
 ALLOWED_TELEGRAM_USER_ID: int = 0
+log = logging.getLogger(__name__)
 
 
 def _now_in(tz: str) -> datetime:
@@ -3813,7 +4004,12 @@ def _today_in(tz: str):
     return _now_in(tz).date()
 
 
-async def _guard(msg, session: Session) -> User | None:
+def _noop_user_created(user: User) -> None:
+    pass
+
+
+async def _guard(msg, session: Session, *,
+                 on_user_created: Callable[[User], None] = _noop_user_created) -> User | None:
     decision = authorize_and_get_user(
         session,
         allowed_user_id=ALLOWED_TELEGRAM_USER_ID,
@@ -3822,8 +4018,13 @@ async def _guard(msg, session: Session) -> User | None:
         chat_type=msg.chat.type,
     )
     if not decision.allowed:
+        log.info("unauthorized_update_rejected",
+                 extra={"telegram_user_id": msg.from_user.id,
+                        "chat_id": msg.chat.id})
         await msg.answer(decision.reason)
         return None
+    if decision.created:
+        on_user_created(decision.user)
     return decision.user
 
 
@@ -3840,6 +4041,9 @@ async def handle_start(msg, *, session_factory: _SessionFactory,
             chat_type=msg.chat.type,
         )
         if not decision.allowed:
+            log.info("unauthorized_update_rejected",
+                     extra={"telegram_user_id": msg.from_user.id,
+                            "chat_id": msg.chat.id})
             await msg.answer(decision.reason); return
         if decision.created:
             on_user_created(decision.user)
@@ -3855,7 +4059,7 @@ async def handle_start(msg, *, session_factory: _SessionFactory,
 async def handle_tz(msg, *, session_factory: _SessionFactory,
                     reschedule: Callable[[User], None]) -> None:
     with session_factory() as session:
-        user = await _guard(msg, session)
+        user = await _guard(msg, session, on_user_created=reschedule)
         if user is None: return
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2:
@@ -3872,7 +4076,7 @@ async def handle_tz(msg, *, session_factory: _SessionFactory,
 async def handle_digest_at(msg, *, session_factory: _SessionFactory,
                            reschedule: Callable[[User], None]) -> None:
     with session_factory() as session:
-        user = await _guard(msg, session)
+        user = await _guard(msg, session, on_user_created=reschedule)
         if user is None: return
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2:
@@ -3887,9 +4091,10 @@ async def handle_digest_at(msg, *, session_factory: _SessionFactory,
 
 
 async def handle_list(msg, *, session_factory: _SessionFactory,
-                      now_provider: NowProvider) -> None:
+                      now_provider: NowProvider,
+                      on_user_created: Callable[[User], None] = _noop_user_created) -> None:
     with session_factory() as session:
-        user = await _guard(msg, session)
+        user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None: return
         parts = (msg.text or "").split()
         try:
@@ -3902,9 +4107,10 @@ async def handle_list(msg, *, session_factory: _SessionFactory,
 
 
 async def handle_add(msg, *, session_factory: _SessionFactory,
-                     now_provider: NowProvider) -> None:
+                     now_provider: NowProvider,
+                     on_user_created: Callable[[User], None] = _noop_user_created) -> None:
     with session_factory() as session:
-        user = await _guard(msg, session)
+        user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None: return
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2 or not parts[1].strip():
@@ -3924,9 +4130,10 @@ async def handle_add(msg, *, session_factory: _SessionFactory,
         await msg.answer("\n".join(lines) or "nothing parsed")
 
 
-async def _terminal_cmd(msg, session_factory, now_provider, *, fn, action_word):
+async def _terminal_cmd(msg, session_factory, now_provider, *, fn, action_word,
+                        on_user_created: Callable[[User], None] = _noop_user_created):
     with session_factory() as session:
-        user = await _guard(msg, session)
+        user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None: return
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2:
@@ -3942,29 +4149,39 @@ async def _terminal_cmd(msg, session_factory, now_provider, *, fn, action_word):
         except NotOwnerOrMissing:
             await msg.answer(f"no item #{iid}"); return
         if res.applied:
+            log.info("item_action_applied",
+                     extra={"user_id": user.telegram_id,
+                            "item_id": iid, "action": action_word})
             await msg.answer(f"#{iid} marked {action_word}")
         elif res.was_already:
             await msg.answer(f"#{iid} was already non-active")
 
 
-async def handle_ate(msg, *, session_factory, now_provider):
+async def handle_ate(msg, *, session_factory, now_provider,
+                     on_user_created: Callable[[User], None] = _noop_user_created):
     await _terminal_cmd(msg, session_factory, now_provider,
-                        fn=mark_eaten, action_word="ate")
+                        fn=mark_eaten, action_word="ate",
+                        on_user_created=on_user_created)
 
 
-async def handle_toss(msg, *, session_factory, now_provider):
+async def handle_toss(msg, *, session_factory, now_provider,
+                      on_user_created: Callable[[User], None] = _noop_user_created):
     await _terminal_cmd(msg, session_factory, now_provider,
-                        fn=mark_tossed, action_word="toss")
+                        fn=mark_tossed, action_word="toss",
+                        on_user_created=on_user_created)
 
 
-async def handle_delete(msg, *, session_factory, now_provider):
+async def handle_delete(msg, *, session_factory, now_provider,
+                        on_user_created: Callable[[User], None] = _noop_user_created):
     await _terminal_cmd(msg, session_factory, now_provider,
-                        fn=mark_removed, action_word="delete")
+                        fn=mark_removed, action_word="delete",
+                        on_user_created=on_user_created)
 
 
-async def handle_snooze(msg, *, session_factory, now_provider):
+async def handle_snooze(msg, *, session_factory, now_provider,
+                        on_user_created: Callable[[User], None] = _noop_user_created):
     with session_factory() as session:
-        user = await _guard(msg, session)
+        user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None: return
         parts = (msg.text or "").split()
         try:
@@ -3980,14 +4197,18 @@ async def handle_snooze(msg, *, session_factory, now_provider):
         except ValueError as e:
             await msg.answer(str(e)); return
         if res.applied:
+            log.info("item_action_applied",
+                     extra={"user_id": user.telegram_id,
+                            "item_id": iid, "action": "snooze"})
             await msg.answer(f"#{iid} snoozed for {days}d")
         else:
             await msg.answer(f"#{iid} is not active")
 
 
-async def handle_correct(msg, *, session_factory, now_provider):
+async def handle_correct(msg, *, session_factory, now_provider,
+                         on_user_created: Callable[[User], None] = _noop_user_created):
     with session_factory() as session:
-        user = await _guard(msg, session)
+        user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None: return
         parts = (msg.text or "").split()
         try:
@@ -4009,9 +4230,10 @@ async def handle_correct(msg, *, session_factory, now_provider):
         )
 
 
-async def handle_stats(msg, *, session_factory, now_provider):
+async def handle_stats(msg, *, session_factory, now_provider,
+                       on_user_created: Callable[[User], None] = _noop_user_created):
     with session_factory() as session:
-        user = await _guard(msg, session)
+        user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None: return
         now = now_provider(user.tz)
         stats = compute_stats(session, user_id=user.telegram_id,
@@ -4037,24 +4259,28 @@ HELP_TEXT = (
 )
 
 
-async def handle_help(msg, *, session_factory) -> None:
+async def handle_help(msg, *, session_factory,
+                      on_user_created: Callable[[User], None] = _noop_user_created) -> None:
     with session_factory() as session:
-        user = await _guard(msg, session)
+        user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None: return
     await msg.answer(HELP_TEXT)
 
 
 async def handle_photo(msg, *, session_factory, now_provider,
                        llm: LLMClient,
-                       photo_downloader: Callable[[str], Awaitable[bytes]]) -> None:
+                       photo_downloader: Callable[[str], Awaitable[bytes]],
+                       on_user_created: Callable[[User], None] = _noop_user_created) -> None:
     with session_factory() as session:
-        user = await _guard(msg, session)
+        user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None: return
         # aiogram: largest photo is last in .photo array
         if not msg.photo:
             await msg.answer("send a photo of a receipt"); return
         file_id = msg.photo[-1].file_id
         today = now_provider(user.tz).date()
+        log.info("receipt_ingest_started",
+                 extra={"user_id": user.telegram_id, "photo_file_id": file_id})
         try:
             image_bytes = await photo_downloader(file_id)
             summary = await ingest_photo(
@@ -4063,29 +4289,44 @@ async def handle_photo(msg, *, session_factory, now_provider,
             )
         except DuplicateReceipt:
             await msg.answer("this receipt was already logged"); return
-        except Exception:
+        except Exception as e:
+            log.warning("receipt_ingest_failed",
+                        extra={"user_id": user.telegram_id,
+                               "photo_file_id": file_id,
+                               "error_class": type(e).__name__})
             await msg.answer(
                 "couldn't read that one — try a clearer photo or "
                 "/add <items> manually"
             ); return
+        log.info("receipt_ingest_succeeded",
+                 extra={"user_id": user.telegram_id,
+                        "receipt_id": summary.receipt_id,
+                        "inserted_food_count": summary.inserted_food_count})
         await msg.answer(render_ingest_reply(summary, today=today))
 
 
 async def handle_callback(cb, *, session_factory, now_provider) -> None:
     if cb.from_user.id != ALLOWED_TELEGRAM_USER_ID:
+        log.info("unauthorized_update_rejected",
+                 extra={"telegram_user_id": cb.from_user.id})
         await cb.answer("not authorized", show_alert=False); return
     try:
         action = parse_callback(cb.data)
     except CommandError:
         await cb.answer("unrecognized action"); return
-    if action.verb == "show_all":
-        await cb.answer("show all not yet implemented"); return
     with session_factory() as session:
+        user = session.get(User, cb.from_user.id)
+        if user is None:
+            await cb.answer("not configured"); return
+        today = now_provider(user.tz).date()
+        if action.verb == "show_all":
+            rows = list_digest_due(session, user_id=user.telegram_id, today=today)
+            if not rows:
+                await cb.answer("nothing due"); return
+            await cb.message.answer(render_list(rows, today=today))
+            await cb.answer("sent full digest list")
+            return
         try:
-            today = now_provider("America/Detroit").date()
-            user = session.get(User, cb.from_user.id)
-            if user is not None:
-                today = now_provider(user.tz).date()
             if action.verb == "ate":
                 res = mark_eaten(session, user_id=cb.from_user.id,
                                  item_id=action.item_id, today=today)
@@ -4097,6 +4338,11 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
                                   item_id=action.item_id, today=today, days=2)
         except NotOwnerOrMissing:
             await cb.answer("item not found"); return
+        if res.applied:
+            log.info("item_action_applied",
+                     extra={"user_id": cb.from_user.id,
+                            "item_id": action.item_id,
+                            "action": action.verb})
         msg_text = (f"#{action.item_id} → {action.verb}"
                     if res.applied else f"#{action.item_id} already updated")
         await cb.answer(msg_text)
@@ -4105,7 +4351,7 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
 - [ ] **Step 4: Run tests, expect PASS**
 
 Run: `uv run pytest tests/test_bot_handlers_smoke.py -v`
-Expected: 5 passed.
+Expected: 7 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -4176,52 +4422,62 @@ def build_dispatcher(
     )
     dp.message.register(
         lambda m: handle_list(m, session_factory=session_factory,
-                              now_provider=now_provider),
+                              now_provider=now_provider,
+                              on_user_created=on_user_created),
         Command("list"),
     )
     dp.message.register(
         lambda m: handle_add(m, session_factory=session_factory,
-                             now_provider=now_provider),
+                             now_provider=now_provider,
+                             on_user_created=on_user_created),
         Command("add"),
     )
     dp.message.register(
         lambda m: handle_ate(m, session_factory=session_factory,
-                             now_provider=now_provider),
+                             now_provider=now_provider,
+                             on_user_created=on_user_created),
         Command("ate"),
     )
     dp.message.register(
         lambda m: handle_toss(m, session_factory=session_factory,
-                              now_provider=now_provider),
+                              now_provider=now_provider,
+                              on_user_created=on_user_created),
         Command("toss"),
     )
     dp.message.register(
         lambda m: handle_delete(m, session_factory=session_factory,
-                                now_provider=now_provider),
+                                now_provider=now_provider,
+                                on_user_created=on_user_created),
         Command("delete"),
     )
     dp.message.register(
         lambda m: handle_snooze(m, session_factory=session_factory,
-                                now_provider=now_provider),
+                                now_provider=now_provider,
+                                on_user_created=on_user_created),
         Command("snooze"),
     )
     dp.message.register(
         lambda m: handle_correct(m, session_factory=session_factory,
-                                 now_provider=now_provider),
+                                 now_provider=now_provider,
+                                 on_user_created=on_user_created),
         Command("correct"),
     )
     dp.message.register(
         lambda m: handle_stats(m, session_factory=session_factory,
-                               now_provider=now_provider),
+                               now_provider=now_provider,
+                               on_user_created=on_user_created),
         Command("stats"),
     )
     dp.message.register(
-        lambda m: handle_help(m, session_factory=session_factory),
+        lambda m: handle_help(m, session_factory=session_factory,
+                              on_user_created=on_user_created),
         Command("help"),
     )
     dp.message.register(
         lambda m: handle_photo(m, session_factory=session_factory,
                                now_provider=now_provider, llm=llm,
-                               photo_downloader=downloader),
+                               photo_downloader=downloader,
+                               on_user_created=on_user_created),
         F.photo,
     )
     dp.callback_query.register(
@@ -4344,10 +4600,11 @@ Expected: ImportError.
 # app/scheduler.py
 from __future__ import annotations
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 from typing import Optional
-from sqlmodel import Session, select
+from sqlmodel import Session
 from app.models import User, PantryItem
+from app.pantry_service import list_digest_due
 
 
 @dataclass
@@ -4361,17 +4618,7 @@ def build_digest_payload(session: Session, *, user_id: int,
     user = session.get(User, user_id)
     if user is None:
         return None
-    rows = list(session.exec(
-        select(PantryItem)
-        .where(PantryItem.user_id == user_id,
-               PantryItem.status == "active")
-        .where(
-            (PantryItem.snoozed_until.is_(None))
-            | (PantryItem.snoozed_until <= today)
-        )
-        .where(PantryItem.expires_on <= today + timedelta(days=7))
-        .order_by(PantryItem.expires_on.asc())
-    ).all())
+    rows = list_digest_due(session, user_id=user_id, today=today)
     if not rows:
         return None
     return DigestPayload(user=user, items=rows)
@@ -4532,18 +4779,20 @@ async def send_digest_with_retry(*, user_id: int, bot,
                                today_provider=today_provider)
         return
     except Exception as e:
-        log.warning("digest_send_failed_retrying",
+        log.warning("digest_send_failed",
                     extra={"user_id": user_id,
-                           "error_class": type(e).__name__})
+                           "error_class": type(e).__name__,
+                           "attempt": 1, "will_retry": True})
     await asyncio.sleep(retry_sleep_seconds)
     try:
         await send_digest_once(user_id=user_id, bot=bot,
                                session_factory=session_factory,
                                today_provider=today_provider)
     except Exception as e:
-        log.warning("digest_send_failed_final",
+        log.warning("digest_send_failed",
                     extra={"user_id": user_id,
-                           "error_class": type(e).__name__})
+                           "error_class": type(e).__name__,
+                           "attempt": 2, "will_retry": False})
 ```
 
 - [ ] **Step 4: Run tests, expect PASS**
@@ -4862,7 +5111,7 @@ async def _amain(settings: Settings) -> None:
 
     # 4. Migrate.
     result = subprocess.run(
-        ["alembic", "upgrade", "head"],
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
         env={"DATABASE_PATH": settings.database_path,
              **{k: v for k, v in __import__("os").environ.items()}},
         capture_output=True, text=True,
@@ -5078,7 +5327,7 @@ The container runs `bin/run.py` which migrates on boot, starts the bot
 | Got something wrong | `/correct <id> <days>` — teaches future estimates |
 | Wrong import | `/delete <id>` — does NOT teach future estimates |
 | Set digest time | `/digest_at 7` |
-| Change timezone | `/tz Asia/Singapore` |
+| Change timezone | `/tz America/New_York` |
 | Stats | `/stats` |
 
 Each morning at your configured hour, you'll get a digest if anything is
@@ -5105,7 +5354,6 @@ Goal: one CLI script that runs a few real receipts through the *real* LLM and di
 
 **Files:**
 - Create: `bin/eval_receipts.py`
-- Create: `tests/fixtures/private_receipts/.gitkeep` (the directory is gitignored, but a `.gitkeep` is fine)
 - Create: `tests/fixtures/expected/.gitkeep`
 
 - [ ] **Step 1: Implement `bin/eval_receipts.py`**
@@ -5191,12 +5439,15 @@ if __name__ == "__main__":
     sys.exit(asyncio.run(_amain()))
 ```
 
-- [ ] **Step 2: Create the empty fixture directories**
+- [ ] **Step 2: Create the fixture directories**
 
 ```bash
 mkdir -p tests/fixtures/private_receipts tests/fixtures/expected
-touch tests/fixtures/private_receipts/.gitkeep tests/fixtures/expected/.gitkeep
+touch tests/fixtures/expected/.gitkeep
 ```
+
+`tests/fixtures/private_receipts/` is gitignored on purpose. Do not force-add
+real receipt photos or placeholder files from that directory.
 
 - [ ] **Step 3: Verify the script's imports parse**
 
@@ -5206,7 +5457,7 @@ Expected: `ok`.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add bin/eval_receipts.py tests/fixtures/
+git add bin/eval_receipts.py tests/fixtures/expected/.gitkeep
 git commit -m "chore(eval): bin/eval_receipts.py for manual/weekly LLM golden-eval
 
 Compares parsed results against committed sanitized JSON; tolerates
@@ -5273,4 +5524,3 @@ These don't block any task — they're notes for the implementer.
 **Type consistency:** `ShelfLifeDecision` (Task 4.1) has fields `days / source / cache_was_hit` consistently referenced through Task 4.2. `MutationResult` (Task 5.2) has fields `applied / was_already` used identically in Tasks 5.2, 5.3, 7.4. `CallbackButton.callback_data` shape `act:{verb}:{item_id}` (Task 6.2) matches the `parse_callback()` parser (Task 7.3) and the verbs handled in `handle_callback` (Task 7.4): `ate`, `toss`, `snooze2`, `show_all`. `IngestSummary` field names used by `render_ingest_reply` (Task 6.1) match those produced by `ingest_photo` (Task 4.2).
 
 **Spec requirements with no task — none found.** v1 is fully covered.
-

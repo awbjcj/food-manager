@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
+from app.correction_service import AddPayload, CorrectPayload
 from app.ingest_service import IngestSummary
 from app.pantry_service import Stats
 
@@ -149,6 +150,79 @@ def build_digest_keyboard(
     return rows
 
 
+# TODO(user): tune correction/add diff wording and field order against the
+# messages you actually want to read in Telegram.
+def render_correction_diff(
+    *,
+    pending_id: int,
+    payload: CorrectPayload,
+    item_id: int,
+    item_raw_name: str,
+) -> str:
+    lines = [f"Proposed correction for #{item_id} {item_raw_name}:"]
+    for field_name in ("name", "category", "expires_on", "shelf_life_days"):
+        change = payload.diff.get(field_name)
+        if change is None:
+            continue
+        suffix = ""
+        if field_name == "shelf_life_days" and payload.back_computed_days:
+            suffix = "  (back-computed from expires_on)"
+        lines.append(f"  - {field_name}: {change['old']} -> {change['new']}{suffix}")
+    lines.append(f"  - cache: {payload.cache_action}")
+    lines.append("")
+    lines.append(f"Reason: {payload.rationale}")
+    lines.append("Expires in 10 min.")
+    return "\n".join(lines)
+
+
+def render_add_diff(*, pending_id: int, payload: AddPayload) -> str:
+    category = payload.category if payload.category is not None else "(unknown)"
+    unit = f" {payload.unit}" if payload.unit else ""
+    return "\n".join([
+        f"Proposed add - {payload.name}:",
+        f"  - category: {category}",
+        f"  - qty / unit: {payload.qty}{unit}",
+        f"  - expires_on: {payload.expires_on.isoformat()}",
+        f"  - shelf_life_days: {payload.shelf_life_days} (source: {payload.shelf_life_source})",
+        "",
+        f"Confidence: {payload.confidence:.2f}",
+        "Expires in 10 min.",
+    ])
+
+
+def build_apply_cancel_keyboard(*, pending_id: int) -> list[list[CallbackButton]]:
+    return [[
+        CallbackButton(text="Apply", callback_data=f"apply:{pending_id}"),
+        CallbackButton(text="Cancel", callback_data=f"cancel:{pending_id}"),
+    ]]
+
+
+def render_applied_correction(*, item_id: int, payload: CorrectPayload) -> str:
+    changes = []
+    for field_name in ("name", "category", "expires_on", "shelf_life_days"):
+        change = payload.diff.get(field_name)
+        if change is not None:
+            changes.append(f"{field_name}={change['new']}")
+    suffix = ", ".join(changes) if changes else "no changes"
+    return f"Applied to #{item_id}: {suffix}"
+
+
+def render_applied_add(*, item_id: int, payload: AddPayload) -> str:
+    return f"Added #{item_id} {payload.name} (expires {payload.expires_on.isoformat()})"
+
+
+_TERMINAL_LABELS = {
+    "cancelled": "Cancelled.",
+    "expired": "This proposal has expired - re-run the command.",
+    "stale": "This proposal is stale (the item changed) - re-run the command.",
+    "applied": "This proposal was already applied.",
+}
+
+
+def render_terminal_state(status: str) -> str:
+    return _TERMINAL_LABELS.get(status, f"This proposal is no longer pending ({status}).")
+
+
 def render_list(items: list, *, today: date) -> str:
     if not items:
         return "no items match this filter"
@@ -178,12 +252,32 @@ def render_stats(stats: Stats) -> str:
     waste_rate = "-" if stats.waste_rate_percent is None else f"{stats.waste_rate_percent:.1f}%"
     avg_cost = _fmt_cost_short(stats.avg_cost_micros_usd)
     total_cost = "$0.000" if stats.total_cost_micros_usd == 0 else _fmt_cost_short(stats.total_cost_micros_usd)
-    return "\n".join([
+    lines = [
         "Last 30 days",
         f"Receipts: {stats.receipt_count} (unknown-cost: {stats.unknown_cost_receipt_count})",
         f"Tracked items: {stats.tracked_item_count}",
         f"Removed (wrong import): {stats.removed_item_count}",
         f"Cache hit rate: {cache_hit}",
         f"LLM spend: total {total_cost}  avg {avg_cost} / receipt",
-        f"Waste rate: {waste_rate}",
-    ])
+    ]
+    tl = stats.text_llm
+    corr_unknown = (
+        f", {tl.correction_unknown_cost_count} unknown"
+        if tl.correction_unknown_cost_count
+        else ""
+    )
+    add_unknown = (
+        f", {tl.add_unknown_cost_count} unknown"
+        if tl.add_unknown_cost_count
+        else ""
+    )
+    lines.append(
+        f"  Corrections: {tl.correction_proposal_count}  "
+        f"(${tl.correction_cost_micros / 1_000_000:.4f} total{corr_unknown})"
+    )
+    lines.append(
+        f"  Adds:        {tl.add_proposal_count}  "
+        f"(${tl.add_cost_micros / 1_000_000:.4f} total{add_unknown})"
+    )
+    lines.append(f"Waste rate: {waste_rate}")
+    return "\n".join(lines)

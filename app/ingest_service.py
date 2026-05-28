@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
@@ -8,11 +7,10 @@ from typing import Literal, Optional
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.cache import get_cached, put_cached, write_user_correction
+from app.cache import get_cached, put_cached
 from app.llm import LLMClient, ParsedItem
 from app.models import PantryItem, Receipt
 from app.normalization import normalize
-from app.shelf_life_defaults import lookup_default
 
 
 @dataclass(frozen=True)
@@ -182,128 +180,4 @@ async def ingest_photo(
         raise
 
     summary.receipt_id = receipt.id
-    return summary
-
-
-@dataclass
-class TextIngestSummary:
-    inserted_count: int = 0
-    inserted_ids: list[int] = field(default_factory=list)
-    inserted_names: list[str] = field(default_factory=list)
-    failed_parts: list[str] = field(default_factory=list)
-    failed_reasons: list[str] = field(default_factory=list)
-
-
-_HINT_RE = re.compile(r"\s+(\d+)\s*d\s*$", flags=re.IGNORECASE)
-_QTY_PREFIX_RE = re.compile(
-    r"^\s*(\d+(?:\.\d+)?)\s*"
-    r"(gal|gallon|gallons|oz|lb|lbs|g|kg|ml|l|ct|count|pk|pack|bunch|dozen)?\s+",
-    flags=re.IGNORECASE,
-)
-_DOZEN_PREFIX_RE = re.compile(r"^\s*dozen\s+", flags=re.IGNORECASE)
-
-
-def _parse_text_part(raw: str) -> tuple[str, Optional[int], float, Optional[str], Optional[str]]:
-    text = raw.strip()
-    hint_days = None
-    hint_match = _HINT_RE.search(text)
-    if hint_match:
-        days = int(hint_match.group(1))
-        if not 1 <= days <= 730:
-            return text[:hint_match.start()].strip(), None, 1.0, None, "shelf life days must be 1..730"
-        hint_days = days
-        text = text[:hint_match.start()].rstrip()
-
-    qty = 1.0
-    unit: Optional[str] = None
-    dozen_match = _DOZEN_PREFIX_RE.match(text)
-    qty_match = None if dozen_match else _QTY_PREFIX_RE.match(text)
-    if dozen_match:
-        qty = 12.0
-        unit = "ct"
-        text = text[dozen_match.end():]
-    elif qty_match:
-        qty = float(qty_match.group(1))
-        unit = qty_match.group(2).lower() if qty_match.group(2) else None
-        if unit == "dozen":
-            qty *= 12
-            unit = "ct"
-        text = text[qty_match.end():]
-
-    return text.strip(), hint_days, qty, unit, None
-
-
-def ingest_text(
-    session: Session, *, user_id: int, text: str, today: date
-) -> TextIngestSummary:
-    summary = TextIngestSummary()
-    parts = [part.strip() for part in text.split(",") if part.strip()]
-    if not parts:
-        summary.failed_parts.append(text)
-        summary.failed_reasons.append("empty")
-        return summary
-
-    for raw_part in parts:
-        item_text, hint_days, qty, unit, parse_error = _parse_text_part(raw_part)
-        if parse_error is not None:
-            summary.failed_parts.append(raw_part)
-            summary.failed_reasons.append(parse_error)
-            continue
-        if not item_text:
-            summary.failed_parts.append(raw_part)
-            summary.failed_reasons.append("empty after stripping hint/qty")
-            continue
-
-        normalized_name = normalize(item_text)
-        category = None
-        if hint_days is not None:
-            days = hint_days
-            shelf_life_source = "user_correction"
-            ingest_source = "manual_user_hint"
-            cached = write_user_correction(session, user_id, normalized_name, days=days)
-            category = cached.category
-        else:
-            cached = get_cached(session, user_id, normalized_name)
-            if cached is not None:
-                days = cached.days
-                shelf_life_source = "cache"
-                ingest_source = "cache"
-                category = cached.category
-            else:
-                default = lookup_default(normalized_name)
-                if default is None:
-                    summary.failed_parts.append(raw_part)
-                    summary.failed_reasons.append(
-                        "no cache, no default; add `7d` hint or use /correct after adding"
-                    )
-                    continue
-                days = default.days
-                shelf_life_source = "manual_fallback"
-                ingest_source = "manual_fallback"
-                category = default.category
-
-        pantry_item = PantryItem(
-            user_id=user_id,
-            raw_name=item_text,
-            normalized_name=normalized_name,
-            category=category,
-            qty=qty,
-            unit=unit,
-            purchased_on=today,
-            shelf_life_days=days,
-            shelf_life_source=shelf_life_source,
-            ingest_shelf_life_source=ingest_source,
-            expires_on=today + timedelta(days=days),
-            status="active",
-            created_via="manual",
-            source_receipt_id=None,
-            created_at=datetime.now(timezone.utc),
-        )
-        session.add(pantry_item)
-        session.flush()
-        assert pantry_item.id is not None
-        summary.inserted_ids.append(pantry_item.id)
-        summary.inserted_names.append(pantry_item.raw_name)
-        summary.inserted_count += 1
-    session.commit()
     return summary

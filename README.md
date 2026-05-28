@@ -6,8 +6,8 @@ A single-user Telegram bot that tracks your grocery pantry and sends a daily exp
 
 1. **Receipt photo → pantry items**: Send a photo to the bot. Claude parses the receipt, extracts food items with estimated shelf lives, and stores them in a local SQLite database.
 2. **Daily digest**: Each morning at your configured hour, you receive a message listing everything expiring within 7 days, with one-tap buttons to mark items as eaten, tossed, or snooze for 2 days.
-3. **Shelf life learning**: When you use `/correct` to adjust a shelf life estimate, that correction is stored per-item and takes priority over the LLM for future imports of the same item.
-4. **Manual add**: Use `/add` for items you didn't receive a receipt for.
+3. **Shelf life learning**: When you apply a `/correct` proposal, that correction can teach future imports of the same item.
+4. **Manual add**: Use `/add` for items you didn't receive a receipt for. The bot proposes parsed items before inserting them.
 
 ## Prerequisites
 
@@ -26,6 +26,7 @@ uv sync
 # 2. Configure environment
 cp .env.example .env
 # Fill in TELEGRAM_BOT_TOKEN, ALLOWED_TELEGRAM_USER_ID, ANTHROPIC_API_KEY
+# Optional: set ANTHROPIC_TEXT_MODEL for /correct and /add proposals
 
 # 3. Run database migrations
 DATABASE_PATH=./food.db uv run alembic upgrade head
@@ -35,6 +36,17 @@ uv run python bin/run.py
 
 # 5. Send /start from your Telegram account to create your user record
 ```
+
+### v1.5 behavior
+
+- `/correct <id> <free text>` and `/add <free text>` parse with Claude
+  Haiku (configurable via `ANTHROPIC_TEXT_MODEL`) and reply with a diff
+  message. Tap **Apply** to commit or **Cancel** to discard. Proposals
+  expire after 10 minutes.
+- Any mutation to a pantry item (mark eaten / tossed / removed / snoozed /
+  corrected) invalidates pending corrections for that item in the same
+  transaction.
+- `/stats` reports text-LLM cost broken down by action type.
 
 ## Tests
 
@@ -63,12 +75,12 @@ The container runs `bin/run.py` which backs up the database, runs Alembic migrat
 | Command | Description |
 |---|---|
 | Send a photo | Parse a receipt and log all food items |
-| `/add 2 lb chicken, dozen eggs` | Manually add items without a receipt |
+| `/add 2 lb chicken, dozen eggs` | Propose manual items without a receipt |
 | `/list` | Show all active pantry items |
 | `/list dairy` | Filter by category |
 | `/list week` | Show items expiring within 7 days |
 | `/list expired` | Show already-expired items |
-| `/correct <id> <days>` | Fix a shelf life estimate (teaches future imports) |
+| `/correct <id> <free text>` | Propose a natural-language correction |
 | `/delete <id>` | Remove a wrongly imported item (does not teach future imports) |
 | `/digest_at 7` | Set your daily digest hour (0–23, in your timezone) |
 | `/tz America/New_York` | Set your timezone |
@@ -84,5 +96,6 @@ The container runs `bin/run.py` which backs up the database, runs Alembic migrat
 | `ANTHROPIC_API_KEY` | Yes | — | Anthropic API key |
 | `DATABASE_PATH` | No | `./food.db` | Path to the SQLite database file |
 | `ANTHROPIC_MODEL` | No | `claude-sonnet-4-6` | Claude model to use for receipt parsing |
+| `ANTHROPIC_TEXT_MODEL` | No | `claude-haiku-4-5-20251001` | Claude model to use for `/correct` and `/add` proposals |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
 | `ENV` | No | `dev` | Set to `prod` for JSON-structured logs |

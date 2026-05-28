@@ -13,20 +13,31 @@ from sqlmodel import Session
 from app.commands import (
     CommandError,
     parse_callback,
-    parse_correct_args,
     parse_digest_at,
     parse_item_id_arg,
     parse_list_filter,
     parse_snooze_args,
     parse_tz,
 )
-from app.ingest_service import DuplicateReceipt, ingest_photo, ingest_text
-from app.llm import LLMClient
-from app.models import User
+from app.correction_service import (
+    NullDiff,
+    ProposeCorrectError,
+    add_payload_from_json,
+    add_payload_to_json,
+    apply_add,
+    apply_correct,
+    correct_payload_from_json,
+    correct_payload_to_json,
+    item_snapshot_to_json,
+    propose_add,
+    propose_correct,
+)
+from app.ingest_service import DuplicateReceipt, ingest_photo
+from app.llm import LLMClient, TextLLMClient
+from app.models import PantryItem, User
 from app.pantry_service import (
     NotOwnerOrMissing,
     compute_stats,
-    correct_item,
     list_active,
     list_digest_due,
     mark_eaten,
@@ -34,13 +45,28 @@ from app.pantry_service import (
     mark_tossed,
     snooze_item,
 )
+from app.pending_service import (
+    create_pending,
+    expire_for_item,
+    load_pending,
+    mark_applied,
+    mark_cancelled,
+    set_message_id,
+    utc_naive,
+)
 from app.renderer import (
     CallbackButton,
+    build_apply_cancel_keyboard,
     build_digest_keyboard,
+    render_add_diff,
+    render_applied_add,
+    render_applied_correction,
+    render_correction_diff,
     render_digest,
     render_ingest_reply,
     render_list,
     render_stats,
+    render_terminal_state,
 )
 
 DEFAULT_TZ = "America/Detroit"
@@ -232,6 +258,7 @@ async def handle_add(
     *,
     session_factory: _SessionFactory,
     now_provider: NowProvider,
+    text_llm: TextLLMClient,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ) -> None:
     with session_factory() as session:
@@ -240,28 +267,60 @@ async def handle_add(
             return
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2 or not parts[1].strip():
-            await msg.answer("usage: /add <items, separated, by, commas>")
+            await msg.answer("usage: /add <free text - name, category, expiry>")
             return
-        summary = ingest_text(
-            session,
-            user_id=user.telegram_id,
-            text=parts[1].strip(),
-            today=now_provider(user.tz).date(),
-        )
-        lines = []
-        if summary.inserted_count:
-            lines.append(f"Added {summary.inserted_count} items:")
-            lines.extend(
-                f"  - #{item_id} {name}"
-                for item_id, name in zip(summary.inserted_ids, summary.inserted_names)
+        today = now_provider(user.tz).date()
+        try:
+            proposals, _ = await propose_add(
+                session,
+                llm=text_llm,
+                user_id=user.telegram_id,
+                user_text=parts[1].strip(),
+                today=today,
+                tz=user.tz,
             )
-        if summary.failed_parts:
-            lines.append("Couldn't add:")
-            lines.extend(
-                f"  - {raw!r}: {reason}"
-                for raw, reason in zip(summary.failed_parts, summary.failed_reasons)
+        except Exception as exc:
+            log.warning(
+                "add_propose_failed",
+                extra={
+                    "user_id": user.telegram_id,
+                    "error_class": type(exc).__name__,
+                },
             )
-        await msg.answer("\n".join(lines) or "nothing parsed")
+            await msg.answer("couldn't parse that add - try simpler wording")
+            return
+        if not proposals:
+            await msg.answer("usage: /add <free text - name, category, expiry>")
+            return
+
+        for proposal in proposals:
+            pending = create_pending(
+                session,
+                user_id=user.telegram_id,
+                action_type="add",
+                item_id=None,
+                proposed_json=add_payload_to_json(proposal.payload),
+                snapshot_json=None,
+                cost_micros_usd=proposal.cost_share,
+                chat_id=msg.chat.id,
+                now=datetime.now(timezone.utc),
+            )
+            assert pending.id is not None
+            text = render_add_diff(pending_id=pending.id, payload=proposal.payload)
+            keyboard = to_aiogram_keyboard(
+                build_apply_cancel_keyboard(pending_id=pending.id)
+            )
+            try:
+                sent = await msg.answer(text, reply_markup=keyboard)
+            except Exception as exc:
+                log.warning(
+                    "add_send_failed",
+                    extra={"pending_id": pending.id, "error_class": type(exc).__name__},
+                )
+                mark_cancelled(session, pending=pending)
+                session.commit()
+                continue
+            set_message_id(session, pending=pending, message_id=sent.message_id)
 
 
 async def _terminal_cmd(
@@ -412,37 +471,89 @@ async def handle_correct(
     *,
     session_factory,
     now_provider,
+    text_llm: TextLLMClient,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
-        item_id: int
+        parts = (msg.text or "").split(maxsplit=2)
+        if len(parts) < 3 or not parts[2].strip():
+            await msg.answer("usage: /correct <item_id> <free text>")
+            return
         try:
-            item_id, days = parse_correct_args(list((msg.text or "").split()[1:]))
+            item_id = parse_item_id_arg(parts[1].strip())
         except CommandError as exc:
             await msg.answer(str(exc))
             return
-        try:
-            pantry_item = correct_item(
-                session,
-                user_id=user.telegram_id,
-                item_id=item_id,
-                days=days,
-                today=now_provider(user.tz).date(),
-            )
-        except NotOwnerOrMissing:
+        item = session.get(PantryItem, item_id)
+        if item is None or item.user_id != user.telegram_id:
             await msg.answer(f"no item #{item_id}")
             return
-        except ValueError as exc:
+        if item.status != "active":
+            await msg.answer(f"#{item_id} is {item.status}; cannot correct")
+            return
+        today = now_provider(user.tz).date()
+        try:
+            payload, cost = await propose_correct(
+                session,
+                llm=text_llm,
+                user_id=user.telegram_id,
+                item=item,
+                user_text=parts[2].strip(),
+                today=today,
+            )
+        except NullDiff:
+            await msg.answer("no changes detected")
+            return
+        except ProposeCorrectError as exc:
             await msg.answer(str(exc))
             return
-        await msg.answer(
-            f"#{item_id} {pantry_item.raw_name}: shelf life set to {days}d, "
-            f"expires {pantry_item.expires_on}. Future estimates for "
-            f'"{pantry_item.normalized_name}" will use this value.'
+        except Exception as exc:
+            log.warning(
+                "correction_propose_failed",
+                extra={
+                    "user_id": user.telegram_id,
+                    "item_id": item_id,
+                    "error_class": type(exc).__name__,
+                },
+            )
+            await msg.answer("couldn't parse that correction - try simpler wording")
+            return
+
+        pending = create_pending(
+            session,
+            user_id=user.telegram_id,
+            action_type="correct",
+            item_id=item_id,
+            proposed_json=correct_payload_to_json(payload),
+            snapshot_json=item_snapshot_to_json(item),
+            cost_micros_usd=cost,
+            chat_id=msg.chat.id,
+            now=datetime.now(timezone.utc),
         )
+        assert pending.id is not None
+        text = render_correction_diff(
+            pending_id=pending.id,
+            payload=payload,
+            item_id=item_id,
+            item_raw_name=item.raw_name,
+        )
+        keyboard = to_aiogram_keyboard(
+            build_apply_cancel_keyboard(pending_id=pending.id)
+        )
+        try:
+            sent = await msg.answer(text, reply_markup=keyboard)
+        except Exception as exc:
+            log.warning(
+                "correct_send_failed",
+                extra={"pending_id": pending.id, "error_class": type(exc).__name__},
+            )
+            mark_cancelled(session, pending=pending)
+            session.commit()
+            return
+        set_message_id(session, pending=pending, message_id=sent.message_id)
 
 
 async def handle_stats(
@@ -471,11 +582,15 @@ HELP_TEXT = (
     "  /tz <IANA> - set timezone\n"
     "  /digest_at <0..23> - set digest hour\n"
     "  /list [category|week|expired] - show pantry\n"
-    "  /add <items, by, commas> - manual entry; trailing `7d` sets shelf life\n"
+    "  /add <free text> - propose new items in natural language.\n"
+    "      Replies with a diff per item; tap Apply or Cancel.\n"
+    "      Proposals expire after 10 min.\n"
     "  /ate <id> - mark eaten\n"
     "  /toss <id> - mark tossed\n"
     "  /snooze <id> [days=2] - suppress reminders 1..30d\n"
-    "  /correct <id> <days> - fix shelf life and teach future estimates\n"
+    "  /correct <id> <free text> - propose a correction in natural\n"
+    "      language (name, category, expires, days). Replies with a\n"
+    "      diff; tap Apply or Cancel. Proposal expires after 10 min.\n"
     "  /delete <id> - remove a wrong/duplicate import\n"
     "  /stats - last 30 days\n"
     "  /help - this message\n"
@@ -583,6 +698,18 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             await cb.answer("sent full digest list")
             return
 
+        if action.verb in ("apply", "cancel"):
+            pending_id = action.item_id
+            assert pending_id is not None
+            await _handle_pending_callback(
+                cb,
+                session=session,
+                today=today,
+                pending_id=pending_id,
+                verb=action.verb,
+            )
+            return
+
         item_id = action.item_id
         assert item_id is not None
         try:
@@ -623,6 +750,124 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             if result.applied
             else f"#{item_id} already updated"
         )
+
+
+async def _handle_pending_callback(
+    cb, *, session: Session, today, pending_id: int, verb: str
+) -> None:
+    pending = load_pending(session, user_id=cb.from_user.id, pending_id=pending_id)
+    if pending is None:
+        await cb.answer("not found")
+        return
+
+    now = utc_naive(datetime.now(timezone.utc))
+    if pending.status != "pending" or pending.expires_at <= now:
+        terminal = pending.status if pending.status != "pending" else "expired"
+        if terminal == "expired" and pending.status == "pending":
+            pending.status = "expired"
+            session.add(pending)
+            session.commit()
+        try:
+            await cb.message.edit_text(render_terminal_state(terminal))
+        except Exception as exc:
+            log.warning(
+                "pending_message_edit_failed",
+                extra={"error_class": type(exc).__name__},
+            )
+        await cb.answer(f"already {terminal}")
+        return
+
+    if verb == "cancel":
+        mark_cancelled(session, pending=pending)
+        session.commit()
+        try:
+            await cb.message.edit_text(render_terminal_state("cancelled"))
+        except Exception as exc:
+            log.warning(
+                "pending_message_edit_failed",
+                extra={"error_class": type(exc).__name__},
+            )
+        await cb.answer("cancelled")
+        return
+
+    if pending.action_type == "correct":
+        payload = correct_payload_from_json(pending.proposed_json)
+        assert pending.item_id is not None
+        item = session.get(PantryItem, pending.item_id)
+        if item is None:
+            mark_cancelled(session, pending=pending)
+            session.commit()
+            try:
+                await cb.message.edit_text("Item gone - proposal cancelled.")
+            except Exception as exc:
+                log.warning(
+                    "pending_message_edit_failed",
+                    extra={"error_class": type(exc).__name__},
+                )
+            await cb.answer("item gone")
+            return
+        if item.status != "active":
+            mark_cancelled(session, pending=pending)
+            session.commit()
+            try:
+                await cb.message.edit_text("Item is no longer active - proposal cancelled.")
+            except Exception as exc:
+                log.warning(
+                    "pending_message_edit_failed",
+                    extra={"error_class": type(exc).__name__},
+                )
+            await cb.answer("item no longer active")
+            return
+        assert item.id is not None
+        expire_for_item(
+            session,
+            user_id=cb.from_user.id,
+            item_id=item.id,
+            exclude_pending_id=pending.id,
+        )
+        apply_correct(session, user_id=cb.from_user.id, item=item, payload=payload)
+        mark_applied(session, pending=pending)
+        session.commit()
+        try:
+            await cb.message.edit_text(
+                render_applied_correction(item_id=item.id, payload=payload)
+            )
+        except Exception as exc:
+            log.warning(
+                "pending_message_edit_failed",
+                extra={"error_class": type(exc).__name__},
+            )
+        log.info(
+            "item_action_applied",
+            extra={
+                "user_id": cb.from_user.id,
+                "item_id": item.id,
+                "action": "correct",
+            },
+        )
+        await cb.answer("applied")
+        return
+
+    if pending.action_type != "add":
+        log.warning("unknown_pending_action_type", extra={"action_type": pending.action_type})
+        await cb.answer("unknown action")
+        return
+    payload = add_payload_from_json(pending.proposed_json)
+    new_id = apply_add(session, user_id=cb.from_user.id, payload=payload, today=today)
+    mark_applied(session, pending=pending)
+    session.commit()
+    try:
+        await cb.message.edit_text(render_applied_add(item_id=new_id, payload=payload))
+    except Exception as exc:
+        log.warning(
+            "pending_message_edit_failed",
+            extra={"error_class": type(exc).__name__},
+        )
+    log.info(
+        "item_action_applied",
+        extra={"user_id": cb.from_user.id, "item_id": new_id, "action": "add"},
+    )
+    await cb.answer("added")
 
 
 async def _refresh_digest_message(cb, session, user_id: int, today) -> None:
@@ -670,6 +915,7 @@ def build_dispatcher(
     bot: Bot,
     session_factory: _SessionFactory,
     llm: LLMClient,
+    text_llm: TextLLMClient,
     now_provider: NowProvider,
     on_user_created: Callable[[User], None],
     reschedule: Callable[[User], None],
@@ -713,6 +959,7 @@ def build_dispatcher(
             message,
             session_factory=session_factory,
             now_provider=now_provider,
+            text_llm=text_llm,
             on_user_created=on_user_created,
         )
 
@@ -753,6 +1000,7 @@ def build_dispatcher(
             message,
             session_factory=session_factory,
             now_provider=now_provider,
+            text_llm=text_llm,
             on_user_created=on_user_created,
         )
 

@@ -6,7 +6,6 @@ from app.commands import (
     CallbackAction,
     CommandError,
     parse_callback,
-    parse_correct_args,
     parse_digest_at,
     parse_item_id_arg,
     parse_list_filter,
@@ -37,9 +36,6 @@ def test_command_parsers():
     assert parse_item_id_arg("#42") == 42
     assert parse_snooze_args(["42"]) == (42, 2)
     assert parse_snooze_args(["#42", "5"]) == (42, 5)
-    assert parse_correct_args(["#42", "5"]) == (42, 5)
-    with pytest.raises(CommandError):
-        parse_correct_args(["42", "731"])
     assert parse_list_filter([]) == ListFilter.default()
     assert parse_list_filter(["dairy"]) == ListFilter(category="dairy")
     assert parse_list_filter(["week"]) == ListFilter(window="week")

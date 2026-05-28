@@ -7,8 +7,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.pantry_service import (
     ALLOWED_CATEGORIES,
     ListFilter,
-    SHELF_LIFE_DAYS_MAX,
-    SHELF_LIFE_DAYS_MIN,
     SNOOZE_DAYS_DEFAULT,
     SNOOZE_DAYS_MAX,
     SNOOZE_DAYS_MIN,
@@ -65,21 +63,6 @@ def parse_snooze_args(args: Sequence[str]) -> tuple[int, int]:
     return item_id, days
 
 
-def parse_correct_args(args: Sequence[str]) -> tuple[int, int]:
-    if len(args) != 2:
-        raise CommandError("usage: /correct <item_id> <shelf_life_days>")
-    item_id = parse_item_id_arg(args[0])
-    try:
-        days = int(args[1])
-    except ValueError as exc:
-        raise CommandError("shelf_life_days must be an integer") from exc
-    if days < SHELF_LIFE_DAYS_MIN or days > SHELF_LIFE_DAYS_MAX:
-        raise CommandError(
-            f"shelf_life_days must be in [{SHELF_LIFE_DAYS_MIN}, {SHELF_LIFE_DAYS_MAX}]"
-        )
-    return item_id, days
-
-
 def parse_list_filter(args: Sequence[str]) -> ListFilter:
     if not args:
         return ListFilter.default()
@@ -96,7 +79,7 @@ def parse_list_filter(args: Sequence[str]) -> ListFilter:
     )
 
 
-Verb = Literal["ate", "toss", "snooze2", "show_all"]
+Verb = Literal["ate", "toss", "snooze2", "show_all", "apply", "cancel"]
 
 
 @dataclass(frozen=True)
@@ -108,6 +91,13 @@ class CallbackAction:
 def parse_callback(data: str) -> CallbackAction:
     if data == "show:all":
         return CallbackAction(verb="show_all", item_id=None)
+    if data.startswith("apply:") or data.startswith("cancel:"):
+        verb, _, raw_id = data.partition(":")
+        try:
+            pending_id = int(raw_id)
+        except ValueError as exc:
+            raise CommandError(f"bad pending id {raw_id!r}") from exc
+        return CallbackAction(verb=cast(Verb, verb), item_id=pending_id)
     parts = data.split(":")
     if len(parts) != 3 or parts[0] != "act":
         raise CommandError(f"unrecognized callback data {data!r}")

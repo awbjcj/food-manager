@@ -51,6 +51,7 @@ def write_user_correction(
     *,
     days: int,
     category: Optional[str] = None,
+    commit: bool = True,
 ) -> ShelfLifeCache:
     existing = get_cached(session, user_id, normalized_name)
     now = datetime.now(timezone.utc)
@@ -73,6 +74,9 @@ def write_user_correction(
         if category is not None:
             existing.category = category
         row = existing
-    session.commit()
-    session.refresh(row)
+    if commit:
+        session.commit()
+        session.refresh(row)
+    else:
+        session.flush()
     return row

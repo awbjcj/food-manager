@@ -224,7 +224,18 @@ class AnthropicLLMClient(LLMClient):
 
 
 CORRECTION_SYSTEM_PROMPT = """You parse a user-supplied correction for a single pantry item.
-Return ONLY valid JSON matching the CorrectionDiff schema. No prose.
+Return ONLY valid JSON with exactly these snake_case keys. No prose.
+
+Output schema (all keys required; use null for unchanged fields):
+{
+  "name":            string or null,           // corrected item name, null if unchanged
+  "category":        string or null,           // one of: dairy|produce|meat|seafood|bakery|pantry|frozen|beverage|other, null if unchanged
+  "expires_on":      "YYYY-MM-DD" or null,     // new expiry date, null if not stated
+  "shelf_life_days": integer 1..730 or null,   // new shelf life in days, null if not stated
+  "cache_action":    "move"|"add_new"|"leave", // always required
+  "rationale":       string,                   // always required: one short clause
+  "confidence":      float 0.0..1.0            // always required: parse confidence
+}
 
 You receive (in the user message):
   - item_snapshot: {id, raw_name, normalized_name, category, qty, unit,

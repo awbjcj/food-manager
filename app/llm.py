@@ -19,7 +19,7 @@ Category = Literal[
 class ParsedItem(BaseModel):
     is_food: bool
     name: str
-    qty: float = 1.0
+    qty: float = Field(default=1.0, gt=0)
     unit: Optional[str] = None
     category: Optional[Category] = None
     est_shelf_life_days: int = Field(ge=1, le=730)
@@ -54,7 +54,7 @@ class CorrectionDiff(BaseModel):
 class ProposedAddItem(BaseModel):
     name: str
     category: Optional[Category] = None
-    qty: float = 1.0
+    qty: float = Field(default=1.0, gt=0)
     unit: Optional[str] = None
     explicit_user_expiry: bool
     shelf_life_days: Optional[int] = Field(default=None, ge=1, le=730)

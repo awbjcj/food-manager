@@ -28,7 +28,7 @@ class AddPayload(BaseModel):
     kind: Literal["add"] = "add"
     name: str
     category: Optional[str] = None
-    qty: float = 1.0
+    qty: float = Field(default=1.0, gt=0)
     unit: Optional[str] = None
     shelf_life_days: int = Field(ge=1, le=730)
     expires_on: date

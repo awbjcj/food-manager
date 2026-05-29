@@ -3,6 +3,8 @@ from datetime import date, datetime, timedelta, timezone
 from sqlmodel import SQLModel, Session, create_engine
 from app.models import PantryItem, Receipt, User
 from app.commands import CallbackAction, CommandError, parse_callback
+from app.pantry_service import UndoResult
+from app.renderer import build_undo_keyboard, build_undo_add_keyboard, render_undo_result
 
 
 def test_parse_undo_receipt_and_add():
@@ -112,3 +114,19 @@ def test_undo_add_skips_corrected(session):
     result = undo_add(session, user_id=1, item_id=item.id, now=now)
     assert result.removed_ids == []
     assert result.skipped == [(item.id, "corrected")]
+
+
+def test_undo_keyboards():
+    assert build_undo_keyboard(receipt_id=12)[0][0].callback_data == "undo:receipt:12"
+    assert build_undo_add_keyboard(item_id=7)[0][0].callback_data == "undo:add:7"
+
+
+def test_render_undo_result_full_and_partial():
+    full = render_undo_result(UndoResult([1, 2], [], receipt_deleted=True, expired=False))
+    assert "Undone" in full and "2" in full
+    partial = render_undo_result(
+        UndoResult([1], [(3, "eaten")], receipt_deleted=False, expired=False)
+    )
+    assert "skipped #3 (eaten)" in partial
+    expired = render_undo_result(UndoResult([], [], False, expired=True))
+    assert "expired" in expired.lower()

@@ -226,6 +226,26 @@ def render_add_diff(*, pending_id: int, payload: AddPayload) -> str:
     ])
 
 
+def build_undo_keyboard(*, receipt_id: int) -> list[list[CallbackButton]]:
+    return [[CallbackButton(text="Undo", callback_data=f"undo:receipt:{receipt_id}")]]
+
+
+def build_undo_add_keyboard(*, item_id: int) -> list[list[CallbackButton]]:
+    return [[CallbackButton(text="Undo", callback_data=f"undo:add:{item_id}")]]
+
+
+def render_undo_result(result) -> str:
+    if result.expired:
+        return "Undo window expired (10 min) - use /delete <id> instead."
+    if not result.removed_ids and not result.skipped:
+        return "Nothing to undo."
+    parts = [f"Undone: removed {len(result.removed_ids)} item(s)."]
+    if result.skipped:
+        skipped = ", ".join(f"#{i} ({why})" for i, why in result.skipped)
+        parts.append(f"skipped {skipped}.")
+    return " ".join(parts)
+
+
 def build_apply_cancel_keyboard(*, pending_id: int) -> list[list[CallbackButton]]:
     return [[
         CallbackButton(text="Apply", callback_data=f"apply:{pending_id}"),

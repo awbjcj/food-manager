@@ -15,6 +15,40 @@ def _fmt_date(value: date, *, today: date) -> str:
     return base
 
 
+URGENCY_SOON_DAYS = 3
+
+
+def _urgency_icon(expires_on: date, *, today: date) -> str:
+    delta = (expires_on - today).days
+    if delta <= 0:
+        return "🔴"
+    if delta <= URGENCY_SOON_DAYS:
+        return "🟡"
+    return "🟢"
+
+
+def _qty_prefix(qty: float, unit: str | None) -> str:
+    qty_str = str(int(qty)) if float(qty).is_integer() else str(qty)
+    if unit:
+        return f"{qty_str} {unit} "
+    if qty_str != "1":
+        return f"{qty_str} "
+    return ""
+
+
+def render_item_line(item, *, today: date) -> str:
+    icon = _urgency_icon(item.expires_on, today=today)
+    qty = _qty_prefix(item.qty, item.unit)
+    delta = (item.expires_on - today).days
+    if delta < 0:
+        tail = f"expired {-delta}d"
+    elif delta == 0:
+        tail = "today"
+    else:
+        tail = f"{_fmt_date(item.expires_on, today=today)} ({delta}d)"
+    return f"{icon} #{item.id} {qty}{item.raw_name} - {tail}"
+
+
 def _fmt_cost(micros: int | None) -> str:
     if micros is None:
         return "Cost: unavailable"

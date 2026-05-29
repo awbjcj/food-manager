@@ -9,7 +9,7 @@ from app.cache import get_cached
 from app.correction_service import propose_add
 from app.llm import LLMResult, ParseResult, ParsedItem, ProposedAddItem
 from app.models import PantryItem, Receipt, User
-from app.refine_service import ShelfLifeSearchResult, resolve_search_days, SEARCH_MIN_CONFIDENCE, refine_receipt_items
+from app.refine_service import ShelfLifeSearchResult, resolve_search_days, SEARCH_MIN_CONFIDENCE, refine_receipt_items, AnthropicSearchClient
 from tests.fakes import FakeLLMClient, FakeSearchClient, FakeTextLLMClient
 
 
@@ -223,3 +223,28 @@ async def test_propose_add_no_search_client_uses_estimate(session):
     )
     # no search client passed -> falls through to LLM estimate (or default table if one exists)
     assert proposals[0].payload.shelf_life_days in (9,) or proposals[0].payload.shelf_life_source in ("manual_fallback",)
+
+
+@pytest.mark.asyncio
+async def test_anthropic_search_client_parses_days_and_cost():
+    msg = MagicMock()
+    msg.content = [MagicMock(type="text", text='{"days": 14, "confidence": 0.9}')]
+    msg.usage = MagicMock(input_tokens=100, output_tokens=10)
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(return_value=msg)
+    client = AnthropicSearchClient(sdk=sdk, model="claude-sonnet-4-6")
+    result = await client.lookup_shelf_life(name="Kefir", category="dairy")
+    assert result.days == 14
+    assert result.confidence == 0.9
+    assert result.cost_micros_usd == 450  # 100*3 + 10*15 (sonnet pricing)
+
+
+@pytest.mark.asyncio
+async def test_anthropic_search_client_handles_transport_error():
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(side_effect=RuntimeError("boom"))
+    client = AnthropicSearchClient(sdk=sdk, model="claude-sonnet-4-6")
+    result = await client.lookup_shelf_life(name="Kefir", category=None)
+    assert result.days is None
+    assert result.confidence == 0.0
+    assert result.cost_micros_usd is None

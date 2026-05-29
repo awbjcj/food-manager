@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Optional, Protocol
@@ -81,3 +83,55 @@ async def refine_receipt_items(
         updated.append(item.id)
     session.commit()
     return RefineResult(updated, total_cost if saw_cost else None)
+
+
+log = logging.getLogger(__name__)
+
+SEARCH_SYSTEM_PROMPT = (
+    "You research how long a grocery item stays good under normal home storage. "
+    "Use web search to verify. Then reply with ONLY a JSON object: "
+    '{"days": <int 1..730>, "confidence": <float 0..1>}. '
+    "Use conservative estimates. No prose."
+)
+
+
+class AnthropicSearchClient(ShelfLifeSearchClient):
+    def __init__(self, sdk, model: str, *, max_uses: int = 2):
+        self._sdk = sdk
+        self._model = model
+        self._max_uses = max_uses
+
+    async def lookup_shelf_life(self, *, name: str, category: Optional[str]) -> ShelfLifeSearchResult:
+        from app.llm import _PRICE_MICROS_PER_TOKEN_BY_MODEL  # local import avoids cycle
+        prompt = f"Item: {name}" + (f" (category: {category})" if category else "")
+        try:
+            msg = await self._sdk.messages.create(
+                model=self._model,
+                max_tokens=512,
+                system=SEARCH_SYSTEM_PROMPT,
+                tools=[{"type": "web_search_20250305", "name": "web_search",
+                        "max_uses": self._max_uses}],
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except Exception as exc:
+            log.warning("search_transport_failed", extra={"error_class": type(exc).__name__})
+            return ShelfLifeSearchResult(days=None, confidence=0.0, cost_micros_usd=None)
+
+        price = _PRICE_MICROS_PER_TOKEN_BY_MODEL.get(self._model)
+        cost = None
+        usage = getattr(msg, "usage", None)
+        if price is not None and usage is not None:
+            cost = usage.input_tokens * price["input"] + usage.output_tokens * price["output"]
+
+        text = "".join(
+            b.text for b in msg.content if getattr(b, "type", None) == "text"
+        ).strip()
+        try:
+            data = json.loads(text[text.index("{"): text.rindex("}") + 1])
+            return ShelfLifeSearchResult(
+                days=int(data["days"]), confidence=float(data["confidence"]),
+                cost_micros_usd=cost,
+            )
+        except Exception as exc:
+            log.warning("search_parse_failed", extra={"error_class": type(exc).__name__})
+            return ShelfLifeSearchResult(days=None, confidence=0.0, cost_micros_usd=cost)

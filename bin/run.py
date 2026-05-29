@@ -30,6 +30,7 @@ from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
 from app.db import make_engine, make_session_factory
 from app.llm import AnthropicLLMClient, AnthropicTextLLMClient
+from app.refine_service import AnthropicSearchClient
 from app.scheduler import (
     register_all_user_digests,
     register_sweep_expired_pendings,
@@ -85,6 +86,7 @@ async def _amain(settings: Settings) -> None:
     sdk = AsyncAnthropic(api_key=settings.anthropic_api_key)
     llm = AnthropicLLMClient(sdk=sdk, model=settings.anthropic_model)
     text_llm = AnthropicTextLLMClient(sdk=sdk, model=settings.anthropic_text_model)
+    search = AnthropicSearchClient(sdk=sdk, model=settings.anthropic_search_model)
     bot_mod.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
 
     scheduler = AsyncIOScheduler()
@@ -108,6 +110,7 @@ async def _amain(settings: Settings) -> None:
         session_factory=session_factory,
         llm=llm,
         text_llm=text_llm,
+        search=search,
         now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
         on_user_created=reschedule,
         reschedule=reschedule,

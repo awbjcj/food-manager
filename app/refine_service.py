@@ -9,7 +9,7 @@ from typing import Optional, Protocol
 from sqlmodel import Session
 
 from app.cache import put_cached
-from app.models import PantryItem
+from app.models import PantryItem, Receipt
 
 
 SEARCH_MIN_CONFIDENCE = 0.7
@@ -86,6 +86,47 @@ async def refine_receipt_items(
         updated.append(item.id)
     session.commit()
     return RefineResult(updated, total_cost if saw_cost else None)
+
+
+def _accrue_receipt_cost(session, receipt_id, add_micros):
+    if not add_micros:
+        return
+    receipt = session.get(Receipt, receipt_id)
+    if receipt is None:
+        return
+    receipt.llm_cost_micros_usd = (receipt.llm_cost_micros_usd or 0) + add_micros
+    session.add(receipt)
+    session.commit()
+
+
+def _refresh_summary_from_db(session, summary):
+    for idx, item_id in enumerate(summary.inserted_item_ids):
+        item = session.get(PantryItem, item_id)
+        if item is None:
+            continue
+        summary.inserted_item_expires_on[idx] = item.expires_on
+        summary.inserted_item_shelf_life_days[idx] = item.shelf_life_days
+
+
+async def run_receipt_refine(
+    session_factory,
+    search: ShelfLifeSearchClient,
+    *,
+    item_ids: list[int],
+    summary,
+    user_id: int,
+    receipt_id: int,
+    today: date,
+) -> frozenset:
+    with session_factory() as session:
+        result = await refine_receipt_items(
+            session, search, user_id=user_id, item_ids=item_ids, today=today,
+        )
+        if not result.updated_ids:
+            return frozenset()
+        _accrue_receipt_cost(session, receipt_id, result.total_cost_micros)
+        _refresh_summary_from_db(session, summary)
+        return frozenset(result.updated_ids)
 
 
 log = logging.getLogger(__name__)

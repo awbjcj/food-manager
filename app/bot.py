@@ -35,8 +35,8 @@ from app.correction_service import (
 )
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import LLMClient, TextLLMClient
-from app.models import PantryItem, Receipt, User
-from app.refine_service import refine_receipt_items
+from app.models import PantryItem, User
+from app.refine_service import run_receipt_refine
 from app.pantry_service import (
     NotOwnerOrMissing,
     compute_stats,
@@ -131,25 +131,6 @@ def _require_user(user: User | None) -> User:
     assert user is not None
     return user
 
-
-def _accrue_receipt_cost(session, receipt_id, add_micros):
-    if not add_micros:
-        return
-    receipt = session.get(Receipt, receipt_id)
-    if receipt is None:
-        return
-    receipt.llm_cost_micros_usd = (receipt.llm_cost_micros_usd or 0) + add_micros
-    session.add(receipt)
-    session.commit()
-
-
-def _refresh_summary_from_db(session, summary):
-    for idx, item_id in enumerate(summary.inserted_item_ids):
-        item = session.get(PantryItem, item_id)
-        if item is None:
-            continue
-        summary.inserted_item_expires_on[idx] = item.expires_on
-        summary.inserted_item_shelf_life_days[idx] = item.shelf_life_days
 
 
 async def _guard(
@@ -716,17 +697,13 @@ async def handle_photo(
         item_ids = list(summary.uncached_item_ids)
 
         async def _run_refine():
-            with session_factory() as refine_session:
-                result = await refine_receipt_items(
-                    refine_session, search, user_id=refine_user_id,
-                    item_ids=item_ids, today=today,
-                )
-                if not result.updated_ids:
-                    return
-                _accrue_receipt_cost(refine_session, receipt_id, result.total_cost_micros)
-                refined = frozenset(result.updated_ids)
-                _refresh_summary_from_db(refine_session, summary)
-                text = render_ingest_reply(summary, today=today, refined_ids=refined)
+            refined = await run_receipt_refine(
+                session_factory, search, item_ids=item_ids, summary=summary,
+                user_id=refine_user_id, receipt_id=receipt_id, today=today,
+            )
+            if not refined:
+                return
+            text = render_ingest_reply(summary, today=today, refined_ids=refined)
             try:
                 await bot.edit_message_text(
                     chat_id=chat_id, message_id=message_id, text=text,

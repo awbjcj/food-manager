@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlmodel import SQLModel, Session, create_engine
 
 import app.bot as bot_mod
-from app.bot import _accrue_receipt_cost
+from app.refine_service import _accrue_receipt_cost
 from app.cache import get_cached
 from app.correction_service import propose_add
 from app.llm import LLMResult, ParseResult, ParsedItem, ProposedAddItem
@@ -327,3 +327,50 @@ async def test_refine_skips_item_touched_during_search(session):
     session.refresh(item)
     assert item.shelf_life_days == 7         # estimate preserved
     assert item.status == "removed"
+
+
+@pytest.mark.asyncio
+async def test_run_receipt_refine_refreshes_summary_and_accrues_cost():
+    from sqlmodel import SQLModel, Session, create_engine
+    from app.ingest_service import IngestSummary
+    from app.refine_service import run_receipt_refine
+
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    with factory() as s:
+        s.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        r = Receipt(user_id=1, photo_file_id="r1", purchase_date=date(2026, 5, 28),
+                    purchase_date_source="receipt", scanned_at=datetime.now(timezone.utc),
+                    llm_cost_micros_usd=1000)
+        s.add(r); s.commit(); s.refresh(r)
+        item = PantryItem(
+            user_id=1, raw_name="Kefir", normalized_name="kefir", category="dairy",
+            qty=1.0, unit=None, purchased_on=date(2026, 5, 28), shelf_life_days=7,
+            shelf_life_source="llm", ingest_shelf_life_source="llm",
+            expires_on=date(2026, 6, 4), status="active", created_via="receipt",
+            source_receipt_id=r.id, created_at=datetime.now(timezone.utc),
+        )
+        s.add(item); s.commit(); s.refresh(item)
+        receipt_id, item_id = r.id, item.id
+
+    summary = IngestSummary(
+        receipt_id=receipt_id, inserted_food_count=1,
+        inserted_item_ids=[item_id], inserted_item_names=["Kefir"],
+        inserted_item_expires_on=[date(2026, 6, 4)], inserted_item_shelf_life_days=[7],
+        purchase_date=date(2026, 5, 28), purchase_date_assumed=False,
+        cost_micros_usd=1000, uncached_item_ids=[item_id],
+    )
+    search = FakeSearchClient(default=ShelfLifeSearchResult(days=14, confidence=0.95, cost_micros_usd=300))
+
+    refined = await run_receipt_refine(
+        factory, search, item_ids=[item_id], summary=summary,
+        user_id=1, receipt_id=receipt_id, today=date(2026, 5, 28),
+    )
+    assert refined == frozenset({item_id})
+    # summary refreshed in place to the new shelf life/expiry
+    assert summary.inserted_item_shelf_life_days == [14]
+    assert summary.inserted_item_expires_on == [date(2026, 5, 28) + timedelta(days=14)]
+    # cost accrued onto the receipt
+    with factory() as s:
+        assert s.get(Receipt, receipt_id).llm_cost_micros_usd == 1300

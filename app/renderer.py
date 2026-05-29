@@ -65,6 +65,11 @@ def render_ingest_reply(summary: IngestSummary, *, today: date, refined_ids=froz
             )
         else:
             lines.append("No food items found in this receipt.")
+        if summary.skipped_excluded_count:
+            names = ", ".join(summary.skipped_excluded_names[:5])
+            more = "" if len(summary.skipped_excluded_names) <= 5 else ", ..."
+            lines.append(f"Skipped (not tracked): {names}{more}")
+            lines.append("Want one tracked? /add <name>")
         lines.append(_fmt_cost(summary.cost_micros_usd))
         return "\n".join(lines)
 

@@ -423,3 +423,49 @@ async def test_run_receipt_refine_suppresses_edit_when_receipt_undone():
         user_id=1, receipt_id=receipt_id, today=date(2026, 5, 28),
     )
     assert refined == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_run_receipt_refine_accrues_cost_even_when_nothing_refined():
+    # When all searches return low-confidence results (no item updates),
+    # the search cost must still be accrued on the receipt so /stats is accurate.
+    from app.ingest_service import IngestSummary
+    from app.refine_service import run_receipt_refine
+
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    factory = lambda: Session(engine)
+    with factory() as s:
+        s.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        r = Receipt(user_id=1, photo_file_id="r1", purchase_date=date(2026, 5, 28),
+                    purchase_date_source="receipt", scanned_at=datetime.now(timezone.utc),
+                    llm_cost_micros_usd=1000)
+        s.add(r); s.commit(); s.refresh(r)
+        item = PantryItem(
+            user_id=1, raw_name="Kefir", normalized_name="kefir", category="dairy",
+            qty=1.0, unit=None, purchased_on=date(2026, 5, 28), shelf_life_days=7,
+            shelf_life_source="llm", ingest_shelf_life_source="llm",
+            expires_on=date(2026, 6, 4), status="active", created_via="receipt",
+            source_receipt_id=r.id, created_at=datetime.now(timezone.utc),
+        )
+        s.add(item); s.commit(); s.refresh(item)
+        receipt_id, item_id = r.id, item.id
+
+    summary = IngestSummary(
+        receipt_id=receipt_id, inserted_food_count=1,
+        inserted_item_ids=[item_id], inserted_item_names=["Kefir"],
+        inserted_item_expires_on=[date(2026, 6, 4)], inserted_item_shelf_life_days=[7],
+        purchase_date=date(2026, 5, 28), purchase_date_assumed=False,
+        cost_micros_usd=1000, uncached_item_ids=[item_id],
+    )
+    # Low confidence — resolve_search_days returns None, so no item is updated.
+    search = FakeSearchClient(default=ShelfLifeSearchResult(days=14, confidence=0.3, cost_micros_usd=200))
+
+    refined = await run_receipt_refine(
+        factory, search, item_ids=[item_id], summary=summary,
+        user_id=1, receipt_id=receipt_id, today=date(2026, 5, 28),
+    )
+    assert refined == frozenset()
+    # Search was paid for even though nothing was updated.
+    with factory() as s:
+        assert s.get(Receipt, receipt_id).llm_cost_micros_usd == 1200

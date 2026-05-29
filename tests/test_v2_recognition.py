@@ -75,3 +75,21 @@ def test_render_ingest_reply_lists_excluded():
     text = render_ingest_reply(summary, today=date(2026, 5, 28))
     assert "Skipped (not tracked): Ketchup, Advil" in text
     assert "/add" in text
+
+
+def test_render_ingest_reply_excluded_only_receipt():
+    # A receipt containing only non-tracked items (medicines, condiments) has
+    # inserted_food_count==0; the excluded-items hint must still be shown so the
+    # user knows why nothing was logged and can /add if needed.
+    summary = IngestSummary(
+        receipt_id=1, inserted_food_count=0,
+        inserted_item_ids=[], inserted_item_names=[],
+        inserted_item_expires_on=[], inserted_item_shelf_life_days=[],
+        purchase_date=date(2026, 5, 28), purchase_date_assumed=False,
+        cost_micros_usd=500,
+        skipped_excluded_count=3, skipped_excluded_names=["Advil", "Ketchup", "Bleach"],
+    )
+    text = render_ingest_reply(summary, today=date(2026, 5, 28))
+    assert "No food items found" in text
+    assert "Skipped (not tracked): Advil, Ketchup, Bleach" in text
+    assert "/add" in text

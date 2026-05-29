@@ -122,14 +122,14 @@ async def run_receipt_refine(
         result = await refine_receipt_items(
             session, search, user_id=user_id, item_ids=item_ids, today=today,
         )
-        if not result.updated_ids:
+        receipt_exists = session.get(Receipt, receipt_id) is not None
+        if receipt_exists:
+            _accrue_receipt_cost(session, receipt_id, result.total_cost_micros)
+        if not result.updated_ids or not receipt_exists:
+            # No updates, or the receipt was fully undone (deleted) while the
+            # web search was in flight — suppress the edit so we don't resurrect
+            # the "Undone" message with a live Undo button.
             return frozenset()
-        if session.get(Receipt, receipt_id) is None:
-            # The receipt was fully undone (deleted) while the web search was in
-            # flight. Suppress the edit so we don't resurrect the "Undone" message
-            # with a live Undo button pointing at items that are already removed.
-            return frozenset()
-        _accrue_receipt_cost(session, receipt_id, result.total_cost_micros)
         _refresh_summary_from_db(session, summary)
         return frozenset(result.updated_ids)
 

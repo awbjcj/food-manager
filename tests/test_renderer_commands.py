@@ -141,6 +141,8 @@ def test_render_digest_buckets_and_keyboard():
     assert "Today (2)" in rendered.text
     assert "Tomorrow (1)" in rendered.text
     assert "This week (1)" in rendered.text
+    assert "🔴 #42 Whole Milk 1 gal - today" in rendered.text
+    assert "🟡 #44 Sliced Bread - May 28 (1d)" in rendered.text
     keyboard = build_digest_keyboard([42], has_more=False)
     assert {button.callback_data for button in keyboard[0]} == {
         "act:ate:42",

@@ -287,6 +287,7 @@ async def handle_add(
     now_provider: NowProvider,
     text_llm: TextLLMClient,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    search=None,
 ) -> None:
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
@@ -305,6 +306,7 @@ async def handle_add(
                 user_text=parts[1].strip(),
                 today=today,
                 tz=user.tz,
+                search=search,
             )
         except Exception as exc:
             log.warning(
@@ -1051,6 +1053,7 @@ def build_dispatcher(
             now_provider=now_provider,
             text_llm=text_llm,
             on_user_created=on_user_created,
+            search=search,
         )
 
     async def on_ate(message):

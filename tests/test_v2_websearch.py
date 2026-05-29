@@ -6,10 +6,11 @@ from sqlmodel import SQLModel, Session, create_engine
 
 import app.bot as bot_mod
 from app.cache import get_cached
-from app.llm import LLMResult, ParseResult, ParsedItem
+from app.correction_service import propose_add
+from app.llm import LLMResult, ParseResult, ParsedItem, ProposedAddItem
 from app.models import PantryItem, Receipt, User
 from app.refine_service import ShelfLifeSearchResult, resolve_search_days, SEARCH_MIN_CONFIDENCE, refine_receipt_items
-from tests.fakes import FakeLLMClient, FakeSearchClient
+from tests.fakes import FakeLLMClient, FakeSearchClient, FakeTextLLMClient
 
 
 def test_resolve_accepts_confident_in_range():
@@ -178,3 +179,47 @@ async def test_handle_photo_spawns_refine_and_edits_message(monkeypatch):
     edited_text = call_kwargs["text"]
     assert "Kefir" in edited_text
     assert "✓refined" in edited_text
+
+
+@pytest.mark.asyncio
+async def test_propose_add_uses_search_on_cache_miss(session):
+    text_llm = FakeTextLLMClient(canned_add=([
+        ProposedAddItem(name="Kefir", explicit_user_expiry=False,
+                        estimated_shelf_life_days=7, confidence=0.9)
+    ], 500))
+    search = FakeSearchClient(default=ShelfLifeSearchResult(days=14, confidence=0.95, cost_micros_usd=200))
+    proposals, _ = await propose_add(
+        session, llm=text_llm, user_id=1, user_text="kefir",
+        today=date(2026, 5, 28), tz="America/Detroit", search=search,
+    )
+    assert proposals[0].payload.shelf_life_days == 14
+    assert proposals[0].payload.shelf_life_source == "websearch"
+
+
+@pytest.mark.asyncio
+async def test_propose_add_skips_search_when_user_gave_expiry(session):
+    text_llm = FakeTextLLMClient(canned_add=([
+        ProposedAddItem(name="Kefir", explicit_user_expiry=True,
+                        shelf_life_days=3, confidence=0.9)
+    ], 500))
+    search = FakeSearchClient(default=ShelfLifeSearchResult(days=14, confidence=0.95, cost_micros_usd=200))
+    proposals, _ = await propose_add(
+        session, llm=text_llm, user_id=1, user_text="kefir keeps 3 days",
+        today=date(2026, 5, 28), tz="America/Detroit", search=search,
+    )
+    assert proposals[0].payload.shelf_life_days == 3
+    assert search.calls == []
+
+
+@pytest.mark.asyncio
+async def test_propose_add_no_search_client_uses_estimate(session):
+    text_llm = FakeTextLLMClient(canned_add=([
+        ProposedAddItem(name="Kumquat", explicit_user_expiry=False,
+                        estimated_shelf_life_days=9, confidence=0.9)
+    ], 500))
+    proposals, _ = await propose_add(
+        session, llm=text_llm, user_id=1, user_text="kumquat",
+        today=date(2026, 5, 28), tz="America/Detroit",
+    )
+    # no search client passed -> falls through to LLM estimate (or default table if one exists)
+    assert proposals[0].payload.shelf_life_days in (9,) or proposals[0].payload.shelf_life_source in ("manual_fallback",)

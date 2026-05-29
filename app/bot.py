@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -34,7 +35,8 @@ from app.correction_service import (
 )
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import LLMClient, TextLLMClient
-from app.models import PantryItem, User
+from app.models import PantryItem, Receipt, User
+from app.refine_service import refine_receipt_items
 from app.pantry_service import (
     NotOwnerOrMissing,
     compute_stats,
@@ -128,6 +130,26 @@ def _noop_user_created(user: User) -> None:
 def _require_user(user: User | None) -> User:
     assert user is not None
     return user
+
+
+def _accrue_receipt_cost(session, receipt_id, add_micros):
+    if not add_micros:
+        return
+    receipt = session.get(Receipt, receipt_id)
+    if receipt is None:
+        return
+    receipt.llm_cost_micros_usd = (receipt.llm_cost_micros_usd or 0) + add_micros
+    session.add(receipt)
+    session.commit()
+
+
+def _refresh_summary_from_db(session, summary):
+    for idx, item_id in enumerate(summary.inserted_item_ids):
+        item = session.get(PantryItem, item_id)
+        if item is None:
+            continue
+        summary.inserted_item_expires_on[idx] = item.expires_on
+        summary.inserted_item_shelf_life_days[idx] = item.shelf_life_days
 
 
 async def _guard(
@@ -624,6 +646,9 @@ async def handle_photo(
     llm: LLMClient,
     photo_downloader: Callable[[str], Awaitable[bytes]],
     on_user_created: Callable[[User], None] = _noop_user_created,
+    search=None,
+    spawn=None,
+    bot=None,
 ) -> None:
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
@@ -676,7 +701,39 @@ async def handle_photo(
             if summary.receipt_id is not None and summary.inserted_food_count
             else None
         )
-        await msg.answer(render_ingest_reply(summary, today=today), reply_markup=keyboard)
+        refine_user_id = user.telegram_id
+        sent = await msg.answer(render_ingest_reply(summary, today=today), reply_markup=keyboard)
+
+    if (
+        search is not None and spawn is not None and bot is not None
+        and summary.receipt_id is not None and summary.uncached_item_ids
+    ):
+        chat_id = msg.chat.id
+        message_id = sent.message_id
+        receipt_id = summary.receipt_id
+        item_ids = list(summary.uncached_item_ids)
+
+        async def _run_refine():
+            with session_factory() as refine_session:
+                result = await refine_receipt_items(
+                    refine_session, search, user_id=refine_user_id,
+                    item_ids=item_ids, today=today,
+                )
+                if not result.updated_ids:
+                    return
+                _accrue_receipt_cost(refine_session, receipt_id, result.total_cost_micros)
+                refined = frozenset(result.updated_ids)
+                _refresh_summary_from_db(refine_session, summary)
+                text = render_ingest_reply(summary, today=today, refined_ids=refined)
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id, message_id=message_id, text=text,
+                    reply_markup=to_aiogram_keyboard(build_undo_keyboard(receipt_id=receipt_id)),
+                )
+            except Exception as exc:
+                log.warning("refine_edit_failed", extra={"error_class": type(exc).__name__})
+
+        spawn(_run_refine())
 
 
 async def handle_callback(cb, *, session_factory, now_provider) -> None:
@@ -951,6 +1008,7 @@ def build_dispatcher(
     now_provider: NowProvider,
     on_user_created: Callable[[User], None],
     reschedule: Callable[[User], None],
+    search=None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -1059,6 +1117,9 @@ def build_dispatcher(
             llm=llm,
             photo_downloader=downloader,
             on_user_created=on_user_created,
+            search=search,
+            spawn=asyncio.create_task,
+            bot=bot,
         )
 
     async def on_callback(callback):

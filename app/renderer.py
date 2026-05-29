@@ -55,7 +55,7 @@ def _fmt_cost(micros: int | None) -> str:
     return f"Cost: ${micros / 1_000_000:.3f}"
 
 
-def render_ingest_reply(summary: IngestSummary, *, today: date) -> str:
+def render_ingest_reply(summary: IngestSummary, *, today: date, refined_ids=frozenset()) -> str:
     lines: list[str] = []
     if summary.inserted_food_count == 0:
         if summary.skipped_low_confidence_count:
@@ -75,8 +75,9 @@ def render_ingest_reply(summary: IngestSummary, *, today: date) -> str:
         summary.inserted_item_expires_on,
         summary.inserted_item_shelf_life_days,
     ):
+        mark = " ✓refined" if item_id in refined_ids else ""
         lines.append(
-            f"  - #{item_id} {name} - exp {_fmt_date(expires_on, today=today)} ({shelf_life_days}d)"
+            f"  - #{item_id} {name} - exp {_fmt_date(expires_on, today=today)} ({shelf_life_days}d){mark}"
         )
 
     if summary.purchase_date is not None and summary.purchase_date != today:

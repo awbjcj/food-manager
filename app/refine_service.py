@@ -70,6 +70,9 @@ async def refine_receipt_items(
         days = resolve_search_days(result)
         if days is None:
             continue
+        session.refresh(item)            # pick up any change committed during the await
+        if not is_untouched(item):       # user acted on it mid-search -> don't clobber
+            continue
         item.shelf_life_days = days
         item.shelf_life_source = "websearch"
         item.expires_on = item.purchased_on + timedelta(days=days)

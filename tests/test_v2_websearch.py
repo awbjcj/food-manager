@@ -260,3 +260,70 @@ def test_accrued_search_cost_shows_in_stats(session):
     _accrue_receipt_cost(session, r.id, 300)  # simulate refine search cost
     stats = compute_stats(session, user_id=1, now=datetime.now(timezone.utc))
     assert stats.total_cost_micros_usd == 1300
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: /add inline websearch cost must flow into the proposal's cost_share
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_propose_add_search_cost_added_to_cost_share(session):
+    text_llm = FakeTextLLMClient(canned_add=([
+        ProposedAddItem(name="Kefir", explicit_user_expiry=False,
+                        estimated_shelf_life_days=7, confidence=0.9)
+    ], 500))
+    search = FakeSearchClient(default=ShelfLifeSearchResult(days=14, confidence=0.95, cost_micros_usd=200))
+    proposals, _ = await propose_add(
+        session, llm=text_llm, user_id=1, user_text="kefir",
+        today=date(2026, 5, 28), tz="America/Detroit", search=search,
+    )
+    # single item: parse share 500 + search 200 = 700
+    assert proposals[0].cost_share == 700
+
+
+@pytest.mark.asyncio
+async def test_propose_add_search_cost_when_parse_cost_unknown(session):
+    text_llm = FakeTextLLMClient(canned_add=([
+        ProposedAddItem(name="Kefir", explicit_user_expiry=False,
+                        estimated_shelf_life_days=7, confidence=0.9)
+    ], None))  # unknown parse cost
+    search = FakeSearchClient(default=ShelfLifeSearchResult(days=14, confidence=0.95, cost_micros_usd=200))
+    proposals, _ = await propose_add(
+        session, llm=text_llm, user_id=1, user_text="kefir",
+        today=date(2026, 5, 28), tz="America/Detroit", search=search,
+    )
+    assert proposals[0].cost_share == 200  # parse None -> just search cost
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: refine_receipt_items must re-check is_untouched AFTER the search await
+# ---------------------------------------------------------------------------
+
+class _RemovingSearch:
+    def __init__(self, session, item_id):
+        self._session = session
+        self._item_id = item_id
+        self.calls = []
+
+    async def lookup_shelf_life(self, *, name, category):
+        self.calls.append(name)
+        # simulate an undo/eaten committed during the search await
+        target = self._session.get(PantryItem, self._item_id)
+        target.status = "removed"
+        self._session.add(target)
+        self._session.commit()
+        return ShelfLifeSearchResult(days=14, confidence=0.95, cost_micros_usd=100)
+
+
+@pytest.mark.asyncio
+async def test_refine_skips_item_touched_during_search(session):
+    item = _item(session, "Kefir", days=7)   # _item helper already exists in this file
+    search = _RemovingSearch(session, item.id)
+    result = await refine_receipt_items(
+        session, search, user_id=1, item_ids=[item.id], today=date(2026, 5, 28),
+    )
+    assert result.updated_ids == []          # write skipped after re-check
+    assert result.total_cost_micros == 100   # but the search cost is still accrued
+    session.refresh(item)
+    assert item.shelf_life_days == 7         # estimate preserved
+    assert item.status == "removed"

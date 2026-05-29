@@ -284,6 +284,7 @@ async def propose_add(
     for parsed, cost_share in zip(items, shares):
         normalized = normalize(parsed.name)
         category = parsed.category
+        search_cost: Optional[int] = None
 
         if parsed.explicit_user_expiry:
             if parsed.shelf_life_days is not None:
@@ -307,9 +308,9 @@ async def propose_add(
             else:
                 searched = None
                 if search is not None:
-                    searched = resolve_search_days(
-                        await search.lookup_shelf_life(name=parsed.name, category=category)
-                    )
+                    search_result = await search.lookup_shelf_life(name=parsed.name, category=category)
+                    search_cost = search_result.cost_micros_usd
+                    searched = resolve_search_days(search_result)
                 if searched is not None:
                     days = searched
                     shelf_life_source = "websearch"
@@ -335,6 +336,9 @@ async def propose_add(
                         ingest_source = "manual_fallback"
             expires_on = today + timedelta(days=days)
 
+        combined_cost = cost_share if search_cost is None else (
+            search_cost if cost_share is None else cost_share + search_cost
+        )
         proposals.append(
             AddProposal(
                 payload=AddPayload(
@@ -350,7 +354,7 @@ async def propose_add(
                     estimated_shelf_life_days=parsed.estimated_shelf_life_days,
                     confidence=parsed.confidence,
                 ),
-                cost_share=cost_share,
+                cost_share=combined_cost,
             )
         )
     return proposals, total_cost

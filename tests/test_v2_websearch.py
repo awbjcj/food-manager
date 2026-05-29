@@ -5,10 +5,12 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlmodel import SQLModel, Session, create_engine
 
 import app.bot as bot_mod
+from app.bot import _accrue_receipt_cost
 from app.cache import get_cached
 from app.correction_service import propose_add
 from app.llm import LLMResult, ParseResult, ParsedItem, ProposedAddItem
 from app.models import PantryItem, Receipt, User
+from app.pantry_service import compute_stats
 from app.refine_service import ShelfLifeSearchResult, resolve_search_days, SEARCH_MIN_CONFIDENCE, refine_receipt_items, AnthropicSearchClient
 from tests.fakes import FakeLLMClient, FakeSearchClient, FakeTextLLMClient
 
@@ -248,3 +250,13 @@ async def test_anthropic_search_client_handles_transport_error():
     assert result.days is None
     assert result.confidence == 0.0
     assert result.cost_micros_usd is None
+
+
+def test_accrued_search_cost_shows_in_stats(session):
+    r = Receipt(user_id=1, photo_file_id="r1", purchase_date=date(2026, 5, 28),
+                purchase_date_source="receipt", scanned_at=datetime.now(timezone.utc),
+                llm_cost_micros_usd=1000)
+    session.add(r); session.commit()
+    _accrue_receipt_cost(session, r.id, 300)  # simulate refine search cost
+    stats = compute_stats(session, user_id=1, now=datetime.now(timezone.utc))
+    assert stats.total_cost_micros_usd == 1300

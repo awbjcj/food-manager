@@ -109,13 +109,27 @@ def test_undo_add_single_item(session):
     assert item.status == "removed"
 
 
-def test_undo_add_skips_corrected(session):
+def test_undo_add_explicit_expiry_is_undoable(session):
+    # A manual /add with an explicit expiry is born shelf_life_source=
+    # "user_correction"; its own Undo button must still remove it (regression:
+    # it used to be wrongly reported as "skipped (corrected)").
     now = datetime.now(timezone.utc)
     item = _ritem(session, None, "Solo", source="user_correction", created_at=now)
     from app.pantry_service import undo_add
     result = undo_add(session, user_id=1, item_id=item.id, now=now)
+    assert result.removed_ids == [item.id]
+    assert result.skipped == []
+    session.refresh(item)
+    assert item.status == "removed"
+
+
+def test_undo_add_skips_eaten(session):
+    now = datetime.now(timezone.utc)
+    item = _ritem(session, None, "Solo", status="eaten", created_at=now)
+    from app.pantry_service import undo_add
+    result = undo_add(session, user_id=1, item_id=item.id, now=now)
     assert result.removed_ids == []
-    assert result.skipped == [(item.id, "corrected")]
+    assert result.skipped == [(item.id, "eaten")]
 
 
 def test_undo_keyboards():

@@ -132,7 +132,6 @@ def _require_user(user: User | None) -> User:
     return user
 
 
-
 async def _guard(
     msg,
     session: Session,

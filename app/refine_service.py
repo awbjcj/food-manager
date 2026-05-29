@@ -124,6 +124,11 @@ async def run_receipt_refine(
         )
         if not result.updated_ids:
             return frozenset()
+        if session.get(Receipt, receipt_id) is None:
+            # The receipt was fully undone (deleted) while the web search was in
+            # flight. Suppress the edit so we don't resurrect the "Undone" message
+            # with a live Undo button pointing at items that are already removed.
+            return frozenset()
         _accrue_receipt_cost(session, receipt_id, result.total_cost_micros)
         _refresh_summary_from_db(session, summary)
         return frozenset(result.updated_ids)

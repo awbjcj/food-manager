@@ -295,6 +295,15 @@ def is_untouched(item: PantryItem) -> bool:
     )
 
 
+def _is_undoable_add(item: PantryItem) -> bool:
+    # A manually-added item is undoable while it is still active and not
+    # snoozed. Unlike receipt items (always born "cache"/"llm"), a manual
+    # /add with an explicit expiry is *born* with shelf_life_source ==
+    # "user_correction", so that source must NOT count as "touched" here --
+    # otherwise the Undo button on such an /add would never remove the item.
+    return item.status == "active" and item.snoozed_until is None
+
+
 def _skip_reason(item: PantryItem) -> str:
     if item.status != "active":
         return item.status
@@ -338,6 +347,7 @@ def undo_receipt(
         if is_untouched(item):
             item.status = "removed"
             item.snoozed_until = None
+            expire_for_item(session, user_id=user_id, item_id=item.id)
             removed_ids.append(item.id)
         else:
             skipped.append((item.id, _skip_reason(item)))
@@ -363,10 +373,11 @@ def undo_add(
     if _expired(item.created_at, now):
         return UndoResult([], [], False, expired=True)
     assert item.id is not None
-    if not is_untouched(item):
+    if not _is_undoable_add(item):
         return UndoResult([], [(item.id, _skip_reason(item))], False, expired=False)
     item.status = "removed"
     item.snoozed_until = None
+    expire_for_item(session, user_id=user_id, item_id=item.id)
     session.add(item)
     session.commit()
     return UndoResult([item.id], [], receipt_deleted=False, expired=False)

@@ -44,6 +44,8 @@ from app.pantry_service import (
     mark_removed,
     mark_tossed,
     snooze_item,
+    undo_add,
+    undo_receipt,
 )
 from app.pending_service import (
     create_pending,
@@ -58,6 +60,8 @@ from app.renderer import (
     CallbackButton,
     build_apply_cancel_keyboard,
     build_digest_keyboard,
+    build_undo_add_keyboard,
+    build_undo_keyboard,
     render_add_diff,
     render_applied_add,
     render_applied_correction,
@@ -67,6 +71,7 @@ from app.renderer import (
     render_list,
     render_stats,
     render_terminal_state,
+    render_undo_result,
 )
 
 DEFAULT_TZ = "America/Detroit"
@@ -666,7 +671,12 @@ async def handle_photo(
                 "inserted_food_count": summary.inserted_food_count,
             },
         )
-        await msg.answer(render_ingest_reply(summary, today=today))
+        keyboard = (
+            to_aiogram_keyboard(build_undo_keyboard(receipt_id=summary.receipt_id))
+            if summary.receipt_id is not None and summary.inserted_food_count
+            else None
+        )
+        await msg.answer(render_ingest_reply(summary, today=today), reply_markup=keyboard)
 
 
 async def handle_callback(cb, *, session_factory, now_provider) -> None:
@@ -708,6 +718,25 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
                 pending_id=pending_id,
                 verb=action.verb,
             )
+            return
+
+        if action.verb in ("undo_receipt", "undo_add"):
+            target_id = action.item_id
+            assert target_id is not None
+            now = datetime.now(timezone.utc)
+            if action.verb == "undo_receipt":
+                result = undo_receipt(
+                    session, user_id=user.telegram_id, receipt_id=target_id, now=now
+                )
+            else:
+                result = undo_add(
+                    session, user_id=user.telegram_id, item_id=target_id, now=now
+                )
+            try:
+                await cb.message.edit_text(render_undo_result(result))
+            except Exception as exc:
+                log.warning("undo_edit_failed", extra={"error_class": type(exc).__name__})
+            await cb.answer("undone" if result.removed_ids else "nothing undone")
             return
 
         item_id = action.item_id
@@ -857,7 +886,10 @@ async def _handle_pending_callback(
     mark_applied(session, pending=pending)
     session.commit()
     try:
-        await cb.message.edit_text(render_applied_add(item_id=new_id, payload=payload))
+        await cb.message.edit_text(
+            render_applied_add(item_id=new_id, payload=payload),
+            reply_markup=to_aiogram_keyboard(build_undo_add_keyboard(item_id=new_id)),
+        )
     except Exception as exc:
         log.warning(
             "pending_message_edit_failed",

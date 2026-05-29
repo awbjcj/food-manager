@@ -1,10 +1,12 @@
 import pytest
 from datetime import date, datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock
 from sqlmodel import SQLModel, Session, create_engine
 from app.models import PantryItem, Receipt, User
 from app.commands import CallbackAction, CommandError, parse_callback
 from app.pantry_service import UndoResult
 from app.renderer import build_undo_keyboard, build_undo_add_keyboard, render_undo_result
+import app.bot as bot_mod
 
 
 def test_parse_undo_receipt_and_add():
@@ -130,3 +132,94 @@ def test_render_undo_result_full_and_partial():
     assert "skipped #3 (eaten)" in partial
     expired = render_undo_result(UndoResult([], [], False, expired=True))
     assert "expired" in expired.lower()
+
+
+# ---------------------------------------------------------------------------
+# Handler integration tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def handler_engine():
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(User(telegram_id=1, chat_id=99, created_at=datetime.now(timezone.utc)))
+        db.commit()
+    return engine
+
+
+def _cb(data: str, *, user_id: int = 1):
+    cb = MagicMock()
+    cb.from_user = MagicMock(id=user_id)
+    cb.data = data
+    cb.answer = AsyncMock()
+    cb.message = MagicMock()
+    cb.message.answer = AsyncMock()
+    cb.message.edit_text = AsyncMock()
+    return cb
+
+
+@pytest.mark.asyncio
+async def test_handle_callback_undo_receipt(handler_engine, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    now = datetime.now(timezone.utc)
+
+    # Insert a receipt and an active item referencing it
+    with Session(handler_engine) as setup_db:
+        receipt = Receipt(
+            user_id=1,
+            photo_file_id="ph_undo_test",
+            purchase_date=date(2026, 5, 28),
+            purchase_date_source="receipt",
+            scanned_at=now,
+        )
+        setup_db.add(receipt)
+        setup_db.commit()
+        setup_db.refresh(receipt)
+        receipt_id = receipt.id
+        assert receipt_id is not None
+
+        item = PantryItem(
+            user_id=1,
+            raw_name="Eggs",
+            normalized_name="eggs",
+            category="dairy",
+            qty=1.0,
+            unit=None,
+            purchased_on=date(2026, 5, 28),
+            shelf_life_days=14,
+            shelf_life_source="llm",
+            ingest_shelf_life_source="llm",
+            expires_on=date(2026, 6, 11),
+            status="active",
+            created_via="receipt",
+            source_receipt_id=receipt_id,
+            created_at=now,
+        )
+        setup_db.add(item)
+        setup_db.commit()
+        setup_db.refresh(item)
+        item_id = item.id
+        assert item_id is not None
+
+    cb = _cb(f"undo:receipt:{receipt_id}")
+
+    await bot_mod.handle_callback(
+        cb,
+        session_factory=lambda: Session(handler_engine),
+        now_provider=lambda tz: datetime(2026, 5, 29, tzinfo=timezone.utc),
+    )
+
+    # edit_text should have been called with a message containing "Undone"
+    cb.message.edit_text.assert_awaited_once()
+    edited_text = cb.message.edit_text.await_args.args[0]
+    assert "Undone" in edited_text
+
+    # The item should now be status="removed" — verify in a fresh session
+    with Session(handler_engine) as verify_db:
+        refreshed = verify_db.get(PantryItem, item_id)
+        assert refreshed is not None
+        assert refreshed.status == "removed"
+
+    # cb.answer should have been called with "undone"
+    cb.answer.assert_awaited_once_with("undone")

@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator, Optional
 
 from app.llm import CorrectionDiff, LLMClient, LLMResult, ProposedAddItem
+from app.refine_service import ShelfLifeSearchClient, ShelfLifeSearchResult
 
 
 @dataclass
@@ -63,3 +64,17 @@ class FakeTextLLMClient:
             return self.canned_add_sequence.pop(0)
         assert self.canned_add is not None
         return self.canned_add
+
+
+@dataclass
+class FakeSearchClient(ShelfLifeSearchClient):
+    by_name: dict[str, ShelfLifeSearchResult] = field(default_factory=dict)
+    default: Optional[ShelfLifeSearchResult] = None
+    calls: list[str] = field(default_factory=list)
+
+    async def lookup_shelf_life(self, *, name, category):
+        self.calls.append(name)
+        if name in self.by_name:
+            return self.by_name[name]
+        assert self.default is not None, f"no canned result for {name!r}"
+        return self.default

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -35,6 +36,7 @@ from app.correction_service import (
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import LLMClient, TextLLMClient
 from app.models import PantryItem, User
+from app.refine_service import run_receipt_refine
 from app.pantry_service import (
     NotOwnerOrMissing,
     compute_stats,
@@ -44,6 +46,8 @@ from app.pantry_service import (
     mark_removed,
     mark_tossed,
     snooze_item,
+    undo_add,
+    undo_receipt,
 )
 from app.pending_service import (
     create_pending,
@@ -58,6 +62,8 @@ from app.renderer import (
     CallbackButton,
     build_apply_cancel_keyboard,
     build_digest_keyboard,
+    build_undo_add_keyboard,
+    build_undo_keyboard,
     render_add_diff,
     render_applied_add,
     render_applied_correction,
@@ -67,6 +73,7 @@ from app.renderer import (
     render_list,
     render_stats,
     render_terminal_state,
+    render_undo_result,
 )
 
 DEFAULT_TZ = "America/Detroit"
@@ -260,6 +267,7 @@ async def handle_add(
     now_provider: NowProvider,
     text_llm: TextLLMClient,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    search=None,
 ) -> None:
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
@@ -278,6 +286,7 @@ async def handle_add(
                 user_text=parts[1].strip(),
                 today=today,
                 tz=user.tz,
+                search=search,
             )
         except Exception as exc:
             log.warning(
@@ -619,6 +628,9 @@ async def handle_photo(
     llm: LLMClient,
     photo_downloader: Callable[[str], Awaitable[bytes]],
     on_user_created: Callable[[User], None] = _noop_user_created,
+    search=None,
+    spawn=None,
+    bot=None,
 ) -> None:
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
@@ -666,7 +678,40 @@ async def handle_photo(
                 "inserted_food_count": summary.inserted_food_count,
             },
         )
-        await msg.answer(render_ingest_reply(summary, today=today))
+        keyboard = (
+            to_aiogram_keyboard(build_undo_keyboard(receipt_id=summary.receipt_id))
+            if summary.receipt_id is not None and summary.inserted_food_count
+            else None
+        )
+        refine_user_id = user.telegram_id
+        sent = await msg.answer(render_ingest_reply(summary, today=today), reply_markup=keyboard)
+
+    if (
+        search is not None and spawn is not None and bot is not None
+        and summary.receipt_id is not None and summary.uncached_item_ids
+    ):
+        chat_id = msg.chat.id
+        message_id = sent.message_id
+        receipt_id = summary.receipt_id
+        item_ids = list(summary.uncached_item_ids)
+
+        async def _run_refine():
+            refined = await run_receipt_refine(
+                session_factory, search, item_ids=item_ids, summary=summary,
+                user_id=refine_user_id, receipt_id=receipt_id, today=today,
+            )
+            if not refined:
+                return
+            text = render_ingest_reply(summary, today=today, refined_ids=refined)
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id, message_id=message_id, text=text,
+                    reply_markup=to_aiogram_keyboard(build_undo_keyboard(receipt_id=receipt_id)),
+                )
+            except Exception as exc:
+                log.warning("refine_edit_failed", extra={"error_class": type(exc).__name__})
+
+        spawn(_run_refine())
 
 
 async def handle_callback(cb, *, session_factory, now_provider) -> None:
@@ -708,6 +753,25 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
                 pending_id=pending_id,
                 verb=action.verb,
             )
+            return
+
+        if action.verb in ("undo_receipt", "undo_add"):
+            target_id = action.item_id
+            assert target_id is not None
+            now = datetime.now(timezone.utc)
+            if action.verb == "undo_receipt":
+                result = undo_receipt(
+                    session, user_id=user.telegram_id, receipt_id=target_id, now=now
+                )
+            else:
+                result = undo_add(
+                    session, user_id=user.telegram_id, item_id=target_id, now=now
+                )
+            try:
+                await cb.message.edit_text(render_undo_result(result))
+            except Exception as exc:
+                log.warning("undo_edit_failed", extra={"error_class": type(exc).__name__})
+            await cb.answer("undone" if result.removed_ids else "nothing undone")
             return
 
         item_id = action.item_id
@@ -857,7 +921,10 @@ async def _handle_pending_callback(
     mark_applied(session, pending=pending)
     session.commit()
     try:
-        await cb.message.edit_text(render_applied_add(item_id=new_id, payload=payload))
+        await cb.message.edit_text(
+            render_applied_add(item_id=new_id, payload=payload),
+            reply_markup=to_aiogram_keyboard(build_undo_add_keyboard(item_id=new_id)),
+        )
     except Exception as exc:
         log.warning(
             "pending_message_edit_failed",
@@ -919,6 +986,7 @@ def build_dispatcher(
     now_provider: NowProvider,
     on_user_created: Callable[[User], None],
     reschedule: Callable[[User], None],
+    search=None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -961,6 +1029,7 @@ def build_dispatcher(
             now_provider=now_provider,
             text_llm=text_llm,
             on_user_created=on_user_created,
+            search=search,
         )
 
     async def on_ate(message):
@@ -1027,6 +1096,9 @@ def build_dispatcher(
             llm=llm,
             photo_downloader=downloader,
             on_user_created=on_user_created,
+            search=search,
+            spawn=asyncio.create_task,
+            bot=bot,
         )
 
     async def on_callback(callback):

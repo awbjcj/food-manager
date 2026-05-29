@@ -19,6 +19,7 @@ class Settings(BaseSettings):
         default="claude-haiku-4-5-20251001",
         alias="ANTHROPIC_TEXT_MODEL",
     )
+    anthropic_search_model: str = Field(default="claude-sonnet-4-6", alias="ANTHROPIC_SEARCH_MODEL")
     database_path: str = Field(default="./food.db", alias="DATABASE_PATH")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     env: str = Field(default="dev", alias="ENV")

@@ -66,6 +66,9 @@ class IngestSummary:
     skipped_low_confidence_count: int = 0
     skipped_low_confidence_names: list[str] = field(default_factory=list)
     low_confidence_inserted_ids: list[int] = field(default_factory=list)
+    skipped_excluded_count: int = 0
+    skipped_excluded_names: list[str] = field(default_factory=list)
+    uncached_item_ids: list[int] = field(default_factory=list)
     purchase_date: Optional[date] = None
     purchase_date_assumed: bool = False
     cost_micros_usd: Optional[int] = None
@@ -113,6 +116,10 @@ async def ingest_photo(
 
     to_insert: list[tuple[ParsedItem, bool]] = []
     for parsed_item in parsed_receipt.items:
+        if not parsed_item.track_worthy:
+            summary.skipped_excluded_count += 1
+            summary.skipped_excluded_names.append(parsed_item.name)
+            continue
         if not parsed_item.is_food:
             summary.skipped_non_food_count += 1
             continue
@@ -170,6 +177,8 @@ async def ingest_photo(
             summary.inserted_item_shelf_life_days.append(pantry_item.shelf_life_days)
             if is_low_confidence:
                 summary.low_confidence_inserted_ids.append(pantry_item.id)
+            if not decision.cache_was_hit:
+                summary.uncached_item_ids.append(pantry_item.id)
             summary.inserted_food_count += 1
         session.commit()
     except IntegrityError:

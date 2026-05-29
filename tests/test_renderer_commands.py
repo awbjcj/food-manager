@@ -137,9 +137,12 @@ def test_render_digest_buckets_and_keyboard():
     rendered = render_digest(items, today=today)
     assert "Expired (1)" in rendered.text
     assert "#41 Spinach" in rendered.text
+    assert "🔴 #41 Spinach" in rendered.text
     assert "Today (2)" in rendered.text
     assert "Tomorrow (1)" in rendered.text
     assert "This week (1)" in rendered.text
+    assert "🔴 #42 Whole Milk 1 gal - today" in rendered.text
+    assert "🟡 #44 Sliced Bread - May 28 (1d)" in rendered.text
     keyboard = build_digest_keyboard([42], has_more=False)
     assert {button.callback_data for button in keyboard[0]} == {
         "act:ate:42",
@@ -162,6 +165,7 @@ def test_render_digest_truncates_at_20():
 def test_render_list_and_stats():
     text = render_list([_pantry_item("Milk", date(2026, 5, 30), 1)], today=date(2026, 5, 26))
     assert "#1 Milk" in text and "May 30" in text
+    assert "Other (1)" in text
     assert "no items" in render_list([], today=date(2026, 5, 26)).lower()
     stats = Stats(
         receipt_count=5,

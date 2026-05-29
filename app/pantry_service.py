@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 
 from sqlmodel import Session, col, select
@@ -279,3 +279,105 @@ def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
         waste_rate_percent=waste_rate,
         text_llm=text_llm,
     )
+
+
+UNDO_TTL_MINUTES = 10
+
+
+def is_untouched(item: PantryItem) -> bool:
+    # "untouched" = still active, not snoozed, not shelf-life-corrected.
+    # NOTE: a name-only /correct does not flip shelf_life_source, so such an
+    # item is still treated as untouched (accepted limitation).
+    return (
+        item.status == "active"
+        and item.snoozed_until is None
+        and item.shelf_life_source != "user_correction"
+    )
+
+
+def _is_undoable_add(item: PantryItem) -> bool:
+    # A manually-added item is undoable while it is still active and not
+    # snoozed. Unlike receipt items (always born "cache"/"llm"), a manual
+    # /add with an explicit expiry is *born* with shelf_life_source ==
+    # "user_correction", so that source must NOT count as "touched" here --
+    # otherwise the Undo button on such an /add would never remove the item.
+    return item.status == "active" and item.snoozed_until is None
+
+
+def _skip_reason(item: PantryItem) -> str:
+    if item.status != "active":
+        return item.status
+    if item.snoozed_until is not None:
+        return "snoozed"
+    return "corrected"
+
+
+@dataclass(frozen=True)
+class UndoResult:
+    removed_ids: list[int]
+    skipped: list[tuple[int, str]]
+    receipt_deleted: bool
+    expired: bool
+
+
+def _expired(reference: datetime, now: datetime) -> bool:
+    ref = reference if reference.tzinfo else reference.replace(tzinfo=timezone.utc)
+    return (now - ref) > timedelta(minutes=UNDO_TTL_MINUTES)
+
+
+def undo_receipt(
+    session: Session, *, user_id: int, receipt_id: int, now: datetime
+) -> UndoResult:
+    receipt = session.get(Receipt, receipt_id)
+    if receipt is None or receipt.user_id != user_id:
+        return UndoResult([], [], False, expired=False)
+    if _expired(receipt.scanned_at, now):
+        return UndoResult([], [], False, expired=True)
+
+    items = list(session.exec(
+        select(PantryItem).where(
+            PantryItem.user_id == user_id,
+            PantryItem.source_receipt_id == receipt_id,
+        )
+    ).all())
+    removed_ids: list[int] = []
+    skipped: list[tuple[int, str]] = []
+    for item in items:
+        assert item.id is not None
+        if is_untouched(item):
+            item.status = "removed"
+            item.snoozed_until = None
+            expire_for_item(session, user_id=user_id, item_id=item.id)
+            removed_ids.append(item.id)
+        else:
+            skipped.append((item.id, _skip_reason(item)))
+        session.add(item)
+
+    full = not skipped
+    if full:
+        for item in items:
+            item.source_receipt_id = None
+            session.add(item)
+        session.flush()
+        session.delete(receipt)
+    session.commit()
+    return UndoResult(removed_ids, skipped, receipt_deleted=full, expired=False)
+
+
+def undo_add(
+    session: Session, *, user_id: int, item_id: int, now: datetime
+) -> UndoResult:
+    item = session.get(PantryItem, item_id)
+    if item is None or item.user_id != user_id:
+        return UndoResult([], [], False, expired=False)
+    if _expired(item.created_at, now):
+        return UndoResult([], [], False, expired=True)
+    assert item.id is not None
+    if not _is_undoable_add(item):
+        return UndoResult([], [(item.id, _skip_reason(item))], False, expired=False)
+    item.status = "removed"
+    item.snoozed_until = None
+    expire_for_item(session, user_id=user_id, item_id=item.id)
+    session.add(item)
+    session.commit()
+    return UndoResult([item.id], [], receipt_deleted=False, expired=False)

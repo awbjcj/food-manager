@@ -8,8 +8,11 @@ from app.ingest_service import IngestSummary
 from app.pantry_service import Stats
 
 
-def _fmt_date(value: date) -> str:
-    return f"{value:%b} {value.day}"
+def _fmt_date(value: date, *, today: date) -> str:
+    base = f"{value:%b} {value.day}"
+    if value.year != today.year:
+        return f"{base} {value.year}"
+    return base
 
 
 def _fmt_cost(micros: int | None) -> str:
@@ -39,13 +42,13 @@ def render_ingest_reply(summary: IngestSummary, *, today: date) -> str:
         summary.inserted_item_shelf_life_days,
     ):
         lines.append(
-            f"  - #{item_id} {name} - exp {_fmt_date(expires_on)} ({shelf_life_days}d)"
+            f"  - #{item_id} {name} - exp {_fmt_date(expires_on, today=today)} ({shelf_life_days}d)"
         )
 
     if summary.purchase_date is not None and summary.purchase_date != today:
-        lines.append(f"Purchase date: {_fmt_date(summary.purchase_date)}")
+        lines.append(f"Purchase date: {_fmt_date(summary.purchase_date, today=today)}")
     if summary.purchase_date_assumed and summary.purchase_date is not None:
-        lines.append(f"Purchase date assumed: {_fmt_date(summary.purchase_date)}")
+        lines.append(f"Purchase date assumed: {_fmt_date(summary.purchase_date, today=today)}")
 
     if summary.low_confidence_inserted_ids:
         ids = ", ".join(f"#{item_id}" for item_id in summary.low_confidence_inserted_ids[:5])
@@ -110,7 +113,7 @@ def render_digest(items: list, *, today: date) -> DigestRender:
             return f"  - #{item.id} {item.raw_name}"
         return f"  - #{item.id} {item.raw_name} - {weekday_short[item.expires_on.weekday()]}"
 
-    lines = [f"Pantry digest - {weekday_short[today.weekday()]} {_fmt_date(today)}", ""]
+    lines = [f"Pantry digest - {weekday_short[today.weekday()]} {_fmt_date(today, today=today)}", ""]
     for key, header in (
         ("expired", "Expired"),
         ("today", "Today"),
@@ -236,7 +239,7 @@ def render_list(items: list, *, today: date) -> str:
         elif delta == 1:
             tag = "expires tomorrow"
         else:
-            tag = f"expires {_fmt_date(item.expires_on)} ({delta}d)"
+            tag = f"expires {_fmt_date(item.expires_on, today=today)} ({delta}d)"
         lines.append(f"#{item.id} {item.raw_name} - {tag}")
     return "\n".join(lines)
 

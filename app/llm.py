@@ -24,6 +24,8 @@ class ParsedItem(BaseModel):
     category: Optional[Category] = None
     est_shelf_life_days: int = Field(ge=1, le=730)
     confidence: float = Field(ge=0.0, le=1.0)
+    track_worthy: bool = True
+    exclusion_reason: Optional[str] = None
 
 
 class ParseResult(BaseModel):
@@ -114,6 +116,13 @@ returned line item:
         whole milk = 7, fresh chicken = 2, bananas = 5,
         canned beans = 365, fresh bread = 4, eggs = 28
   - confidence: 0.0-1.0
+  - track_worthy: false for items not worth expiry-tracking even if edible:
+    medicines/supplements/vitamins, condiments & sauces (ketchup, soy sauce,
+    dressing, jam), spices & seasonings (salt, pepper, dried herbs), and
+    household/toiletries. true for genuinely perishable food AND legitimately
+    stocked staples (canned beans, rice, pasta).
+  - exclusion_reason: when track_worthy is false, one of "non_food",
+    "shelf_stable", "household". null when track_worthy is true.
 
 TODO(user): tune the example shelf-life values above to your kitchen.
 """

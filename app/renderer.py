@@ -138,14 +138,7 @@ def render_digest(items: list, *, today: date) -> DigestRender:
     weekday_short = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
     def line_for(item) -> str:
-        delta = (item.expires_on - today).days
-        if delta < 0:
-            days = -delta
-            tag = f"({days}d ago)" if days > 1 else "(yesterday)"
-            return f"  - #{item.id} {item.raw_name} {tag}"
-        if delta in (0, 1):
-            return f"  - #{item.id} {item.raw_name}"
-        return f"  - #{item.id} {item.raw_name} - {weekday_short[item.expires_on.weekday()]}"
+        return "  " + render_item_line(item, today=today)
 
     lines = [f"Pantry digest - {weekday_short[today.weekday()]} {_fmt_date(today, today=today)}", ""]
     for key, header in (
@@ -260,21 +253,28 @@ def render_terminal_state(status: str) -> str:
     return _TERMINAL_LABELS.get(status, f"This proposal is no longer pending ({status}).")
 
 
+CATEGORY_ORDER = (
+    "produce", "dairy", "meat", "seafood", "bakery",
+    "frozen", "beverage", "pantry", "other",
+)
+
+
 def render_list(items: list, *, today: date) -> str:
     if not items:
         return "no items match this filter"
-    lines = []
+    by_cat: dict[str, list] = {}
     for item in items:
-        delta = (item.expires_on - today).days
-        if delta < 0:
-            tag = f"expired {-delta}d ago"
-        elif delta == 0:
-            tag = "expires today"
-        elif delta == 1:
-            tag = "expires tomorrow"
-        else:
-            tag = f"expires {_fmt_date(item.expires_on, today=today)} ({delta}d)"
-        lines.append(f"#{item.id} {item.raw_name} - {tag}")
+        key = item.category or "other"
+        by_cat.setdefault(key, []).append(item)
+    ordered = sorted(
+        by_cat.keys(),
+        key=lambda c: CATEGORY_ORDER.index(c) if c in CATEGORY_ORDER else len(CATEGORY_ORDER),
+    )
+    lines: list[str] = []
+    for cat in ordered:
+        group = sorted(by_cat[cat], key=lambda i: i.expires_on)
+        lines.append(f"{cat.capitalize()} ({len(group)})")
+        lines.extend(f"  {render_item_line(i, today=today)}" for i in group)
     return "\n".join(lines)
 
 

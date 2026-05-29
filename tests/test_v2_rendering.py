@@ -1,5 +1,5 @@
 from datetime import date
-from app.renderer import _fmt_date, _urgency_icon, _qty_prefix, render_item_line
+from app.renderer import _fmt_date, _urgency_icon, _qty_prefix, render_item_line, render_list
 from tests.test_renderer_commands import _pantry_item  # reuse builder
 
 
@@ -41,3 +41,29 @@ def test_render_item_line_combines_icon_qty_date():
     assert expired == "🔴 #3 Old - expired 2d"
     due = render_item_line(_pantry_item("Due", date(2026, 5, 28), 4), today=date(2026, 5, 28))
     assert due == "🔴 #4 Due - today"
+
+
+def _cat_item(name, expires_on, item_id, category, qty=1.0, unit=None):
+    item = _pantry_item(name, expires_on, item_id)
+    item.category = category
+    item.qty, item.unit = qty, unit
+    return item
+
+
+def test_render_list_groups_by_category_then_expiry():
+    today = date(2026, 5, 28)
+    items = [
+        _cat_item("Bananas", date(2026, 6, 2), 4, "produce"),
+        _cat_item("Spinach", date(2026, 5, 27), 9, "produce"),
+        _cat_item("Chicken", date(2026, 5, 27), 7, "meat", qty=2.0, unit="lb"),
+    ]
+    text = render_list(items, today=today)
+    assert "Produce (2)" in text
+    assert "Meat (1)" in text
+    assert text.index("Produce (2)") < text.index("Meat (1)")
+    assert text.index("#9 Spinach") < text.index("#4 Bananas")
+    assert "🔴 #7 2 lb Chicken" in text
+
+
+def test_render_list_empty_unchanged():
+    assert "no items" in render_list([], today=date(2026, 5, 28)).lower()

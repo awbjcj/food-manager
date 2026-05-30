@@ -8,7 +8,12 @@ import sqlalchemy as sa
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.models import User
-from app.profile_service import FoodProfile, apply_profile_to_user, profile_from_user
+from app.profile_service import (
+    FoodProfile,
+    apply_profile_to_user,
+    profile_from_user,
+    update_profile_from_sentence,
+)
 from tests.fakes import FakeProfileLLMClient
 
 
@@ -84,6 +89,32 @@ def test_fake_profile_client_returns_merged_profile():
     assert result == merged
     assert cost == 42
     assert fake.calls[0]["sentence"] == "I'm vegan, no peanuts"
+
+
+def test_update_profile_persists_merge_and_keeps_allergy_structured():
+    with _session() as db:
+        user = User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc))
+        db.add(user)
+        db.commit()
+        merged = FoodProfile(
+            diet="vegetarian",
+            exclusions=["peanut"],
+            preferred_cuisines=["chinese"],
+            note="spicy ok",
+        )
+        fake = FakeProfileLLMClient(canned=(merged, 7))
+        profile, cost = asyncio.run(
+            update_profile_from_sentence(
+                db,
+                llm=fake,
+                user=user,
+                sentence="veggie, no peanuts, chinese, spicy ok",
+            )
+        )
+        assert cost == 7
+        db.refresh(user)
+        assert profile_from_user(user) == merged
+        assert "peanut" in profile.exclusions
 
 
 def _env():

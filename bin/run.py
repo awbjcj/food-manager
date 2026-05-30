@@ -31,10 +31,13 @@ from app.bot import build_dispatcher
 from app.db import make_engine, make_session_factory
 from app.llm import (
     AnthropicLLMClient,
+    AnthropicProfileLLMClient,
     AnthropicTextLLMClient,
     LLMProviderSelector,
     OpenAILLMClient,
+    OpenAIProfileLLMClient,
     OpenAITextLLMClient,
+    ProfileLLMProviderSelector,
     TextLLMProviderSelector,
 )
 from app.refine_service import AnthropicSearchClient
@@ -63,6 +66,7 @@ def _configure_logging(env: str, level: str) -> None:
 def _build_llm_clients(settings: Settings):
     image_clients = {}
     text_clients = {}
+    profile_clients = {}
     search = None
 
     if settings.anthropic_api_key:
@@ -72,6 +76,10 @@ def _build_llm_clients(settings: Settings):
             model=settings.anthropic_model,
         )
         text_clients["anthropic"] = AnthropicTextLLMClient(
+            sdk=anthropic_sdk,
+            model=settings.anthropic_text_model,
+        )
+        profile_clients["anthropic"] = AnthropicProfileLLMClient(
             sdk=anthropic_sdk,
             model=settings.anthropic_text_model,
         )
@@ -92,10 +100,15 @@ def _build_llm_clients(settings: Settings):
             sdk=openai_sdk,
             model=settings.openai_text_model,
         )
+        profile_clients["openai"] = OpenAIProfileLLMClient(
+            sdk=openai_sdk,
+            model=settings.openai_text_model,
+        )
 
     return (
         LLMProviderSelector(image_clients, settings.llm_provider),
         TextLLMProviderSelector(text_clients, settings.llm_provider),
+        ProfileLLMProviderSelector(profile_clients, settings.llm_provider),
         search,
     )
 
@@ -130,7 +143,7 @@ async def _amain(settings: Settings) -> None:
     log.info("migration_ok")
 
     bot = Bot(token=settings.telegram_bot_token)
-    llm, text_llm, search = _build_llm_clients(settings)
+    llm, text_llm, profile_llm, search = _build_llm_clients(settings)
     log.info(
         "llm_provider_configured",
         extra={
@@ -171,6 +184,7 @@ async def _amain(settings: Settings) -> None:
         session_factory=session_factory,
         llm=llm,
         text_llm=text_llm,
+        profile_llm=profile_llm,
         search=search,
         now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
         on_user_created=reschedule,

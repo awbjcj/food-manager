@@ -318,6 +318,40 @@ class TextLLMProviderSelector(TextLLMClient):
         )
 
 
+class ProfileLLMProviderSelector(ProfileUpdateLLMClient):
+    def __init__(
+        self,
+        clients: dict[str, ProfileUpdateLLMClient],
+        default_provider: LLMProviderName,
+    ):
+        if default_provider not in clients:
+            raise LLMProviderNotConfigured(default_provider)
+        self._clients = clients
+        self._default_provider: LLMProviderName = default_provider
+
+    @property
+    def available_providers(self) -> tuple[str, ...]:
+        return tuple(sorted(self._clients))
+
+    @property
+    def default_provider(self) -> LLMProviderName:
+        return self._default_provider
+
+    def for_provider(self, provider: str) -> ProfileUpdateLLMClient:
+        try:
+            return self._clients[provider]
+        except KeyError as exc:
+            raise LLMProviderNotConfigured(provider) from exc
+
+    async def parse_profile_update(
+        self, *, current: FoodProfile, sentence: str
+    ) -> tuple[FoodProfile, Optional[int]]:
+        return await self.for_provider(self._default_provider).parse_profile_update(
+            current=current,
+            sentence=sentence,
+        )
+
+
 class AnthropicLLMClient(LLMClient):
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
         self._sdk = sdk

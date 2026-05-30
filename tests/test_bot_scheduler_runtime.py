@@ -18,7 +18,13 @@ from app.bot import (
     handle_llm,
     handle_start,
 )
-from app.llm import LLMProviderSelector, LLMResult, ParseResult, TextLLMProviderSelector
+from app.llm import (
+    LLMProviderSelector,
+    LLMResult,
+    ParseResult,
+    ProfileLLMProviderSelector,
+    TextLLMProviderSelector,
+)
 from app.models import PantryItem, User
 from app.scheduler import (
     build_digest_payload,
@@ -281,6 +287,26 @@ def test_build_dispatcher_imports_and_registers():
         reschedule=lambda user: None,
     )
     assert dispatcher is not None
+
+
+def test_build_llm_clients_includes_profile_llm():
+    from bin.run import _build_llm_clients
+    from app.settings import Settings
+
+    settings = Settings(
+        TELEGRAM_BOT_TOKEN="token",
+        ALLOWED_TELEGRAM_USER_ID=1,
+        LLM_PROVIDER="anthropic",
+        ANTHROPIC_API_KEY="anthropic-key",
+        OPENAI_API_KEY=None,
+    )
+    llm, text_llm, profile_llm, search = _build_llm_clients(settings)
+
+    assert isinstance(llm, LLMProviderSelector)
+    assert isinstance(text_llm, TextLLMProviderSelector)
+    assert isinstance(profile_llm, ProfileLLMProviderSelector)
+    assert profile_llm.available_providers == ("anthropic",)
+    assert search is not None
 
 
 def test_scheduler_payload_and_registration(session):

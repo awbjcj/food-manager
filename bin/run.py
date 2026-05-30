@@ -27,6 +27,7 @@ from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import app.bot as bot_mod
+import app.cook_service as cook_service_mod
 from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
 from app.cook_llm import (
@@ -210,6 +211,7 @@ async def _amain(settings: Settings) -> None:
     )
     bot_mod.DEFAULT_LLM_PROVIDER = settings.llm_provider
     bot_mod.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
+    cook_service_mod.COOK_COST_CEILING_MICROS = settings.cook_cost_ceiling_micros
 
     scheduler = AsyncIOScheduler()
 

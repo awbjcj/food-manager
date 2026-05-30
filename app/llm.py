@@ -561,7 +561,7 @@ class OpenAILLMClient(LLMClient):
 
         return LLMResult(
             parse=parsed,
-            cost_micros_usd=None,
+            cost_micros_usd=_cost_micros(response, self._model),
             provider_usage=_usage_dict(response),
         )
 
@@ -860,7 +860,10 @@ class OpenAITextLLMClient(TextLLMClient):
             user_msg,
             CorrectionDiff,
         )
-        return CorrectionDiff.model_validate(_extract_openai_parsed(response)), None
+        return (
+            CorrectionDiff.model_validate(_extract_openai_parsed(response)),
+            _cost_micros(response, self._model),
+        )
 
     async def parse_add(
         self,
@@ -882,7 +885,7 @@ class OpenAITextLLMClient(TextLLMClient):
             ProposedAddItems,
         )
         parsed = ProposedAddItems.model_validate(_extract_openai_parsed(response))
-        return parsed.items, None
+        return parsed.items, _cost_micros(response, self._model)
 
 
 class AnthropicProfileLLMClient(ProfileUpdateLLMClient):
@@ -909,7 +912,10 @@ class OpenAIProfileLLMClient(ProfileUpdateLLMClient):
         response = await self._delegate._create_response(
             PROFILE_SYSTEM_PROMPT, user_msg, FoodProfile
         )
-        return FoodProfile.model_validate(_extract_openai_parsed(response)), None
+        return (
+            FoodProfile.model_validate(_extract_openai_parsed(response)),
+            _cost_micros(response, self._delegate._model),
+        )
 
 
 def _detect_media_type(image_bytes: bytes) -> str:

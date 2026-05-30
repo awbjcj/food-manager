@@ -268,8 +268,11 @@ def _render_card(card: ScoredCandidate, *, rank: int) -> str:
     lines = [
         header,
         f"  Health {n.health_score}/100 - {n.effort} - {n.est_minutes} min",
-        f"  {r.method_gist}",
     ]
+    ingredients = ", ".join(i.name for i in r.ingredients)
+    if ingredients:
+        lines.append(f"  Ingredients: {ingredients}")
+    lines.append(f"  {r.method_gist}")
     if r.source_url:
         lines.append(f"  Recipe: {r.source_url}")
     if rank == 0 and card.shopping_list:
@@ -350,12 +353,13 @@ def render_list(items: list, *, today: date) -> str:
         by_cat.keys(),
         key=lambda c: CATEGORY_ORDER.index(c) if c in CATEGORY_ORDER else len(CATEGORY_ORDER),
     )
-    lines: list[str] = []
+    blocks: list[str] = []
     for cat in ordered:
         group = sorted(by_cat[cat], key=lambda i: i.expires_on)
-        lines.append(f"{cat.capitalize()} ({len(group)})")
-        lines.extend(f"  {render_item_line(i, today=today)}" for i in group)
-    return "\n".join(lines)
+        block = [f"{cat.capitalize()} ({len(group)})"]
+        block.extend(f"  {render_item_line(i, today=today)}" for i in group)
+        blocks.append("\n".join(block))
+    return "\n\n".join(blocks)
 
 
 def _fmt_cost_short(micros: int | None) -> str:

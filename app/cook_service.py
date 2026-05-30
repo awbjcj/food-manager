@@ -127,12 +127,21 @@ async def run_cook(
     safe_candidates = _safe_candidates(recipes.candidates, profile=profile)
 
     if recipes.candidates and not safe_candidates:
+        violated_ingredients = sorted(
+            {
+                name
+                for candidate in recipes.candidates
+                for name in _ingredient_names(candidate)
+                if violates_exclusions([name], exclusions=profile.exclusions)
+            }
+        )
         regenerate_prompt = _prompt_json(
             ingredients=[_item_payload(item, today=today) for item in selected_items],
             meal_type=cook.meal_type,
             cuisine=cook.cuisine,
             profile=profile_json,
             must_avoid=profile.exclusions,
+            violated_ingredients=violated_ingredients,
             today=today.isoformat(),
         )
         regenerated, regenerate_cost = await recipe_llm.fetch_recipes(
@@ -145,7 +154,7 @@ async def run_cook(
         return []
 
     if _over_ceiling(cook):
-        log.warning("cook_cost_ceiling_after_recipe", extra={"cook_id": cook.id})
+        log.warning("cook_cost_ceiling_after_regenerate", extra={"cook_id": cook.id})
         return []
 
     nutrition_prompt = _prompt_json(
@@ -163,6 +172,15 @@ async def run_cook(
         if (item.expires_on - today).days <= URGENT_DAYS
     ]
     pantry_normalized = [item.normalized_name for item in active_items]
+    if len(nutrition.scores) != len(safe_candidates):
+        log.warning(
+            "cook_nutrition_count_mismatch",
+            extra={
+                "cook_id": cook.id,
+                "candidates": len(safe_candidates),
+                "scores": len(nutrition.scores),
+            },
+        )
     scored: list[ScoredCandidate] = []
     for candidate, nutrition_score in zip(safe_candidates, nutrition.scores):
         ingredient_names = _ingredient_names(candidate)

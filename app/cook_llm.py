@@ -222,13 +222,19 @@ class _OpenAIJSONClient:
     async def _call(self, system, user_text, model_cls):
         tools = [_OPENAI_WEB_SEARCH_TOOL] if self._web_search else []
         user_content = [{"type": "input_text", "text": user_text}]
+        total_cost = 0
+        unknown_cost = False
         for attempt in range(2):
+            resp = await self._create_response(system, user_content, tools, model_cls)
+            cost = _cost_micros(resp, self._model)
+            if cost is None:
+                unknown_cost = True
+            else:
+                total_cost += cost
             try:
-                resp = await self._create_response(system, user_content, tools, model_cls)
-                return model_cls.model_validate(_extract_openai_parsed(resp)), None
+                parsed = model_cls.model_validate(_extract_openai_parsed(resp))
+                return parsed, None if unknown_cost else total_cost
             except Exception as exc:
-                if _is_retryable_transport_error(exc):
-                    raise
                 if attempt == 1:
                     log.warning(
                         "cook_llm_schema_failed_final",

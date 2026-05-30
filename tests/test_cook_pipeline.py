@@ -12,7 +12,6 @@ from app.cook_models import (
     RecipeCandidate,
     RecipeCandidates,
     RecipeIngredient,
-    ScoredCandidate,
     SelectedItems,
 )
 from app.cook_logic import (
@@ -226,6 +225,8 @@ def test_run_cook_regenerates_once_then_refuses_on_allergen_wipeout():
     assert "items" not in regenerate_prompt
     assert regenerate_prompt["ingredients"]
     assert regenerate_prompt["must_avoid"] == ["peanut"]
+    # the re-prompt must name the specific ingredients that triggered the filter (spec §8)
+    assert regenerate_prompt["violated_ingredients"] == ["peanut"]
     assert nutrition.calls == []   # never reached the nutrition stage
 
 

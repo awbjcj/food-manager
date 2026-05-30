@@ -43,6 +43,23 @@ def test_render_cook_result_expanded_shows_alternatives():
     assert "Alt" in text
 
 
+def test_render_cook_result_shows_ingredient_list():
+    rec = RecipeCandidate(
+        title="Stew",
+        cuisine="french",
+        source_url="https://x",
+        ingredients=[RecipeIngredient(name="carrot"), RecipeIngredient(name="onion")],
+        method_gist="simmer",
+        deliciousness=0.7,
+    )
+    nut = NutritionScore(health_score=70, effort="easy", est_minutes=40, rationale="ok")
+    card = ScoredCandidate(
+        recipe=rec, nutrition=nut, expiry_use=0.5, final_score=0.7, shopping_list=[]
+    )
+    text = render_cook_result([card], show_alternatives=False)
+    assert "Ingredients: carrot, onion" in text
+
+
 def test_parse_cook_callbacks():
     pick = parse_callback("cookpick:7:2")
     assert (

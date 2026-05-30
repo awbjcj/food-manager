@@ -202,3 +202,37 @@ def test_result_keyboard_attached_on_render(monkeypatch):
     data = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard for b in row]
     assert f"cooksave:{cook_id}" in data
     assert f"cookfb:{cook_id}:liked" in data
+
+
+def test_no_result_keyboard_when_no_recipe_found(monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    engine = _engine_with_user()
+    today_dt = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+    today = today_dt.date()
+    with Session(engine) as db:
+        for i in range(4):
+            db.add(PantryItem(
+                user_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
+                category="produce", qty=1.0, purchased_on=today, shelf_life_days=2,
+                shelf_life_source="llm", ingest_shelf_life_source="llm",
+                expires_on=today + timedelta(days=2), status="active",
+                created_via="receipt", created_at=datetime.now(timezone.utc)))
+        now = today_dt.replace(tzinfo=None)
+        db.add(CookSession(user_id=1, status="ready", chat_id=1, meal_type="Dinner",
+                           cuisine="Italian", selected_item_ids="[]", message_id=99,
+                           created_at=now, expires_at=now + timedelta(minutes=10)))
+        db.commit()
+        cook_id = db.exec(select(CookSession)).all()[0].id
+
+    # Recipe stage returns zero candidates -> run_cook returns [] (no recipe found).
+    recipe = FakeRecipeLLM(canned=(RecipeCandidates(candidates=[]), 9))
+    nutrition = FakeNutritionLLM(canned=(NutritionScores(scores=[]), 3))
+    bot = type("B", (), {"edit_message_text": AsyncMock()})()
+    asyncio.run(run_cook_and_render(
+        lambda: Session(engine), user_id=1, user_tz="America/Detroit", cook_id=cook_id,
+        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
+        recipe_llm=recipe, nutrition_llm=nutrition,
+        now_provider=lambda tz: today_dt, bot=bot))
+    kwargs = bot.edit_message_text.await_args.kwargs
+    # No action buttons on a "couldn't find a recipe" message.
+    assert kwargs["reply_markup"] is None

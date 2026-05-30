@@ -1228,8 +1228,12 @@ async def run_cook_and_render(
 
         mark_status(session, cook=cook, status="done")
         text = render_cook_result(cards, show_alternatives=False)
-        keyboard = to_aiogram_keyboard(
-            build_cook_result_keyboard(cook_id, has_alternatives=len(cards) > 1)
+        keyboard = (
+            to_aiogram_keyboard(
+                build_cook_result_keyboard(cook_id, has_alternatives=len(cards) > 1)
+            )
+            if cards
+            else None
         )
         await _safe_edit_bot(
             bot, chat_id=chat_id, message_id=message_id, text=text, keyboard=keyboard

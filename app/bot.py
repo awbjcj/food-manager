@@ -36,6 +36,8 @@ from app.correction_service import (
     propose_add,
     propose_correct,
 )
+from app.cook_feedback import set_feedback
+from app.cook_logic import missing_ingredients
 from app.cook_models import ScoredCandidate
 from app.cook_service import NotEnoughItems, run_cook
 from app.cook_session_service import (
@@ -44,6 +46,14 @@ from app.cook_session_service import (
     mark_status,
     set_message_id as set_cook_message_id,
 )
+from app.favorites_service import (
+    list_saved,
+    load_saved,
+    recipe_from_saved,
+    recook_shopping_list,
+    save_candidate,
+)
+from app.shopping_service import add_missing, check_off, list_pending
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import (
     LLMClient,
@@ -55,6 +65,7 @@ from app.models import CookSession, PantryItem, User
 from app.refine_service import run_receipt_refine
 from app.pantry_service import (
     NotOwnerOrMissing,
+    active_pantry_names,
     compute_stats,
     list_active,
     list_digest_due,
@@ -77,9 +88,11 @@ from app.pending_service import (
 from app.renderer import (
     CallbackButton,
     build_apply_cancel_keyboard,
-    build_cook_alternatives_keyboard,
+    build_cook_result_keyboard,
     build_cook_round_keyboard,
     build_digest_keyboard,
+    build_favorites_keyboard,
+    build_shopping_keyboard,
     build_undo_add_keyboard,
     build_undo_keyboard,
     render_add_diff,
@@ -88,9 +101,12 @@ from app.renderer import (
     render_correction_diff,
     render_cook_result,
     render_digest,
+    render_favorites,
     render_ingest_reply,
     render_list,
     render_profile,
+    render_recook,
+    render_shopping_list,
     render_stats,
     render_terminal_state,
     render_undo_result,
@@ -660,6 +676,45 @@ async def handle_stats(
         await msg.answer(render_stats(stats))
 
 
+async def handle_shopping(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    now_provider: NowProvider,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        items = list_pending(session, user_id=user.telegram_id)
+        keyboard = (
+            to_aiogram_keyboard(build_shopping_keyboard([i.id for i in items if i.id]))
+            if items
+            else None
+        )
+        await msg.answer(render_shopping_list(items), reply_markup=keyboard)
+
+
+async def handle_favorites(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        recipes = list_saved(session, user_id=user.telegram_id)
+        keyboard = (
+            to_aiogram_keyboard(build_favorites_keyboard([r.id for r in recipes if r.id]))
+            if recipes
+            else None
+        )
+        await msg.answer(render_favorites(recipes), reply_markup=keyboard)
+
+
 async def handle_cook(
     msg,
     *,
@@ -777,6 +832,8 @@ HELP_TEXT = (
     "  /llm [anthropic|openai] - show or switch LLM provider\n"
     "  /prefs [sentence] - show or update your food profile\n"
     "  /cook - get a recipe from your pantry\n"
+    "  /shopping - view your to-buy list; tap an item when bought\n"
+    "  /favorites - view saved recipes; tap to re-cook against your pantry\n"
     "  /help - this message\n"
     "Send a receipt photo to log it."
 )
@@ -1009,7 +1066,14 @@ async def handle_cook_callback(
                 ]
             except (TypeError, ValueError):
                 cards = []
-            await _safe_edit_cb(cb, render_cook_result(cards, show_alternatives=True))
+            assert cook.id is not None
+            await _safe_edit_cb(
+                cb,
+                render_cook_result(cards, show_alternatives=True),
+                to_aiogram_keyboard(
+                    build_cook_result_keyboard(cook.id, has_alternatives=False)
+                ),
+            )
             await cb.answer("showing alternatives")
             return
 
@@ -1165,8 +1229,10 @@ async def run_cook_and_render(
         mark_status(session, cook=cook, status="done")
         text = render_cook_result(cards, show_alternatives=False)
         keyboard = (
-            to_aiogram_keyboard(build_cook_alternatives_keyboard(cook_id))
-            if len(cards) > 1
+            to_aiogram_keyboard(
+                build_cook_result_keyboard(cook_id, has_alternatives=len(cards) > 1)
+            )
+            if cards
             else None
         )
         await _safe_edit_bot(
@@ -1194,6 +1260,103 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             await cb.answer("not configured")
             return
         today = now_provider(user.tz).date()
+
+        if action.verb in ("cook_like", "cook_dislike"):
+            cook_id = action.item_id
+            assert cook_id is not None
+            cook = load_cook_session(session, user_id=user.telegram_id, cook_id=cook_id)
+            if cook is None or cook.status != "done":
+                await cb.answer("this cook session expired - start a new /cook")
+                return
+            verdict = "liked" if action.verb == "cook_like" else "disliked"
+            set_feedback(session, cook=cook, feedback=verdict, now=now_provider(user.tz))
+            await cb.answer("got it 👍" if verdict == "liked" else "noted 👎")
+            return
+
+        if action.verb in ("cook_save", "cook_shop"):
+            cook_id = action.item_id
+            assert cook_id is not None
+            cook = load_cook_session(session, user_id=user.telegram_id, cook_id=cook_id)
+            if cook is None or cook.status != "done":
+                await cb.answer("this cook session expired - start a new /cook")
+                return
+            try:
+                raw_cards = _json.loads(cook.candidates_json or "[]")
+                cards = [ScoredCandidate.model_validate(c) for c in raw_cards]
+            except (TypeError, ValueError):
+                cards = []
+            if not cards:
+                await cb.answer("nothing to use here")
+                return
+            index = cook.chosen_index or 0
+            if index < 0 or index >= len(cards):
+                index = 0
+            candidate = cards[index].recipe
+            if action.verb == "cook_save":
+                result = save_candidate(
+                    session, user_id=user.telegram_id, candidate=candidate,
+                    now=now_provider(user.tz),
+                )
+                await cb.answer("already saved" if result.duplicate else "saved ★")
+                return
+            pantry = active_pantry_names(
+                session, user_id=user.telegram_id, today=today
+            )
+            missing = missing_ingredients(
+                ingredients=candidate.ingredients, pantry_normalized=pantry
+            )
+            add_result = add_missing(
+                session, user_id=user.telegram_id, ingredients=missing,
+                now=now_provider(user.tz),
+            )
+            if add_result.added:
+                await cb.answer(f"added {len(add_result.added)} to shopping list")
+            elif add_result.already:
+                await cb.answer("already on your list")
+            else:
+                await cb.answer("you have everything!")
+            return
+
+        if action.verb == "shop_done":
+            shopping_id = action.item_id
+            assert shopping_id is not None
+            ok = check_off(
+                session, user_id=user.telegram_id, shopping_id=shopping_id,
+                now=now_provider(user.tz),
+            )
+            remaining = list_pending(session, user_id=user.telegram_id)
+            keyboard = (
+                to_aiogram_keyboard(
+                    build_shopping_keyboard([i.id for i in remaining if i.id])
+                )
+                if remaining
+                else None
+            )
+            try:
+                await cb.message.edit_text(
+                    render_shopping_list(remaining), reply_markup=keyboard
+                )
+            except Exception as exc:
+                log.warning("shopping_edit_failed", extra={"error_class": type(exc).__name__})
+            await cb.answer("bought ✓" if ok else "already done")
+            return
+
+        if action.verb == "fav_cook":
+            recipe_id = action.item_id
+            assert recipe_id is not None
+            saved = load_saved(session, user_id=user.telegram_id, recipe_id=recipe_id)
+            if saved is None:
+                await cb.answer("not found")
+                return
+            shopping = recook_shopping_list(
+                session, user_id=user.telegram_id, saved=saved, today=today
+            )
+            await cb.message.answer(
+                render_recook(recipe_from_saved(saved), shopping=shopping)
+            )
+            await cb.answer("here's the plan")
+            return
+
         if action.verb == "show_all":
             rows = list_digest_due(session, user_id=user.telegram_id, today=today)
             if not rows:
@@ -1559,6 +1722,21 @@ def build_dispatcher(
             on_user_created=on_user_created,
         )
 
+    async def on_shopping(message):
+        await handle_shopping(
+            message,
+            session_factory=session_factory,
+            now_provider=now_provider,
+            on_user_created=on_user_created,
+        )
+
+    async def on_favorites(message):
+        await handle_favorites(
+            message,
+            session_factory=session_factory,
+            on_user_created=on_user_created,
+        )
+
     async def on_llm(message):
         await handle_llm(
             message,
@@ -1630,6 +1808,8 @@ def build_dispatcher(
     dispatcher.message.register(on_correct, Command("correct"))
     dispatcher.message.register(on_stats, Command("stats"))
     dispatcher.message.register(on_cook, Command("cook"))
+    dispatcher.message.register(on_shopping, Command("shopping"))
+    dispatcher.message.register(on_favorites, Command("favorites"))
     dispatcher.message.register(on_llm, Command("llm"))
     dispatcher.message.register(on_prefs, Command("prefs"))
     dispatcher.message.register(on_help, Command("help"))

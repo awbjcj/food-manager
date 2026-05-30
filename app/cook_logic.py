@@ -42,3 +42,21 @@ def shopping_list(*, recipe_names, pantry_normalized) -> list[str]:
         seen.add(n)
         missing.append(raw)
     return missing
+
+
+def missing_ingredients(*, ingredients, pantry_normalized):
+    """Return the ingredient objects whose normalized name is not in the pantry.
+
+    `ingredients` is any sequence of objects with a `.name` attribute
+    (e.g. RecipeIngredient); the same objects are returned, de-duplicated.
+    """
+    have = {normalize(n) for n in pantry_normalized}
+    missing = []
+    seen: set[str] = set()
+    for ingredient in ingredients:
+        n = normalize(ingredient.name)
+        if n in have or n in seen:
+            continue
+        seen.add(n)
+        missing.append(ingredient)
+    return missing

@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from app.correction_service import AddPayload, CorrectPayload
-from app.cook_models import ScoredCandidate
+from app.cook_models import RecipeCandidate, ScoredCandidate
+from app.models import SavedRecipe, ShoppingList
 from app.ingest_service import IngestSummary
 from app.pantry_service import Stats
 from app.profile_service import FoodProfile
@@ -296,6 +297,74 @@ def build_cook_alternatives_keyboard(cook_id: int) -> list[list[CallbackButton]]
     return [[CallbackButton(text="Show alternatives", callback_data=f"cookalt:{cook_id}")]]
 
 
+def build_cook_result_keyboard(
+    cook_id: int, *, has_alternatives: bool
+) -> list[list[CallbackButton]]:
+    rows = [
+        [
+            CallbackButton(text="👍 Liked", callback_data=f"cookfb:{cook_id}:liked"),
+            CallbackButton(text="👎 Not for me", callback_data=f"cookfb:{cook_id}:disliked"),
+        ],
+        [
+            CallbackButton(text="★ Save", callback_data=f"cooksave:{cook_id}"),
+            CallbackButton(text="➕ Shopping list", callback_data=f"cookshop:{cook_id}"),
+        ],
+    ]
+    if has_alternatives:
+        rows.append(
+            [CallbackButton(text="Show alternatives", callback_data=f"cookalt:{cook_id}")]
+        )
+    return rows
+
+
+def render_shopping_list(items: list[ShoppingList]) -> str:
+    if not items:
+        return "Your shopping list is empty. Tap ➕ Shopping list on a /cook result."
+    lines = ["Shopping list:"]
+    for item in items:
+        qty = _qty_prefix(item.qty, item.unit) if item.qty is not None else ""
+        lines.append(f"  - {qty}{item.name_raw}")
+    return "\n".join(lines)
+
+
+def build_shopping_keyboard(item_ids: list[int]) -> list[list[CallbackButton]]:
+    return [
+        [CallbackButton(text="Bought ✓", callback_data=f"shopdone:{item_id}")]
+        for item_id in item_ids
+    ]
+
+
+def render_favorites(recipes: list[SavedRecipe]) -> str:
+    if not recipes:
+        return "No saved recipes yet. Tap ★ Save on a /cook result."
+    lines = ["Saved recipes:"]
+    for recipe in recipes:
+        lines.append(f"  #{recipe.id} {recipe.title} ({recipe.cuisine})")
+    return "\n".join(lines)
+
+
+def build_favorites_keyboard(recipe_ids: list[int]) -> list[list[CallbackButton]]:
+    return [
+        [CallbackButton(text="Cook this again", callback_data=f"favcook:{recipe_id}")]
+        for recipe_id in recipe_ids
+    ]
+
+
+def render_recook(recipe: RecipeCandidate, *, shopping: list[str]) -> str:
+    lines = [f"{recipe.title} ({recipe.cuisine})"]
+    ingredients = ", ".join(i.name for i in recipe.ingredients)
+    if ingredients:
+        lines.append(f"  Ingredients: {ingredients}")
+    lines.append(f"  {recipe.method_gist}")
+    if recipe.source_url:
+        lines.append(f"  Recipe: {recipe.source_url}")
+    if shopping:
+        lines.append("  Need to buy: " + ", ".join(shopping))
+    else:
+        lines.append("  Need to buy: nothing - you have it all!")
+    return "\n".join(lines)
+
+
 def build_cook_round_keyboard(
     cook_id: int, options: list[str], *, round_name: str | None = None
 ) -> list[list[CallbackButton]]:
@@ -403,6 +472,9 @@ def render_stats(stats: Stats) -> str:
     lines.append(
         f"Cook sessions: {stats.cook_count} "
         f"(${stats.cook_cost_micros_usd / 1_000_000:.3f})"
+    )
+    lines.append(
+        f"  Cooked: {stats.cook_feedback_count} (liked {stats.cook_liked_count})"
     )
     lines.append(f"Waste rate: {waste_rate}")
     return "\n".join(lines)

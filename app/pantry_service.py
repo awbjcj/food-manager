@@ -47,6 +47,15 @@ def list_active(session: Session, *, user_id: int, f: ListFilter, today: date) -
     return list(session.exec(query).all())
 
 
+def active_pantry_names(session: Session, *, user_id: int, today: date) -> list[str]:
+    """Normalized names of active, not-yet-expired pantry items (for shopping diffs)."""
+    return [
+        item.normalized_name
+        for item in list_active(session, user_id=user_id, f=ListFilter.default(), today=today)
+        if item.expires_on >= today
+    ]
+
+
 def list_digest_due(session: Session, *, user_id: int, today: date) -> list[PantryItem]:
     query = (
         select(PantryItem)
@@ -190,6 +199,8 @@ class Stats:
     waste_rate_percent: Optional[float]
     cook_cost_micros_usd: int = 0
     cook_count: int = 0
+    cook_feedback_count: int = 0
+    cook_liked_count: int = 0
     text_llm: TextLLMCost = TextLLMCost(
         correction_proposal_count=0,
         correction_cost_micros=0,
@@ -279,6 +290,10 @@ def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
         ).all()
     )
     cook_cost = sum(row.llm_cost_micros_usd or 0 for row in cook_rows)
+    cook_feedback_count = sum(
+        1 for row in cook_rows if row.feedback in ("liked", "disliked")
+    )
+    cook_liked_count = sum(1 for row in cook_rows if row.feedback == "liked")
 
     return Stats(
         receipt_count=len(receipts),
@@ -293,6 +308,8 @@ def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
         waste_rate_percent=waste_rate,
         cook_cost_micros_usd=cook_cost,
         cook_count=len(cook_rows),
+        cook_feedback_count=cook_feedback_count,
+        cook_liked_count=cook_liked_count,
         text_llm=text_llm,
     )
 

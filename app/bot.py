@@ -36,6 +36,8 @@ from app.correction_service import (
     propose_add,
     propose_correct,
 )
+from app.cook_feedback import set_feedback
+from app.cook_logic import missing_ingredients
 from app.cook_models import ScoredCandidate
 from app.cook_service import NotEnoughItems, run_cook
 from app.cook_session_service import (
@@ -44,6 +46,14 @@ from app.cook_session_service import (
     mark_status,
     set_message_id as set_cook_message_id,
 )
+from app.favorites_service import (
+    list_saved,
+    load_saved,
+    recipe_from_saved,
+    recook_shopping_list,
+    save_candidate,
+)
+from app.shopping_service import add_missing, check_off, list_pending
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import (
     LLMClient,
@@ -78,8 +88,11 @@ from app.renderer import (
     CallbackButton,
     build_apply_cancel_keyboard,
     build_cook_alternatives_keyboard,
+    build_cook_result_keyboard,
     build_cook_round_keyboard,
     build_digest_keyboard,
+    build_favorites_keyboard,
+    build_shopping_keyboard,
     build_undo_add_keyboard,
     build_undo_keyboard,
     render_add_diff,
@@ -88,9 +101,12 @@ from app.renderer import (
     render_correction_diff,
     render_cook_result,
     render_digest,
+    render_favorites,
     render_ingest_reply,
     render_list,
     render_profile,
+    render_recook,
+    render_shopping_list,
     render_stats,
     render_terminal_state,
     render_undo_result,
@@ -658,6 +674,45 @@ async def handle_stats(
             now=now.astimezone(timezone.utc),
         )
         await msg.answer(render_stats(stats))
+
+
+async def handle_shopping(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    now_provider: NowProvider,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        items = list_pending(session, user_id=user.telegram_id)
+        keyboard = (
+            to_aiogram_keyboard(build_shopping_keyboard([i.id for i in items if i.id]))
+            if items
+            else None
+        )
+        await msg.answer(render_shopping_list(items), reply_markup=keyboard)
+
+
+async def handle_favorites(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        recipes = list_saved(session, user_id=user.telegram_id)
+        keyboard = (
+            to_aiogram_keyboard(build_favorites_keyboard([r.id for r in recipes if r.id]))
+            if recipes
+            else None
+        )
+        await msg.answer(render_favorites(recipes), reply_markup=keyboard)
 
 
 async def handle_cook(

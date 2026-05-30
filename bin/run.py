@@ -5,7 +5,7 @@ Startup order:
 2. open DB engine + session factory
 3. pre-migration backup if DB file already exists
 4. alembic upgrade head
-5. construct Bot + Anthropic SDK + LLMClient
+5. construct Bot + configured LLM SDK + LLMClient
 6. register per-user digest jobs
 7. start AsyncIOScheduler
 8. start dispatcher polling
@@ -29,7 +29,14 @@ import app.bot as bot_mod
 from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
 from app.db import make_engine, make_session_factory
-from app.llm import AnthropicLLMClient, AnthropicTextLLMClient
+from app.llm import (
+    AnthropicLLMClient,
+    AnthropicTextLLMClient,
+    LLMProviderSelector,
+    OpenAILLMClient,
+    OpenAITextLLMClient,
+    TextLLMProviderSelector,
+)
 from app.scheduler import (
     register_all_user_digests,
     register_sweep_expired_pendings,
@@ -49,6 +56,40 @@ def _configure_logging(env: str, level: str) -> None:
         level=getattr(logging, level.upper(), logging.INFO),
         format=fmt,
         stream=sys.stdout,
+    )
+
+
+def _build_llm_clients(settings: Settings):
+    image_clients = {}
+    text_clients = {}
+
+    if settings.anthropic_api_key:
+        anthropic_sdk = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        image_clients["anthropic"] = AnthropicLLMClient(
+            sdk=anthropic_sdk,
+            model=settings.anthropic_model,
+        )
+        text_clients["anthropic"] = AnthropicTextLLMClient(
+            sdk=anthropic_sdk,
+            model=settings.anthropic_text_model,
+        )
+
+    if settings.openai_api_key:
+        from openai import AsyncOpenAI
+
+        openai_sdk = AsyncOpenAI(api_key=settings.openai_api_key)
+        image_clients["openai"] = OpenAILLMClient(
+            sdk=openai_sdk,
+            model=settings.openai_model,
+        )
+        text_clients["openai"] = OpenAITextLLMClient(
+            sdk=openai_sdk,
+            model=settings.openai_text_model,
+        )
+
+    return (
+        LLMProviderSelector(image_clients, settings.llm_provider),
+        TextLLMProviderSelector(text_clients, settings.llm_provider),
     )
 
 
@@ -82,9 +123,24 @@ async def _amain(settings: Settings) -> None:
     log.info("migration_ok")
 
     bot = Bot(token=settings.telegram_bot_token)
-    sdk = AsyncAnthropic(api_key=settings.anthropic_api_key)
-    llm = AnthropicLLMClient(sdk=sdk, model=settings.anthropic_model)
-    text_llm = AnthropicTextLLMClient(sdk=sdk, model=settings.anthropic_text_model)
+    llm, text_llm = _build_llm_clients(settings)
+    log.info(
+        "llm_provider_configured",
+        extra={
+            "provider": settings.llm_provider,
+            "image_model": (
+                settings.openai_model
+                if settings.llm_provider == "openai"
+                else settings.anthropic_model
+            ),
+            "text_model": (
+                settings.openai_text_model
+                if settings.llm_provider == "openai"
+                else settings.anthropic_text_model
+            ),
+        },
+    )
+    bot_mod.DEFAULT_LLM_PROVIDER = settings.llm_provider
     bot_mod.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
 
     scheduler = AsyncIOScheduler()

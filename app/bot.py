@@ -15,6 +15,7 @@ from app.commands import (
     parse_callback,
     parse_digest_at,
     parse_item_id_arg,
+    parse_llm_provider,
     parse_list_filter,
     parse_snooze_args,
     parse_tz,
@@ -33,7 +34,7 @@ from app.correction_service import (
     propose_correct,
 )
 from app.ingest_service import DuplicateReceipt, ingest_photo
-from app.llm import LLMClient, TextLLMClient
+from app.llm import LLMClient, LLMProviderNotConfigured, TextLLMClient
 from app.models import PantryItem, User
 from app.pantry_service import (
     NotOwnerOrMissing,
@@ -71,6 +72,7 @@ from app.renderer import (
 
 DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8
+DEFAULT_LLM_PROVIDER = "anthropic"
 ALLOWED_TELEGRAM_USER_ID: int = 0
 
 _SessionFactory = Callable[[], Session]
@@ -108,6 +110,7 @@ def authorize_and_get_user(
         chat_id=chat_id,
         tz=DEFAULT_TZ,
         digest_hour=DEFAULT_DIGEST_HOUR,
+        llm_provider=DEFAULT_LLM_PROVIDER,
         created_at=datetime.now(timezone.utc),
     )
     session.add(user)
@@ -123,6 +126,35 @@ def _noop_user_created(user: User) -> None:
 def _require_user(user: User | None) -> User:
     assert user is not None
     return user
+
+
+def _available_llm_providers(llm: LLMClient, text_llm: TextLLMClient) -> tuple[str, ...]:
+    image_providers = set(getattr(llm, "available_providers", ("anthropic",)))
+    text_providers = set(getattr(text_llm, "available_providers", ("anthropic",)))
+    return tuple(sorted(image_providers & text_providers))
+
+
+def _select_llm_client(llm: LLMClient, provider: str) -> LLMClient:
+    selector = getattr(llm, "for_provider", None)
+    if callable(selector):
+        return selector(provider)
+    return llm
+
+
+def _select_text_llm_client(text_llm: TextLLMClient, provider: str) -> TextLLMClient:
+    selector = getattr(text_llm, "for_provider", None)
+    if callable(selector):
+        return selector(provider)
+    return text_llm
+
+
+def _render_llm_status(user: User, llm: LLMClient, text_llm: TextLLMClient) -> str:
+    available = _available_llm_providers(llm, text_llm)
+    return (
+        f"LLM provider: {user.llm_provider}\n"
+        f"Available: {', '.join(available) if available else 'none'}\n"
+        "Usage: /llm [anthropic|openai]"
+    )
 
 
 async def _guard(
@@ -271,14 +303,20 @@ async def handle_add(
             return
         today = now_provider(user.tz).date()
         try:
+            selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
             proposals, _ = await propose_add(
                 session,
-                llm=text_llm,
+                llm=selected_text_llm,
                 user_id=user.telegram_id,
                 user_text=parts[1].strip(),
                 today=today,
                 tz=user.tz,
             )
+        except LLMProviderNotConfigured:
+            await msg.answer(
+                f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
+            )
+            return
         except Exception as exc:
             log.warning(
                 "add_propose_failed",
@@ -496,14 +534,20 @@ async def handle_correct(
             return
         today = now_provider(user.tz).date()
         try:
+            selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
             payload, cost = await propose_correct(
                 session,
-                llm=text_llm,
+                llm=selected_text_llm,
                 user_id=user.telegram_id,
                 item=item,
                 user_text=parts[2].strip(),
                 today=today,
             )
+        except LLMProviderNotConfigured:
+            await msg.answer(
+                f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
+            )
+            return
         except NullDiff:
             await msg.answer("no changes detected")
             return
@@ -576,6 +620,39 @@ async def handle_stats(
         await msg.answer(render_stats(stats))
 
 
+async def handle_llm(
+    msg,
+    *,
+    session_factory,
+    llm: LLMClient,
+    text_llm: TextLLMClient,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+):
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        try:
+            provider = parse_llm_provider((msg.text or "").split()[1:])
+        except CommandError as exc:
+            await msg.answer(str(exc))
+            return
+        if provider is None:
+            await msg.answer(_render_llm_status(user, llm, text_llm))
+            return
+        available = _available_llm_providers(llm, text_llm)
+        if provider not in available:
+            await msg.answer(
+                f"LLM provider {provider!r} is not configured. "
+                f"Available: {', '.join(available) if available else 'none'}"
+            )
+            return
+        user.llm_provider = provider
+        session.add(user)
+        session.commit()
+        await msg.answer(f"LLM provider set to {provider}")
+
+
 HELP_TEXT = (
     "Commands:\n"
     "  /start - setup status\n"
@@ -593,6 +670,7 @@ HELP_TEXT = (
     "      diff; tap Apply or Cancel. Proposal expires after 10 min.\n"
     "  /delete <id> - remove a wrong/duplicate import\n"
     "  /stats - last 30 days\n"
+    "  /llm [anthropic|openai] - show or switch LLM provider\n"
     "  /help - this message\n"
     "Send a receipt photo to log it."
 )
@@ -634,14 +712,20 @@ async def handle_photo(
             extra={"user_id": user.telegram_id, "photo_file_id": file_id},
         )
         try:
+            selected_llm = _select_llm_client(llm, user.llm_provider)
             summary = await ingest_photo(
                 session,
-                llm,
+                selected_llm,
                 user_id=user.telegram_id,
                 photo_file_id=file_id,
                 image_bytes=await photo_downloader(file_id),
                 today=today,
             )
+        except LLMProviderNotConfigured:
+            await msg.answer(
+                f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
+            )
+            return
         except DuplicateReceipt:
             await msg.answer("this receipt was already logged")
             return
@@ -1012,6 +1096,15 @@ def build_dispatcher(
             on_user_created=on_user_created,
         )
 
+    async def on_llm(message):
+        await handle_llm(
+            message,
+            session_factory=session_factory,
+            llm=llm,
+            text_llm=text_llm,
+            on_user_created=on_user_created,
+        )
+
     async def on_help(message):
         await handle_help(
             message,
@@ -1045,6 +1138,7 @@ def build_dispatcher(
     dispatcher.message.register(on_snooze, Command("snooze"))
     dispatcher.message.register(on_correct, Command("correct"))
     dispatcher.message.register(on_stats, Command("stats"))
+    dispatcher.message.register(on_llm, Command("llm"))
     dispatcher.message.register(on_help, Command("help"))
     dispatcher.message.register(on_photo, F.photo)
     dispatcher.callback_query.register(on_callback)

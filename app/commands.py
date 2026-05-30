@@ -79,6 +79,21 @@ def parse_list_filter(args: Sequence[str]) -> ListFilter:
     )
 
 
+LLMProviderName = Literal["anthropic", "openai"]
+ALLOWED_LLM_PROVIDERS: tuple[LLMProviderName, ...] = ("anthropic", "openai")
+
+
+def parse_llm_provider(args: Sequence[str]) -> Optional[LLMProviderName]:
+    if len(args) > 1:
+        raise CommandError("usage: /llm [anthropic|openai]")
+    if not args:
+        return None
+    token = args[0].lower()
+    if token not in ALLOWED_LLM_PROVIDERS:
+        raise CommandError("usage: /llm [anthropic|openai]")
+    return cast(LLMProviderName, token)
+
+
 Verb = Literal["ate", "toss", "snooze2", "show_all", "apply", "cancel"]
 
 

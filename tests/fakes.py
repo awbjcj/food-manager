@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Optional
 
+from app.cook_models import NutritionScores, RecipeCandidates, SelectedItems
 from app.llm import CorrectionDiff, LLMClient, LLMResult, ProposedAddItem
 from app.profile_service import FoodProfile
 from app.refine_service import ShelfLifeSearchClient, ShelfLifeSearchResult
@@ -79,6 +80,57 @@ class FakeProfileLLMClient:
         if self._raises < self.raise_n_times:
             self._raises += 1
             raise RuntimeError("simulated profile-llm failure")
+        assert self.canned is not None
+        return self.canned
+
+
+@dataclass
+class FakeSelectionLLM:
+    canned: Optional[tuple[SelectedItems, Optional[int]]] = None
+    raise_n_times: int = 0
+    _raises: int = 0
+    calls: list[str] = field(default_factory=list)
+
+    async def select_items(self, *, prompt):
+        self.calls.append(prompt)
+        if self._raises < self.raise_n_times:
+            self._raises += 1
+            raise RuntimeError("simulated selection failure")
+        assert self.canned is not None
+        return self.canned
+
+
+@dataclass
+class FakeRecipeLLM:
+    canned: Optional[tuple[RecipeCandidates, Optional[int]]] = None
+    canned_sequence: Optional[list[tuple[RecipeCandidates, Optional[int]]]] = None
+    raise_n_times: int = 0
+    _raises: int = 0
+    calls: list[str] = field(default_factory=list)
+
+    async def fetch_recipes(self, *, prompt):
+        self.calls.append(prompt)
+        if self._raises < self.raise_n_times:
+            self._raises += 1
+            raise RuntimeError("simulated recipe failure")
+        if self.canned_sequence:
+            return self.canned_sequence.pop(0)
+        assert self.canned is not None
+        return self.canned
+
+
+@dataclass
+class FakeNutritionLLM:
+    canned: Optional[tuple[NutritionScores, Optional[int]]] = None
+    raise_n_times: int = 0
+    _raises: int = 0
+    calls: list[str] = field(default_factory=list)
+
+    async def score(self, *, prompt):
+        self.calls.append(prompt)
+        if self._raises < self.raise_n_times:
+            self._raises += 1
+            raise RuntimeError("simulated nutrition failure")
         assert self.canned is not None
         return self.canned
 

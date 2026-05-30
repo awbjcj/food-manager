@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.models import User
+from app.profile_service import FoodProfile, apply_profile_to_user, profile_from_user
 
 
 def _session():
@@ -49,6 +50,27 @@ def test_migration_0004_adds_profile_columns(tmp_path):
         "household_size",
         "profile_note",
     } <= cols
+
+
+def test_profile_round_trips_through_user():
+    user = User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc))
+    profile = FoodProfile(
+        diet="vegetarian",
+        exclusions=["peanut", "cilantro"],
+        preferred_cuisines=["chinese", "american"],
+        max_cook_minutes=30,
+        household_size=2,
+        note="prefer one-pot meals",
+    )
+    apply_profile_to_user(user, profile)
+    assert user.diet == "vegetarian"
+    assert user.exclusions_json == '["peanut", "cilantro"]'
+    assert profile_from_user(user) == profile
+
+
+def test_profile_defaults_from_blank_user():
+    user = User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc))
+    assert profile_from_user(user) == FoodProfile()
 
 
 def _env():

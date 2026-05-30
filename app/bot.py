@@ -87,7 +87,6 @@ from app.pending_service import (
 from app.renderer import (
     CallbackButton,
     build_apply_cancel_keyboard,
-    build_cook_alternatives_keyboard,
     build_cook_result_keyboard,
     build_cook_round_keyboard,
     build_digest_keyboard,
@@ -1064,7 +1063,14 @@ async def handle_cook_callback(
                 ]
             except (TypeError, ValueError):
                 cards = []
-            await _safe_edit_cb(cb, render_cook_result(cards, show_alternatives=True))
+            assert cook.id is not None
+            await _safe_edit_cb(
+                cb,
+                render_cook_result(cards, show_alternatives=True),
+                to_aiogram_keyboard(
+                    build_cook_result_keyboard(cook.id, has_alternatives=False)
+                ),
+            )
             await cb.answer("showing alternatives")
             return
 
@@ -1219,10 +1225,8 @@ async def run_cook_and_render(
 
         mark_status(session, cook=cook, status="done")
         text = render_cook_result(cards, show_alternatives=False)
-        keyboard = (
-            to_aiogram_keyboard(build_cook_alternatives_keyboard(cook_id))
-            if len(cards) > 1
-            else None
+        keyboard = to_aiogram_keyboard(
+            build_cook_result_keyboard(cook_id, has_alternatives=len(cards) > 1)
         )
         await _safe_edit_bot(
             bot, chat_id=chat_id, message_id=message_id, text=text, keyboard=keyboard
@@ -1249,6 +1253,107 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             await cb.answer("not configured")
             return
         today = now_provider(user.tz).date()
+
+        if action.verb in ("cook_like", "cook_dislike"):
+            cook_id = action.item_id
+            assert cook_id is not None
+            cook = load_cook_session(session, user_id=user.telegram_id, cook_id=cook_id)
+            if cook is None or cook.status != "done":
+                await cb.answer("this cook session expired - start a new /cook")
+                return
+            verdict = "liked" if action.verb == "cook_like" else "disliked"
+            set_feedback(session, cook=cook, feedback=verdict, now=now_provider(user.tz))
+            await cb.answer("got it 👍" if verdict == "liked" else "noted 👎")
+            return
+
+        if action.verb in ("cook_save", "cook_shop"):
+            cook_id = action.item_id
+            assert cook_id is not None
+            cook = load_cook_session(session, user_id=user.telegram_id, cook_id=cook_id)
+            if cook is None or cook.status != "done":
+                await cb.answer("this cook session expired - start a new /cook")
+                return
+            try:
+                raw_cards = _json.loads(cook.candidates_json or "[]")
+                cards = [ScoredCandidate.model_validate(c) for c in raw_cards]
+            except (TypeError, ValueError):
+                cards = []
+            if not cards:
+                await cb.answer("nothing to use here")
+                return
+            index = cook.chosen_index or 0
+            if index < 0 or index >= len(cards):
+                index = 0
+            candidate = cards[index].recipe
+            if action.verb == "cook_save":
+                result = save_candidate(
+                    session, user_id=user.telegram_id, candidate=candidate,
+                    now=now_provider(user.tz),
+                )
+                await cb.answer("already saved" if result.duplicate else "saved ★")
+                return
+            pantry = [
+                item.normalized_name
+                for item in list_active(
+                    session, user_id=user.telegram_id, f=parse_list_filter([]), today=today
+                )
+                if item.expires_on >= today
+            ]
+            missing = missing_ingredients(
+                ingredients=candidate.ingredients, pantry_normalized=pantry
+            )
+            add_result = add_missing(
+                session, user_id=user.telegram_id, ingredients=missing,
+                now=now_provider(user.tz),
+            )
+            if add_result.added:
+                await cb.answer(f"added {len(add_result.added)} to shopping list")
+            elif add_result.already:
+                await cb.answer("already on your list")
+            else:
+                await cb.answer("you have everything!")
+            return
+
+        if action.verb == "shop_done":
+            shopping_id = action.item_id
+            assert shopping_id is not None
+            ok = check_off(
+                session, user_id=user.telegram_id, shopping_id=shopping_id,
+                now=now_provider(user.tz),
+            )
+            remaining = list_pending(session, user_id=user.telegram_id)
+            keyboard = (
+                to_aiogram_keyboard(
+                    build_shopping_keyboard([i.id for i in remaining if i.id])
+                )
+                if remaining
+                else None
+            )
+            try:
+                await cb.message.edit_text(
+                    render_shopping_list(remaining), reply_markup=keyboard
+                )
+            except Exception as exc:
+                log.warning("shopping_edit_failed", extra={"error_class": type(exc).__name__})
+            await cb.answer("bought ✓" if ok else "already done")
+            return
+
+        if action.verb == "fav_cook":
+            recipe_id = action.item_id
+            assert recipe_id is not None
+            saved = load_saved(session, user_id=user.telegram_id, recipe_id=recipe_id)
+            if saved is None:
+                await cb.answer("not found")
+                return
+            shopping = recook_shopping_list(
+                session, user_id=user.telegram_id, saved=saved, today=today
+            )
+            await cb.message.answer(
+                render_recook(recipe_from_saved(saved), shopping=shopping)
+            )
+            await cb.answer("here's the plan")
+            return
+
         if action.verb == "show_all":
             rows = list_digest_due(session, user_id=user.telegram_id, today=today)
             if not rows:

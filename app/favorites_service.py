@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 from app.cook_logic import shopping_list
 from app.cook_models import RecipeCandidate, RecipeIngredient
 from app.models import SavedRecipe
-from app.pantry_service import ListFilter, list_active
+from app.pantry_service import active_pantry_names
 from app.pending_service import utc_naive
 
 
@@ -84,11 +84,7 @@ def recook_shopping_list(
     session: Session, *, user_id: int, saved: SavedRecipe, today: date
 ) -> list[str]:
     recipe = recipe_from_saved(saved)
-    pantry = [
-        item.normalized_name
-        for item in list_active(session, user_id=user_id, f=ListFilter.default(), today=today)
-        if item.expires_on >= today
-    ]
+    pantry = active_pantry_names(session, user_id=user_id, today=today)
     return shopping_list(
         recipe_names=[i.name for i in recipe.ingredients],
         pantry_normalized=pantry,

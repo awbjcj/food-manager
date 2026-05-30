@@ -65,6 +65,7 @@ from app.models import CookSession, PantryItem, User
 from app.refine_service import run_receipt_refine
 from app.pantry_service import (
     NotOwnerOrMissing,
+    active_pantry_names,
     compute_stats,
     list_active,
     list_digest_due,
@@ -1294,13 +1295,9 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
                 )
                 await cb.answer("already saved" if result.duplicate else "saved ★")
                 return
-            pantry = [
-                item.normalized_name
-                for item in list_active(
-                    session, user_id=user.telegram_id, f=parse_list_filter([]), today=today
-                )
-                if item.expires_on >= today
-            ]
+            pantry = active_pantry_names(
+                session, user_id=user.telegram_id, today=today
+            )
             missing = missing_ingredients(
                 ingredients=candidate.ingredients, pantry_normalized=pantry
             )

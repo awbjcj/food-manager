@@ -22,6 +22,7 @@ PendingActionType = Literal["correct", "add"]
 PendingStatus = Literal["pending", "applied", "cancelled", "expired", "stale"]
 CacheAction = Literal["move", "add_new", "leave"]
 CookStatus = Literal["collecting", "ready", "done", "cancelled", "expired"]
+CookFeedback = Literal["none", "liked", "disliked"]
 
 
 class User(SQLModel, table=True):
@@ -128,5 +129,29 @@ class CookSession(SQLModel, table=True):
     chat_id: int
     message_id: Optional[int] = None
     llm_cost_micros_usd: Optional[int] = None
+    feedback: str = "none"
+    feedback_at: Optional[datetime] = None
     created_at: datetime
     expires_at: datetime
+
+
+class ShoppingList(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.telegram_id", index=True)
+    name_raw: str
+    name_normalized: str = Field(index=True)
+    qty: Optional[float] = None
+    unit: Optional[str] = None
+    added_at: datetime
+    bought_at: Optional[datetime] = None
+
+
+class SavedRecipe(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.telegram_id", index=True)
+    title: str
+    cuisine: str
+    source_url: Optional[str] = None
+    ingredients_json: str
+    method_gist: str
+    saved_at: datetime

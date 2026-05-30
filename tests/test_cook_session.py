@@ -97,3 +97,17 @@ def test_migration_0005_creates_cooksession(tmp_path):
     assert result.returncode == 0, result.stderr
     engine = sa.create_engine(f"sqlite:///{db_path}")
     assert "cooksession" in sa.inspect(engine).get_table_names()
+
+
+def test_stats_counts_cook_cost():
+    from app.pantry_service import compute_stats
+
+    with _session() as db:
+        now = datetime(2026, 5, 30, 12, 0)
+        db.add(CookSession(user_id=1, status="done", chat_id=1, selected_item_ids="[]",
+                           llm_cost_micros_usd=500, created_at=now,
+                           expires_at=now))
+        db.commit()
+        stats = compute_stats(db, user_id=1, now=datetime(2026, 5, 30, 13, 0, tzinfo=timezone.utc))
+        assert stats.cook_cost_micros_usd == 500
+        assert stats.cook_count == 1

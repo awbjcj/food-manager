@@ -774,6 +774,7 @@ HELP_TEXT = (
     "  /stats - last 30 days\n"
     "  /llm [anthropic|openai] - show or switch LLM provider\n"
     "  /prefs [sentence] - show or update your food profile\n"
+    "  /cook - get a recipe from your pantry\n"
     "  /help - this message\n"
     "Send a receipt photo to log it."
 )

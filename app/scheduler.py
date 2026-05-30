@@ -180,3 +180,32 @@ def register_sweep_expired_pendings(
         id="sweep_expired_pendings",
         replace_existing=True,
     )
+
+
+def _cook_sweep_job(session_factory: SessionFactory) -> None:
+    from app.cook_session_service import sweep_expired_cooks
+
+    try:
+        with session_factory() as session:
+            swept = sweep_expired_cooks(session, now=datetime.now(timezone.utc))
+            if swept:
+                log.info("cook_swept", extra={"count": swept})
+    except Exception as exc:
+        log.warning(
+            "cook_sweep_failed",
+            extra={"error_class": type(exc).__name__},
+        )
+
+
+def register_sweep_expired_cooks(
+    scheduler: AsyncIOScheduler, *, session_factory: SessionFactory
+) -> None:
+    scheduler.add_job(
+        _cook_sweep_job,
+        "cron",
+        minute="*/5",
+        timezone="UTC",
+        args=[session_factory],
+        id="sweep_expired_cooks",
+        replace_existing=True,
+    )

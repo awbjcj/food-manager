@@ -91,3 +91,18 @@ def test_build_cook_round_keyboard_can_include_round_token():
         "cookpick:7:meal:0",
         "cookpick:7:meal:1",
     ]
+
+
+def test_render_stats_includes_cook_line():
+    from app.pantry_service import Stats
+    from app.renderer import render_stats
+
+    stats = Stats(
+        receipt_count=0, tracked_item_count=0, removed_item_count=0,
+        cache_hit_percent=None, total_cost_micros_usd=0, avg_cost_micros_usd=None,
+        unknown_cost_receipt_count=0, waste_rate_percent=None,
+        cook_cost_micros_usd=1500, cook_count=2,
+    )
+    text = render_stats(stats)
+    assert "Cook sessions: 2" in text
+    assert "0.001" in text or "0.002" in text

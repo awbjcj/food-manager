@@ -55,6 +55,7 @@ from app.llm import (
 from app.refine_service import AnthropicSearchClient
 from app.scheduler import (
     register_all_user_digests,
+    register_sweep_expired_cooks,
     register_sweep_expired_pendings,
     schedule_user_digest,
     send_digest_with_retry,
@@ -222,6 +223,7 @@ async def _amain(settings: Settings) -> None:
 
     register_all_user_digests(scheduler, session_factory=session_factory, send=send)
     register_sweep_expired_pendings(scheduler, session_factory=session_factory)
+    register_sweep_expired_cooks(scheduler, session_factory=session_factory)
 
     def reschedule(user) -> None:
         schedule_user_digest(scheduler, user, send=send)

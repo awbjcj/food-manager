@@ -396,6 +396,10 @@ def render_stats(stats: Stats) -> str:
         f"  Adds:        {tl.add_proposal_count}  "
         f"(${tl.add_cost_micros / 1_000_000:.4f} total{add_unknown})"
     )
+    lines.append(
+        f"Cook sessions: {stats.cook_count} "
+        f"(${stats.cook_cost_micros_usd / 1_000_000:.3f})"
+    )
     lines.append(f"Waste rate: {waste_rate}")
     return "\n".join(lines)
 

@@ -293,9 +293,16 @@ def build_cook_alternatives_keyboard(cook_id: int) -> list[list[CallbackButton]]
     return [[CallbackButton(text="Show alternatives", callback_data=f"cookalt:{cook_id}")]]
 
 
-def build_cook_round_keyboard(cook_id: int, options: list[str]) -> list[list[CallbackButton]]:
+def build_cook_round_keyboard(
+    cook_id: int, options: list[str], *, round_name: str | None = None
+) -> list[list[CallbackButton]]:
+    def callback_data(idx: int) -> str:
+        if round_name is None:
+            return f"cookpick:{cook_id}:{idx}"
+        return f"cookpick:{cook_id}:{round_name}:{idx}"
+
     return [
-        [CallbackButton(text=option, callback_data=f"cookpick:{cook_id}:{idx}")]
+        [CallbackButton(text=option, callback_data=callback_data(idx))]
         for idx, option in enumerate(options)
     ]
 

@@ -7,7 +7,7 @@ from app.cook_models import (
     ScoredCandidate,
 )
 from app.commands import CommandError, parse_callback
-from app.renderer import render_cook_result
+from app.renderer import build_cook_round_keyboard, render_cook_result
 
 
 def _scored(title, n_alts=0):
@@ -45,13 +45,49 @@ def test_render_cook_result_expanded_shows_alternatives():
 
 def test_parse_cook_callbacks():
     pick = parse_callback("cookpick:7:2")
-    assert pick.verb == "cook_pick" and pick.item_id == 7 and pick.option_index == 2
+    assert (
+        pick.verb == "cook_pick"
+        and pick.item_id == 7
+        and pick.option_index == 2
+        and pick.round_name is None
+    )
+    meal = parse_callback("cookpick:7:meal:2")
+    assert (
+        meal.verb == "cook_pick"
+        and meal.item_id == 7
+        and meal.option_index == 2
+        and meal.round_name == "meal"
+    )
+    cuisine = parse_callback("cookpick:7:cuisine:1")
+    assert (
+        cuisine.verb == "cook_pick"
+        and cuisine.item_id == 7
+        and cuisine.option_index == 1
+        and cuisine.round_name == "cuisine"
+    )
     alt = parse_callback("cookalt:7")
     assert alt.verb == "cook_alt" and alt.item_id == 7
     assert alt.option_index is None
 
 
-@pytest.mark.parametrize("data", ["cookpick:7", "cookpick:7:x", "cookpick:7:-1"])
+@pytest.mark.parametrize(
+    "data",
+    [
+        "cookpick:7",
+        "cookpick:7:x",
+        "cookpick:7:-1",
+        "cookpick:7:snack:0",
+        "cookpick:7:meal:-1",
+    ],
+)
 def test_parse_cook_callbacks_reject_malformed_data(data):
     with pytest.raises(CommandError):
         parse_callback(data)
+
+
+def test_build_cook_round_keyboard_can_include_round_token():
+    rows = build_cook_round_keyboard(7, ["Dinner", "Lunch"], round_name="meal")
+    assert [row[0].callback_data for row in rows] == [
+        "cookpick:7:meal:0",
+        "cookpick:7:meal:1",
+    ]

@@ -113,6 +113,7 @@ class CallbackAction:
     verb: Verb
     item_id: Optional[int]
     option_index: Optional[int] = None
+    round_name: Optional[str] = None
 
 
 def parse_callback(data: str) -> CallbackAction:
@@ -144,15 +145,24 @@ def parse_callback(data: str) -> CallbackAction:
         return CallbackAction(verb="cook_alt", item_id=cook_id)
     if data.startswith("cookpick:"):
         parts = data.split(":")
-        if len(parts) != 3:
+        if len(parts) not in (3, 4):
             raise CommandError(f"bad cookpick data {data!r}")
-        _, raw_id, raw_idx = parts
+        if len(parts) == 3:
+            _, raw_id, raw_idx = parts
+            round_name = None
+        else:
+            _, raw_id, round_name, raw_idx = parts
+            if round_name not in ("meal", "cuisine"):
+                raise CommandError(f"bad cookpick data {data!r}")
         try:
             option_index = int(raw_idx)
             if option_index < 0:
                 raise CommandError(f"bad cookpick data {data!r}")
             return CallbackAction(
-                verb="cook_pick", item_id=int(raw_id), option_index=option_index
+                verb="cook_pick",
+                item_id=int(raw_id),
+                option_index=option_index,
+                round_name=round_name,
             )
         except ValueError as exc:
             raise CommandError(f"bad cookpick data {data!r}") from exc

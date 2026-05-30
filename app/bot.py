@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json as _json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,6 +10,7 @@ from typing import Awaitable, Callable, Optional, cast
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from sqlalchemy import update
 from sqlmodel import Session
 
 from app.commands import (
@@ -34,6 +36,14 @@ from app.correction_service import (
     propose_add,
     propose_correct,
 )
+from app.cook_models import ScoredCandidate
+from app.cook_service import NotEnoughItems, run_cook
+from app.cook_session_service import (
+    create_cook_session,
+    load_cook_session,
+    mark_status,
+    set_message_id as set_cook_message_id,
+)
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import (
     LLMClient,
@@ -41,7 +51,7 @@ from app.llm import (
     ProfileUpdateLLMClient,
     TextLLMClient,
 )
-from app.models import PantryItem, User
+from app.models import CookSession, PantryItem, User
 from app.refine_service import run_receipt_refine
 from app.pantry_service import (
     NotOwnerOrMissing,
@@ -67,6 +77,8 @@ from app.pending_service import (
 from app.renderer import (
     CallbackButton,
     build_apply_cancel_keyboard,
+    build_cook_alternatives_keyboard,
+    build_cook_round_keyboard,
     build_digest_keyboard,
     build_undo_add_keyboard,
     build_undo_keyboard,
@@ -74,6 +86,7 @@ from app.renderer import (
     render_applied_add,
     render_applied_correction,
     render_correction_diff,
+    render_cook_result,
     render_digest,
     render_ingest_reply,
     render_list,
@@ -88,6 +101,8 @@ DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8
 DEFAULT_LLM_PROVIDER = "anthropic"
 ALLOWED_TELEGRAM_USER_ID: int = 0
+MEAL_TYPES = ["Dinner", "Lunch", "Breakfast", "Dessert", "Snack", "Surprise me"]
+DEFAULT_CUISINES = ["Italian", "Mexican", "Chinese", "American", "Surprise me"]
 
 _SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
@@ -643,6 +658,32 @@ async def handle_stats(
         await msg.answer(render_stats(stats))
 
 
+async def handle_cook(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    now_provider: NowProvider,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        now = now_provider(user.tz)
+        cook = create_cook_session(
+            session,
+            user_id=user.telegram_id,
+            chat_id=msg.chat.id,
+            now=now.astimezone(timezone.utc),
+        )
+        assert cook.id is not None
+        keyboard = to_aiogram_keyboard(
+            build_cook_round_keyboard(cook.id, MEAL_TYPES, round_name="meal")
+        )
+        sent = await msg.answer("What are you cooking?", reply_markup=keyboard)
+        set_cook_message_id(session, cook=cook, message_id=sent.message_id)
+
+
 async def handle_llm(
     msg,
     *,
@@ -865,6 +906,268 @@ async def handle_photo(
                 )
 
         spawn(_run_refine())
+
+
+def _cuisine_options(user: User) -> list[str]:
+    try:
+        prefs = _json.loads(user.preferred_cuisines_json or "[]")
+    except (TypeError, ValueError):
+        prefs = []
+    options = [str(c).title() for c in prefs if str(c).strip()]
+    if not options:
+        options = list(DEFAULT_CUISINES)
+    elif "Surprise me" not in options:
+        options = options[:4] + ["Surprise me"]
+    return options[:5]
+
+
+def _select_cook(client, provider: str):
+    selector = getattr(client, "for_provider", None)
+    return selector(provider) if callable(selector) else client
+
+
+async def _safe_edit_cb(cb, text: str, keyboard=None) -> bool:
+    try:
+        await cb.message.edit_text(text, reply_markup=keyboard)
+        return True
+    except Exception as exc:
+        log.warning("cook_edit_failed", extra={"error_class": type(exc).__name__})
+        return False
+
+
+async def _safe_edit_bot(
+    bot, *, chat_id: int, message_id: int | None, text: str, keyboard=None
+) -> None:
+    if bot is None or message_id is None:
+        return
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=keyboard,
+        )
+    except Exception as exc:
+        log.warning("cook_edit_failed", extra={"error_class": type(exc).__name__})
+
+
+async def handle_cook_callback(
+    cb,
+    *,
+    session_factory: _SessionFactory,
+    now_provider: NowProvider,
+    selection_llm,
+    recipe_llm,
+    nutrition_llm,
+    spawn,
+    bot,
+) -> None:
+    if cb.from_user.id != ALLOWED_TELEGRAM_USER_ID:
+        log.info(
+            "unauthorized_update_rejected",
+            extra={"telegram_user_id": cb.from_user.id},
+        )
+        await cb.answer("not authorized", show_alert=False)
+        return
+    try:
+        action = parse_callback(cb.data or "")
+    except CommandError:
+        await cb.answer("unrecognized action")
+        return
+    if action.verb not in ("cook_pick", "cook_alt") or action.item_id is None:
+        await cb.answer("unrecognized action")
+        return
+
+    with session_factory() as session:
+        user = session.get(User, cb.from_user.id)
+        if user is None:
+            await cb.answer("not configured")
+            return
+        cook = load_cook_session(
+            session, user_id=user.telegram_id, cook_id=action.item_id
+        )
+        if cook is None or cook.status not in ("collecting", "ready", "done"):
+            await cb.answer("this cook session expired - start a new /cook")
+            return
+        if cook.status in ("collecting", "ready"):
+            now = utc_naive(now_provider(user.tz))
+            if cook.expires_at <= now:
+                cook.status = "expired"
+                session.add(cook)
+                session.commit()
+                await cb.answer("this cook session expired - start a new /cook")
+                return
+
+        if action.verb == "cook_alt":
+            try:
+                raw_cards = _json.loads(cook.candidates_json or "[]")
+                cards = [
+                    ScoredCandidate.model_validate(card) for card in raw_cards
+                ]
+            except (TypeError, ValueError):
+                cards = []
+            await _safe_edit_cb(cb, render_cook_result(cards, show_alternatives=True))
+            await cb.answer("showing alternatives")
+            return
+
+        option_index = action.option_index
+        if option_index is None:
+            await cb.answer("unrecognized action")
+            return
+
+        if cook.meal_type is None:
+            if action.round_name == "cuisine":
+                await cb.answer("unrecognized action")
+                return
+            if option_index < 0 or option_index >= len(MEAL_TYPES):
+                await cb.answer("unrecognized action")
+                return
+            assert cook.id is not None
+            keyboard = to_aiogram_keyboard(
+                build_cook_round_keyboard(
+                    cook.id, _cuisine_options(user), round_name="cuisine"
+                )
+            )
+            if not await _safe_edit_cb(
+                cb,
+                "Which cuisine?",
+                keyboard,
+            ):
+                await cb.answer("couldn't update this cook session - try /cook again")
+                return
+            cook.meal_type = MEAL_TYPES[option_index]
+            session.add(cook)
+            session.commit()
+            await cb.answer()
+            return
+
+        if action.round_name == "meal":
+            await cb.answer("already answered")
+            return
+
+        if cook.cuisine is not None:
+            await cb.answer()
+            return
+
+        if action.round_name != "cuisine":
+            await cb.answer("unrecognized action")
+            return
+
+        cuisine_options = _cuisine_options(user)
+        if option_index < 0 or option_index >= len(cuisine_options):
+            await cb.answer("unrecognized action")
+            return
+        chosen_cuisine = cuisine_options[option_index]
+        result = session.exec(
+            update(CookSession)
+            .where(
+                CookSession.id == cook.id,
+                CookSession.user_id == user.telegram_id,
+                CookSession.status == "collecting",
+                CookSession.meal_type.is_not(None),  # type: ignore[union-attr]
+                CookSession.cuisine.is_(None),  # type: ignore[union-attr]
+            )
+            .values(cuisine=chosen_cuisine, status="ready")
+        )
+        session.commit()
+        if result.rowcount == 0:
+            await cb.answer("already cooking")
+            return
+        cook = load_cook_session(session, user_id=user.telegram_id, cook_id=cook.id)
+        if cook is None:
+            await cb.answer("this cook session expired - start a new /cook")
+            return
+        await _safe_edit_cb(cb, "Thinking...")
+        await cb.answer()
+        user_id = user.telegram_id
+        user_tz = user.tz
+        cook_id = cook.id
+
+    if cook_id is None:
+        return
+    spawn(
+        run_cook_and_render(
+            session_factory,
+            user_id=user_id,
+            user_tz=user_tz,
+            cook_id=cook_id,
+            selection_llm=selection_llm,
+            recipe_llm=recipe_llm,
+            nutrition_llm=nutrition_llm,
+            now_provider=now_provider,
+            bot=bot,
+        )
+    )
+
+
+async def run_cook_and_render(
+    session_factory: _SessionFactory,
+    *,
+    user_id: int,
+    user_tz: str,
+    cook_id: int,
+    selection_llm,
+    recipe_llm,
+    nutrition_llm,
+    now_provider: NowProvider,
+    bot,
+) -> None:
+    with session_factory() as session:
+        cook = load_cook_session(session, user_id=user_id, cook_id=cook_id)
+        if cook is None or cook.status != "ready":
+            return
+        user = session.get(User, user_id)
+        if user is None:
+            return
+        profile = profile_from_user(user)
+        chat_id = cook.chat_id
+        message_id = cook.message_id
+        today = now_provider(user_tz).date()
+        selected_selection_llm = _select_cook(selection_llm, user.llm_provider)
+        selected_recipe_llm = _select_cook(recipe_llm, user.llm_provider)
+        selected_nutrition_llm = _select_cook(nutrition_llm, user.llm_provider)
+        try:
+            cards = await run_cook(
+                session,
+                cook=cook,
+                profile=profile,
+                selection_llm=selected_selection_llm,
+                recipe_llm=selected_recipe_llm,
+                nutrition_llm=selected_nutrition_llm,
+                today=today,
+            )
+        except NotEnoughItems:
+            mark_status(session, cook=cook, status="cancelled")
+            await _safe_edit_bot(
+                bot,
+                chat_id=chat_id,
+                message_id=message_id,
+                text="Not enough usable items - send a receipt or /add a few things.",
+            )
+            return
+        except Exception as exc:
+            log.warning(
+                "cook_pipeline_failed", extra={"error_class": type(exc).__name__}
+            )
+            mark_status(session, cook=cook, status="cancelled")
+            await _safe_edit_bot(
+                bot,
+                chat_id=chat_id,
+                message_id=message_id,
+                text="Couldn't build a recipe right now - try /cook again.",
+            )
+            return
+
+        mark_status(session, cook=cook, status="done")
+        text = render_cook_result(cards, show_alternatives=False)
+        keyboard = (
+            to_aiogram_keyboard(build_cook_alternatives_keyboard(cook_id))
+            if len(cards) > 1
+            else None
+        )
+        await _safe_edit_bot(
+            bot, chat_id=chat_id, message_id=message_id, text=text, keyboard=keyboard
+        )
 
 
 async def handle_callback(cb, *, session_factory, now_provider) -> None:
@@ -1147,6 +1450,9 @@ def build_dispatcher(
     on_user_created: Callable[[User], None],
     reschedule: Callable[[User], None],
     search=None,
+    selection_llm=None,
+    recipe_llm=None,
+    nutrition_llm=None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -1241,6 +1547,14 @@ def build_dispatcher(
             on_user_created=on_user_created,
         )
 
+    async def on_cook(message):
+        await handle_cook(
+            message,
+            session_factory=session_factory,
+            now_provider=now_provider,
+            on_user_created=on_user_created,
+        )
+
     async def on_llm(message):
         await handle_llm(
             message,
@@ -1279,6 +1593,23 @@ def build_dispatcher(
         )
 
     async def on_callback(callback):
+        if (callback.data or "").startswith(("cookpick:", "cookalt:")):
+            if selection_llm is None or recipe_llm is None or nutrition_llm is None:
+                await callback.answer(
+                    "cook is not configured yet", show_alert=False
+                )
+                return
+            await handle_cook_callback(
+                callback,
+                session_factory=session_factory,
+                now_provider=now_provider,
+                selection_llm=selection_llm,
+                recipe_llm=recipe_llm,
+                nutrition_llm=nutrition_llm,
+                spawn=asyncio.create_task,
+                bot=bot,
+            )
+            return
         await handle_callback(
             callback, session_factory=session_factory, now_provider=now_provider
         )
@@ -1294,6 +1625,7 @@ def build_dispatcher(
     dispatcher.message.register(on_snooze, Command("snooze"))
     dispatcher.message.register(on_correct, Command("correct"))
     dispatcher.message.register(on_stats, Command("stats"))
+    dispatcher.message.register(on_cook, Command("cook"))
     dispatcher.message.register(on_llm, Command("llm"))
     dispatcher.message.register(on_prefs, Command("prefs"))
     dispatcher.message.register(on_help, Command("help"))

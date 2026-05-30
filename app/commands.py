@@ -105,6 +105,12 @@ Verb = Literal[
     "undo_add",
     "cook_pick",
     "cook_alt",
+    "cook_like",
+    "cook_dislike",
+    "cook_save",
+    "cook_shop",
+    "shop_done",
+    "fav_cook",
 ]
 
 
@@ -136,6 +142,29 @@ def parse_callback(data: str) -> CallbackAction:
         except ValueError as exc:
             raise CommandError(f"bad undo id {raw_id!r}") from exc
         return CallbackAction(verb=cast(Verb, f"undo_{kind}"), item_id=target_id)
+    if data.startswith("cookfb:"):
+        parts = data.split(":")
+        if len(parts) != 3 or parts[2] not in ("liked", "disliked"):
+            raise CommandError(f"bad cookfb data {data!r}")
+        try:
+            cook_id = int(parts[1])
+        except ValueError as exc:
+            raise CommandError(f"bad cook id {parts[1]!r}") from exc
+        verb = "cook_like" if parts[2] == "liked" else "cook_dislike"
+        return CallbackAction(verb=cast(Verb, verb), item_id=cook_id)
+    for prefix, verb_name in (
+        ("cooksave:", "cook_save"),
+        ("cookshop:", "cook_shop"),
+        ("shopdone:", "shop_done"),
+        ("favcook:", "fav_cook"),
+    ):
+        if data.startswith(prefix):
+            _, _, raw_id = data.partition(":")
+            try:
+                target_id = int(raw_id)
+            except ValueError as exc:
+                raise CommandError(f"bad id {raw_id!r}") from exc
+            return CallbackAction(verb=cast(Verb, verb_name), item_id=target_id)
     if data.startswith("cookalt:"):
         _, _, raw_id = data.partition(":")
         try:

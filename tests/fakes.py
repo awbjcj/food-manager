@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator, Optional
 
 from app.llm import CorrectionDiff, LLMClient, LLMResult, ProposedAddItem
+from app.profile_service import FoodProfile
 from app.refine_service import ShelfLifeSearchClient, ShelfLifeSearchResult
 
 
@@ -64,6 +65,22 @@ class FakeTextLLMClient:
             return self.canned_add_sequence.pop(0)
         assert self.canned_add is not None
         return self.canned_add
+
+
+@dataclass
+class FakeProfileLLMClient:
+    canned: Optional[tuple["FoodProfile", Optional[int]]] = None
+    raise_n_times: int = 0
+    _raises: int = 0
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    async def parse_profile_update(self, *, current, sentence):
+        self.calls.append({"current": current, "sentence": sentence})
+        if self._raises < self.raise_n_times:
+            self._raises += 1
+            raise RuntimeError("simulated profile-llm failure")
+        assert self.canned is not None
+        return self.canned
 
 
 @dataclass

@@ -1,3 +1,4 @@
+import asyncio
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from sqlmodel import SQLModel, Session, create_engine
 
 from app.models import User
 from app.profile_service import FoodProfile, apply_profile_to_user, profile_from_user
+from tests.fakes import FakeProfileLLMClient
 
 
 def _session():
@@ -71,6 +73,17 @@ def test_profile_round_trips_through_user():
 def test_profile_defaults_from_blank_user():
     user = User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc))
     assert profile_from_user(user) == FoodProfile()
+
+
+def test_fake_profile_client_returns_merged_profile():
+    merged = FoodProfile(diet="vegan", exclusions=["peanut"])
+    fake = FakeProfileLLMClient(canned=(merged, 42))
+    result, cost = asyncio.run(
+        fake.parse_profile_update(current=FoodProfile(), sentence="I'm vegan, no peanuts")
+    )
+    assert result == merged
+    assert cost == 42
+    assert fake.calls[0]["sentence"] == "I'm vegan, no peanuts"
 
 
 def _env():

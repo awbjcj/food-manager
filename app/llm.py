@@ -9,6 +9,8 @@ from typing import Any, Literal, Optional, Protocol
 
 from pydantic import BaseModel, Field
 
+from app.profile_service import FoodProfile
+
 Category = Literal[
     "dairy",
     "produce",
@@ -101,6 +103,12 @@ class TextLLMClient(Protocol):
         today: date,
         tz: str,
     ) -> tuple[list[ProposedAddItem], Optional[int]]: ...
+
+
+class ProfileUpdateLLMClient(Protocol):
+    async def parse_profile_update(
+        self, *, current: FoodProfile, sentence: str
+    ) -> tuple[FoodProfile, Optional[int]]: ...
 
 
 log = logging.getLogger(__name__)
@@ -539,6 +547,22 @@ against the user's typical /add patterns.
 """
 
 
+PROFILE_SYSTEM_PROMPT = """You maintain a user's food profile. You are given the
+current profile as JSON and a new sentence. Return ONLY the updated profile as
+JSON matching this schema (merge, do not drop existing values unless the user
+clearly retracts them):
+{
+  "diet": "none|vegetarian|vegan|pescatarian|halal|kosher|other",
+  "exclusions": [string],          // allergies and hard-avoid ingredients (lowercase singular)
+  "preferred_cuisines": [string],  // e.g. ["chinese","american"]
+  "max_cook_minutes": integer or null,
+  "household_size": integer >= 1,
+  "note": string                   // free-text preferences that don't fit a field
+}
+Add any newly stated allergy to "exclusions". No prose.
+"""
+
+
 def _extract_json_text(message) -> str:
     chunks: list[str] = []
     for block in message.content:
@@ -747,6 +771,33 @@ class OpenAITextLLMClient(TextLLMClient):
         )
         parsed = ProposedAddItems.model_validate(_extract_openai_parsed(response))
         return parsed.items, None
+
+
+class AnthropicProfileLLMClient(ProfileUpdateLLMClient):
+    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
+        self._delegate = AnthropicTextLLMClient(sdk, model, sleep)
+
+    async def parse_profile_update(self, *, current, sentence):
+        user_msg = json.dumps({"current": current.model_dump(), "sentence": sentence})
+
+        def _parse(text: str) -> FoodProfile:
+            return FoodProfile.model_validate(json.loads(text))
+
+        return await self._delegate._call_with_schema(
+            PROFILE_SYSTEM_PROMPT, user_msg, _parse
+        )
+
+
+class OpenAIProfileLLMClient(ProfileUpdateLLMClient):
+    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
+        self._delegate = OpenAITextLLMClient(sdk, model, sleep)
+
+    async def parse_profile_update(self, *, current, sentence):
+        user_msg = json.dumps({"current": current.model_dump(), "sentence": sentence})
+        response = await self._delegate._create_response(
+            PROFILE_SYSTEM_PROMPT, user_msg, FoodProfile
+        )
+        return FoodProfile.model_validate(_extract_openai_parsed(response)), None
 
 
 def _detect_media_type(image_bytes: bytes) -> str:

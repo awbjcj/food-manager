@@ -4,9 +4,18 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
 import sqlalchemy as sa
 from sqlmodel import SQLModel, Session, create_engine
 
+from app.cook_session_service import (
+    COOK_TTL_MINUTES,
+    accrue_cost,
+    create_cook_session,
+    load_cook_session,
+    mark_status,
+    sweep_expired_cooks,
+)
 from app.models import CookSession, User
 
 
@@ -33,6 +42,49 @@ def test_cook_session_row_persists():
         assert row.id is not None
         assert row.status == "collecting"
         assert row.meal_type is None
+
+
+def test_create_supersedes_previous_active():
+    with _session() as db:
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+        first = create_cook_session(db, user_id=1, chat_id=1, now=now)
+        second = create_cook_session(db, user_id=1, chat_id=1, now=now)
+        db.refresh(first)
+        assert first.status == "cancelled"
+        assert second.status == "collecting"
+        assert load_cook_session(db, user_id=1, cook_id=second.id).id == second.id
+
+
+def test_accrue_cost_sums():
+    with _session() as db:
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+        row = create_cook_session(db, user_id=1, chat_id=1, now=now)
+        accrue_cost(db, cook=row, add_micros=100)
+        accrue_cost(db, cook=row, add_micros=50)
+        assert row.llm_cost_micros_usd == 150
+
+
+def test_sweep_expires_old_collecting():
+    with _session() as db:
+        old = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+        row = create_cook_session(db, user_id=1, chat_id=1, now=old)
+        swept = sweep_expired_cooks(db, now=old + timedelta(minutes=COOK_TTL_MINUTES + 1))
+        db.refresh(row)
+        assert swept == 1
+        assert row.status == "expired"
+
+
+def test_mark_status_rejects_invalid_status_without_mutating():
+    with _session() as db:
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+        row = create_cook_session(db, user_id=1, chat_id=1, now=now)
+
+        with pytest.raises(ValueError):
+            mark_status(db, cook=row, status="bogus")
+
+        assert row.status == "collecting"
+        db.refresh(row)
+        assert row.status == "collecting"
 
 
 def test_migration_0005_creates_cooksession(tmp_path):

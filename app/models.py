@@ -29,6 +29,12 @@ class User(SQLModel, table=True):
     tz: str = "America/Detroit"
     digest_hour: int = 8
     llm_provider: str = "anthropic"
+    diet: str = "none"
+    exclusions_json: str = "[]"
+    preferred_cuisines_json: str = "[]"
+    max_cook_minutes: Optional[int] = None
+    household_size: int = 1
+    profile_note: str = ""
     created_at: datetime
 
 

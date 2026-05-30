@@ -1,6 +1,11 @@
 import asyncio
+import json
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
+from sqlmodel import SQLModel, Session, create_engine
+
+from app.models import CookSession, PantryItem, User
 from app.cook_models import (
     NutritionScore,
     NutritionScores,
@@ -26,7 +31,202 @@ from app.cook_llm import (
     OpenAISelectionLLM,
     SCHEMA_REPAIR_INSTRUCTION,
 )
+from app.cook_service import (
+    COOK_COST_CEILING_MICROS,
+    MIN_USABLE_ITEMS,
+    NotEnoughItems,
+    run_cook,
+)
+from app.profile_service import FoodProfile
 from tests.fakes import FakeNutritionLLM, FakeRecipeLLM, FakeSelectionLLM
+
+
+def _db_with_items(n, expiry_days):
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    db = Session(engine)
+    db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+    today = date(2026, 5, 30)
+    for i in range(n):
+        db.add(PantryItem(
+            user_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
+            category="produce", qty=1.0, purchased_on=today,
+            shelf_life_days=expiry_days, shelf_life_source="llm",
+            ingest_shelf_life_source="llm",
+            expires_on=today + timedelta(days=expiry_days),
+            status="active", created_via="receipt", created_at=datetime.now(timezone.utc),
+        ))
+    db.commit()
+    return db, today
+
+
+def _cook_row(db):
+    now = datetime(2026, 5, 30, 12, 0).replace(tzinfo=None)
+    row = CookSession(user_id=1, status="ready", chat_id=1, meal_type="dinner",
+                      cuisine="italian", selected_item_ids="[]",
+                      created_at=now, expires_at=now + timedelta(minutes=10))
+    db.add(row); db.commit(); db.refresh(row)
+    return row
+
+
+def test_run_cook_guards_thin_pantry():
+    import asyncio, pytest
+    db, today = _db_with_items(MIN_USABLE_ITEMS - 1, 2)
+    cook = _cook_row(db)
+    with pytest.raises(NotEnoughItems):
+        asyncio.run(run_cook(
+            db, cook=cook, profile=FoodProfile(),
+            selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 0)),
+            recipe_llm=FakeRecipeLLM(canned=(RecipeCandidates(candidates=[]), 0)),
+            nutrition_llm=FakeNutritionLLM(canned=(NutritionScores(scores=[]), 0)),
+            today=today,
+        ))
+
+
+def test_run_cook_ranks_and_filters_allergens():
+    import asyncio
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
+    candidates = RecipeCandidates(candidates=[
+        RecipeCandidate(title="Peanut Dish", cuisine="thai", source_url="u",
+                        ingredients=[RecipeIngredient(name="peanut")],
+                        method_gist="x", deliciousness=0.9),
+        RecipeCandidate(title="Safe Dish", cuisine="italian", source_url="u",
+                        ingredients=[RecipeIngredient(name="item0"), RecipeIngredient(name="pasta")],
+                        method_gist="y", deliciousness=0.5),
+    ])
+    scores = NutritionScores(scores=[
+        NutritionScore(health_score=90, effort="easy", est_minutes=20, rationale="a"),
+    ])
+    nutrition = FakeNutritionLLM(canned=(scores, 3))
+    result = asyncio.run(run_cook(
+        db, cook=cook, profile=FoodProfile(exclusions=["peanut"]),
+        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=ids), 5)),
+        recipe_llm=FakeRecipeLLM(canned=(candidates, 9)),
+        nutrition_llm=nutrition,
+        today=today,
+    ))
+    assert [c.recipe.title for c in result] == ["Safe Dish"]  # peanut dish filtered out
+    nutrition_prompt = json.loads(nutrition.calls[0])
+    assert [c["title"] for c in nutrition_prompt["candidates"]] == ["Safe Dish"]
+    assert "pasta" in result[0].shopping_list
+    db.refresh(cook)
+    assert cook.llm_cost_micros_usd == 17  # 5 + 9 + 3
+
+
+def test_run_cook_halts_on_cost_ceiling():
+    import asyncio
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
+    recipe = FakeRecipeLLM(canned=(RecipeCandidates(candidates=[]), 0))
+    result = asyncio.run(run_cook(
+        db, cook=cook, profile=FoodProfile(),
+        selection_llm=FakeSelectionLLM(
+            canned=(SelectedItems(item_ids=ids), COOK_COST_CEILING_MICROS + 1)),
+        recipe_llm=recipe,
+        nutrition_llm=FakeNutritionLLM(canned=(NutritionScores(scores=[]), 0)),
+        today=today,
+    ))
+    assert result == []
+    assert recipe.calls == []  # recipe stage never reached after ceiling hit
+
+
+def test_run_cook_falls_back_to_active_items_for_empty_selection():
+    import asyncio
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    active = db.exec(__import__("sqlmodel").select(PantryItem)).all()
+    recipe = FakeRecipeLLM(canned=(RecipeCandidates(candidates=[]), 9))
+    result = asyncio.run(run_cook(
+        db, cook=cook, profile=FoodProfile(),
+        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
+        recipe_llm=recipe,
+        nutrition_llm=FakeNutritionLLM(canned=(NutritionScores(scores=[]), 0)),
+        today=today,
+    ))
+    assert result == []
+    assert len(recipe.calls) == 1
+    recipe_prompt = json.loads(recipe.calls[0])
+    assert "items" not in recipe_prompt
+    assert [ingredient["id"] for ingredient in recipe_prompt["ingredients"]] == [
+        item.id for item in active
+    ]
+    assert [ingredient["name"] for ingredient in recipe_prompt["ingredients"]] == [
+        item.normalized_name for item in active
+    ]
+    db.refresh(cook)
+    assert json.loads(cook.selected_item_ids) == [item.id for item in active]
+
+
+def test_run_cook_halts_before_regeneration_when_recipe_cost_exceeds_ceiling():
+    import asyncio
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
+    peanut_only = RecipeCandidates(candidates=[
+        RecipeCandidate(title="Peanut", cuisine="thai", source_url="u",
+                        ingredients=[RecipeIngredient(name="peanut")],
+                        method_gist="x", deliciousness=0.9)])
+    recipe = FakeRecipeLLM(canned=(peanut_only, COOK_COST_CEILING_MICROS))
+    nutrition = FakeNutritionLLM(canned=(NutritionScores(scores=[]), 3))
+    result = asyncio.run(run_cook(
+        db, cook=cook, profile=FoodProfile(exclusions=["peanut"]),
+        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=ids), 1)),
+        recipe_llm=recipe, nutrition_llm=nutrition, today=today,
+    ))
+    assert result == []
+    assert len(recipe.calls) == 1
+    assert nutrition.calls == []
+
+
+def test_run_cook_expiry_utilization_uses_selected_urgent_items_only():
+    import asyncio
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
+    candidates = RecipeCandidates(candidates=[
+        RecipeCandidate(title="Selected Urgent Dish", cuisine="italian", source_url="u",
+                        ingredients=[RecipeIngredient(name="item0")],
+                        method_gist="x", deliciousness=0.5),
+    ])
+    scores = NutritionScores(scores=[
+        NutritionScore(health_score=80, effort="easy", est_minutes=20, rationale="a"),
+    ])
+    result = asyncio.run(run_cook(
+        db, cook=cook, profile=FoodProfile(),
+        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[ids[0]]), 5)),
+        recipe_llm=FakeRecipeLLM(canned=(candidates, 9)),
+        nutrition_llm=FakeNutritionLLM(canned=(scores, 3)),
+        today=today,
+    ))
+    assert result[0].expiry_use == 1.0
+
+
+def test_run_cook_regenerates_once_then_refuses_on_allergen_wipeout():
+    import asyncio
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
+    peanut_only = RecipeCandidates(candidates=[
+        RecipeCandidate(title="Peanut", cuisine="thai", source_url="u",
+                        ingredients=[RecipeIngredient(name="peanut")],
+                        method_gist="x", deliciousness=0.9)])
+    recipe = FakeRecipeLLM(canned_sequence=[(peanut_only, 9), (peanut_only, 9)])
+    nutrition = FakeNutritionLLM(canned=(NutritionScores(scores=[]), 3))
+    result = asyncio.run(run_cook(
+        db, cook=cook, profile=FoodProfile(exclusions=["peanut"]),
+        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=ids), 5)),
+        recipe_llm=recipe, nutrition_llm=nutrition, today=today,
+    ))
+    assert result == []
+    assert len(recipe.calls) == 2  # regenerated exactly once
+    regenerate_prompt = json.loads(recipe.calls[1])
+    assert "items" not in regenerate_prompt
+    assert regenerate_prompt["ingredients"]
+    assert regenerate_prompt["must_avoid"] == ["peanut"]
+    assert nutrition.calls == []   # never reached the nutrition stage
 
 
 class _FakeOpenAIResponses:

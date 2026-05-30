@@ -25,3 +25,5 @@ tests/fixtures/private_receipts/
 .vscode/
 .idea/
 *.swp
+
+.claude/

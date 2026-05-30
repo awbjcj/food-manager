@@ -1,10 +1,10 @@
 # food-manager
 
-A single-user Telegram bot that tracks your grocery pantry and sends a daily expiry digest. Send it a photo of a receipt and it extracts the items, estimates shelf lives using Claude, and reminds you before things go bad.
+A single-user Telegram bot that tracks your grocery pantry and sends a daily expiry digest. Send it a photo of a receipt and it extracts the items, estimates shelf lives using Anthropic or OpenAI models, and reminds you before things go bad.
 
 ## How it works
 
-1. **Receipt photo → pantry items**: Send a photo to the bot. Claude parses the receipt, extracts food items with estimated shelf lives, and stores them in a local SQLite database.
+1. **Receipt photo → pantry items**: Send a photo to the bot. The configured LLM parses the receipt, extracts food items with estimated shelf lives, and stores them in a local SQLite database.
 2. **Daily digest**: Each morning at your configured hour, you receive a message listing everything expiring within 7 days, with one-tap buttons to mark items as eaten, tossed, or snooze for 2 days.
 3. **Shelf life learning**: When you apply a `/correct` proposal, that correction can teach future imports of the same item.
 4. **Manual add**: Use `/add` for items you didn't receive a receipt for. The bot proposes parsed items before inserting them.
@@ -14,7 +14,7 @@ A single-user Telegram bot that tracks your grocery pantry and sends a daily exp
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
 - A Telegram bot token — create one via `@BotFather`
-- An Anthropic API key
+- An Anthropic or OpenAI API key
 - Your Telegram user ID — get it from `@userinfobot`
 
 ## Local dev
@@ -25,8 +25,10 @@ uv sync
 
 # 2. Configure environment
 cp .env.example .env
-# Fill in TELEGRAM_BOT_TOKEN, ALLOWED_TELEGRAM_USER_ID, ANTHROPIC_API_KEY
-# Optional: set ANTHROPIC_TEXT_MODEL for /correct and /add proposals
+# Fill in TELEGRAM_BOT_TOKEN, ALLOWED_TELEGRAM_USER_ID, and either
+# ANTHROPIC_API_KEY or OPENAI_API_KEY.
+# Optional: set LLM_PROVIDER=openai to use OpenAI. Defaults use
+# OPENAI_MODEL=gpt-5.4 and OPENAI_TEXT_MODEL=gpt-5.4-mini.
 
 # 3. Run database migrations
 DATABASE_PATH=./food.db uv run alembic upgrade head
@@ -39,10 +41,12 @@ uv run python bin/run.py
 
 ### v1.5 behavior
 
-- `/correct <id> <free text>` and `/add <free text>` parse with Claude
-  Haiku (configurable via `ANTHROPIC_TEXT_MODEL`) and reply with a diff
+- `/correct <id> <free text>` and `/add <free text>` parse with the configured
+  text model and reply with a diff
   message. Tap **Apply** to commit or **Cancel** to discard. Proposals
   expire after 10 minutes.
+- `/llm [anthropic|openai]` shows or changes the per-user LLM provider.
+  OpenAI calls use the Responses API with hosted web search enabled.
 - Any mutation to a pantry item (mark eaten / tossed / removed / snoozed /
   corrected) invalidates pending corrections for that item in the same
   transaction.
@@ -85,6 +89,7 @@ The container runs `bin/run.py` which backs up the database, runs Alembic migrat
 | `/digest_at 7` | Set your daily digest hour (0–23, in your timezone) |
 | `/tz America/New_York` | Set your timezone |
 | `/stats` | Show pantry statistics |
+| `/llm [anthropic\|openai]` | Show or switch the LLM provider |
 | `/help` | Show all commands |
 
 ## Environment variables
@@ -93,9 +98,13 @@ The container runs `bin/run.py` which backs up the database, runs Alembic migrat
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | Yes | — | Bot token from `@BotFather` |
 | `ALLOWED_TELEGRAM_USER_ID` | Yes | — | Your numeric Telegram user ID |
-| `ANTHROPIC_API_KEY` | Yes | — | Anthropic API key |
+| `LLM_PROVIDER` | No | `anthropic` | `anthropic` or `openai` |
+| `ANTHROPIC_API_KEY` | When `LLM_PROVIDER=anthropic` | — | Anthropic API key |
+| `OPENAI_API_KEY` | When `LLM_PROVIDER=openai` | — | OpenAI API key |
 | `DATABASE_PATH` | No | `./food.db` | Path to the SQLite database file |
 | `ANTHROPIC_MODEL` | No | `claude-sonnet-4-6` | Claude model to use for receipt parsing |
 | `ANTHROPIC_TEXT_MODEL` | No | `claude-haiku-4-5-20251001` | Claude model to use for `/correct` and `/add` proposals |
+| `OPENAI_MODEL` | No | `gpt-5.4` | OpenAI model to use for receipt parsing |
+| `OPENAI_TEXT_MODEL` | No | `gpt-5.4-mini` | OpenAI model to use for `/correct` and `/add` proposals |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
 | `ENV` | No | `dev` | Set to `prod` for JSON-structured logs |

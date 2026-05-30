@@ -8,7 +8,11 @@ import pytest
 from app.llm import (
     AnthropicTextLLMClient,
     CorrectionDiff,
+    OpenAILLMClient,
+    OpenAITextLLMClient,
+    ParseResult,
     ProposedAddItem,
+    ProposedAddItems,
     TextLLMClient,
 )
 from tests.fakes import FakeTextLLMClient
@@ -18,6 +22,30 @@ class _TextResponse:
     def __init__(self, text: str, input_tokens: int = 200, output_tokens: int = 60):
         self.content = [MagicMock(type="text", text=text)]
         self.usage = MagicMock(input_tokens=input_tokens, output_tokens=output_tokens)
+
+
+class _OpenAIParsedContent:
+    type = "output_text"
+
+    def __init__(self, parsed):
+        self.parsed = parsed
+
+
+class _OpenAIMessageOutput:
+    type = "message"
+
+    def __init__(self, parsed):
+        self.content = [_OpenAIParsedContent(parsed)]
+
+
+class _OpenAIParsedResponse:
+    def __init__(self, parsed, input_tokens: int = 200, output_tokens: int = 60):
+        self.output = [_OpenAIMessageOutput(parsed)]
+        self.usage = MagicMock(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=input_tokens + output_tokens,
+        )
 
 
 def test_text_llm_models_validate_ranges():
@@ -124,3 +152,64 @@ async def test_anthropic_text_llm_parse_add_list():
     assert items[0].name == "Oat Milk"
     assert items[0].explicit_user_expiry is True
     assert cost == 500
+
+
+@pytest.mark.asyncio
+async def test_openai_llm_parse_receipt_image_and_usage():
+    parsed = ParseResult(purchase_date=None, purchase_date_confidence=0.0, items=[])
+    sdk = MagicMock()
+    sdk.responses.parse = AsyncMock(
+        return_value=_OpenAIParsedResponse(parsed, input_tokens=123, output_tokens=45)
+    )
+    client = OpenAILLMClient(sdk=sdk, model="gpt-5.4")
+
+    result = await client.extract_items_from_image(b"\x89PNG\r\n\x1a\npng")
+
+    assert result.parse.items == []
+    assert result.cost_micros_usd is None
+    assert result.provider_usage == {
+        "input_tokens": 123,
+        "output_tokens": 45,
+        "total_tokens": 168,
+    }
+    kwargs = sdk.responses.parse.call_args.kwargs
+    assert kwargs["model"] == "gpt-5.4"
+    assert kwargs["text_format"] is ParseResult
+    assert kwargs["tools"] == [{"type": "web_search", "search_context_size": "low"}]
+    assert kwargs["reasoning"] == {"effort": "low"}
+    content = kwargs["input"][1]["content"]
+    assert content[0] == {"type": "input_text", "text": "Parse this receipt."}
+    assert content[1]["type"] == "input_image"
+    assert content[1]["image_url"].startswith("data:image/png;base64,")
+    assert content[1]["detail"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_openai_text_llm_parse_add_uses_mini_model_and_wrapper_schema():
+    parsed = ProposedAddItems(items=[
+        ProposedAddItem(
+            name="Oat Milk",
+            category="beverage",
+            qty=1.0,
+            explicit_user_expiry=False,
+            estimated_shelf_life_days=10,
+            confidence=0.88,
+        )
+    ])
+    sdk = MagicMock()
+    sdk.responses.parse = AsyncMock(return_value=_OpenAIParsedResponse(parsed))
+    client = OpenAITextLLMClient(sdk=sdk, model="gpt-5.4-mini")
+
+    items, cost = await client.parse_add(
+        user_text="oat milk",
+        today=date(2026, 5, 27),
+        tz="America/Detroit",
+    )
+
+    assert [item.name for item in items] == ["Oat Milk"]
+    assert cost is None
+    kwargs = sdk.responses.parse.call_args.kwargs
+    assert kwargs["model"] == "gpt-5.4-mini"
+    assert kwargs["text_format"] is ProposedAddItems
+    assert kwargs["tools"] == [{"type": "web_search", "search_context_size": "low"}]
+    assert kwargs["reasoning"] == {"effort": "low"}

@@ -47,12 +47,28 @@ def session():
 def test_settings_load_from_env(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
     monkeypatch.setenv("ALLOWED_TELEGRAM_USER_ID", "12345")
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-api-key")
     settings = Settings()  # type: ignore[call-arg]
     assert settings.telegram_bot_token == "test-token"
     assert settings.allowed_telegram_user_id == 12345
+    assert settings.llm_provider == "anthropic"
     assert settings.anthropic_model == "claude-sonnet-4-6"
     assert settings.anthropic_text_model == "claude-haiku-4-5-20251001"
+    assert settings.openai_model == "gpt-5.4"
+    assert settings.openai_text_model == "gpt-5.4-mini"
+
+
+def test_settings_load_openai_provider_from_env(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("ALLOWED_TELEGRAM_USER_ID", "12345")
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    settings = Settings()  # type: ignore[call-arg]
+    assert settings.llm_provider == "openai"
+    assert settings.openai_api_key == "test-openai-key"
+    assert settings.openai_model == "gpt-5.4"
+    assert settings.openai_text_model == "gpt-5.4-mini"
 
 
 def test_make_engine_and_session_factory(tmp_path):

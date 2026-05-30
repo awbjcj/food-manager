@@ -29,6 +29,12 @@ def test_alembic_upgrade_creates_all_tables(tmp_path, monkeypatch):
         "pendingcorrection",
     }.issubset(tables)
 
+    user_columns = {
+        row[1]
+        for row in cur.execute("PRAGMA table_info('user')").fetchall()
+    }
+    assert "llm_provider" in user_columns
+
     indexes = {
         row[1]: bool(row[2])
         for row in cur.execute("PRAGMA index_list('receipt')").fetchall()

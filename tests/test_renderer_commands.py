@@ -8,6 +8,7 @@ from app.commands import (
     parse_callback,
     parse_digest_at,
     parse_item_id_arg,
+    parse_llm_provider,
     parse_list_filter,
     parse_snooze_args,
     parse_tz,
@@ -39,8 +40,12 @@ def test_command_parsers():
     assert parse_list_filter([]) == ListFilter.default()
     assert parse_list_filter(["dairy"]) == ListFilter(category="dairy")
     assert parse_list_filter(["week"]) == ListFilter(window="week")
+    assert parse_llm_provider([]) is None
+    assert parse_llm_provider(["OpenAI"]) == "openai"
     with pytest.raises(CommandError):
         parse_list_filter(["unknownthing"])
+    with pytest.raises(CommandError):
+        parse_llm_provider(["local"])
 
 
 def test_callback_parser():

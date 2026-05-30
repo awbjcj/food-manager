@@ -15,9 +15,10 @@ from app.bot import (
     handle_callback,
     handle_help,
     handle_list,
+    handle_llm,
     handle_start,
 )
-from app.llm import LLMResult, ParseResult
+from app.llm import LLMProviderSelector, LLMResult, ParseResult, TextLLMProviderSelector
 from app.models import PantryItem, User
 from app.scheduler import (
     build_digest_payload,
@@ -136,6 +137,65 @@ async def test_handlers_smoke(session, monkeypatch):
     help_msg = _msg("/help")
     await handle_help(help_msg, session_factory=factory)
     assert "/correct" in help_msg.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_llm_shows_and_switches_provider(session, monkeypatch):
+    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    llm = LLMProviderSelector(
+        {
+            "anthropic": FakeLLMClient(canned=LLMResult(parse=ParseResult(items=[]))),
+            "openai": FakeLLMClient(canned=LLMResult(parse=ParseResult(items=[]))),
+        },
+        "anthropic",
+    )
+    text_llm = TextLLMProviderSelector(
+        {
+            "anthropic": FakeTextLLMClient(),
+            "openai": FakeTextLLMClient(),
+        },
+        "anthropic",
+    )
+
+    status = _msg("/llm")
+    await handle_llm(
+        status,
+        session_factory=lambda: session,
+        llm=llm,
+        text_llm=text_llm,
+    )
+    assert "LLM provider: anthropic" in status.answer.await_args.args[0]
+
+    switch = _msg("/llm openai")
+    await handle_llm(
+        switch,
+        session_factory=lambda: session,
+        llm=llm,
+        text_llm=text_llm,
+    )
+    assert session.get(User, 1).llm_provider == "openai"
+    assert "set to openai" in switch.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_handle_llm_rejects_unconfigured_provider(session, monkeypatch):
+    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    llm = LLMProviderSelector(
+        {"anthropic": FakeLLMClient(canned=LLMResult(parse=ParseResult(items=[])))},
+        "anthropic",
+    )
+    text_llm = TextLLMProviderSelector({"anthropic": FakeTextLLMClient()}, "anthropic")
+
+    msg = _msg("/llm openai")
+    await handle_llm(
+        msg,
+        session_factory=lambda: session,
+        llm=llm,
+        text_llm=text_llm,
+    )
+
+    assert session.get(User, 1).llm_provider == "anthropic"
+    assert "not configured" in msg.answer.await_args.args[0]
 
 
 @pytest.mark.asyncio

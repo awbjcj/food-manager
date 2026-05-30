@@ -273,3 +273,18 @@ def test_run_cook_and_render_completes_and_edits(monkeypatch):
         assert cook.status == "done"
         assert "Safe" in (cook.candidates_json or "")
     bot.edit_message_text.assert_awaited()
+
+
+def test_build_llm_clients_returns_cook_clients(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("ALLOWED_TELEGRAM_USER_ID", "1")
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    from app.settings import Settings
+    from bin.run import _build_llm_clients
+
+    bundle = _build_llm_clients(Settings())  # type: ignore[call-arg]
+    assert bundle.selection.default_provider == "anthropic"
+    assert bundle.recipe.default_provider == "anthropic"
+    assert bundle.nutrition.default_provider == "anthropic"
+    assert bundle.profile.default_provider == "anthropic"

@@ -300,13 +300,13 @@ def test_build_llm_clients_includes_profile_llm():
         ANTHROPIC_API_KEY="anthropic-key",
         OPENAI_API_KEY=None,
     )
-    llm, text_llm, profile_llm, search = _build_llm_clients(settings)
+    bundle = _build_llm_clients(settings)
 
-    assert isinstance(llm, LLMProviderSelector)
-    assert isinstance(text_llm, TextLLMProviderSelector)
-    assert isinstance(profile_llm, ProfileLLMProviderSelector)
-    assert profile_llm.available_providers == ("anthropic",)
-    assert search is not None
+    assert isinstance(bundle.image, LLMProviderSelector)
+    assert isinstance(bundle.text, TextLLMProviderSelector)
+    assert isinstance(bundle.profile, ProfileLLMProviderSelector)
+    assert bundle.profile.available_providers == ("anthropic",)
+    assert bundle.search is not None
 
 
 def test_scheduler_payload_and_registration(session):

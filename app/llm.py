@@ -9,10 +9,16 @@ from typing import Any, Literal, Optional, Protocol
 
 from pydantic import BaseModel, Field
 
-
 Category = Literal[
-    "dairy", "produce", "meat", "seafood", "bakery",
-    "pantry", "frozen", "beverage", "other",
+    "dairy",
+    "produce",
+    "meat",
+    "seafood",
+    "bakery",
+    "pantry",
+    "frozen",
+    "beverage",
+    "other",
 ]
 
 
@@ -168,8 +174,7 @@ def _cost_micros(message, model: str) -> int | None:
         return None
     try:
         return (
-            usage.input_tokens * price["input"]
-            + usage.output_tokens * price["output"]
+            usage.input_tokens * price["input"] + usage.output_tokens * price["output"]
         )
     except Exception:
         return None
@@ -223,7 +228,7 @@ class LLMProviderSelector(LLMClient):
         if default_provider not in clients:
             raise LLMProviderNotConfigured(default_provider)
         self._clients = clients
-        self._default_provider = default_provider
+        self._default_provider: LLMProviderName = default_provider
 
     @property
     def available_providers(self) -> tuple[str, ...]:
@@ -260,7 +265,7 @@ class TextLLMProviderSelector(TextLLMClient):
         if default_provider not in clients:
             raise LLMProviderNotConfigured(default_provider)
         self._clients = clients
-        self._default_provider = default_provider
+        self._default_provider: LLMProviderName = default_provider
 
     @property
     def available_providers(self) -> tuple[str, ...]:
@@ -333,7 +338,7 @@ class AnthropicLLMClient(LLMClient):
                     "llm_transport_failed_retrying",
                     extra={"error_class": type(exc).__name__},
                 )
-                await self._sleep(2 ** attempt)
+                await self._sleep(2**attempt)
         raise RuntimeError("unreachable")
 
     async def extract_items_from_image(
@@ -404,7 +409,7 @@ class OpenAILLMClient(LLMClient):
                     "llm_transport_failed_retrying",
                     extra={"error_class": type(exc).__name__},
                 )
-                await self._sleep(2 ** attempt)
+                await self._sleep(2**attempt)
         raise RuntimeError("unreachable")
 
     async def extract_items_from_image(
@@ -578,7 +583,7 @@ class AnthropicTextLLMClient(TextLLMClient):
                     "text_llm_transport_failed_retrying",
                     extra={"error_class": type(exc).__name__},
                 )
-                await self._sleep(2 ** attempt)
+                await self._sleep(2**attempt)
         raise RuntimeError("unreachable")
 
     async def _call_with_schema(self, system: str, user_text: str, parse_fn):
@@ -623,12 +628,14 @@ class AnthropicTextLLMClient(TextLLMClient):
         user_text,
         today,
     ) -> tuple[CorrectionDiff, Optional[int]]:
-        user_msg = json.dumps({
-            "item_snapshot": item_snapshot,
-            "cache_snapshot": cache_snapshot,
-            "today": today.isoformat(),
-            "user_text": user_text,
-        })
+        user_msg = json.dumps(
+            {
+                "item_snapshot": item_snapshot,
+                "cache_snapshot": cache_snapshot,
+                "today": today.isoformat(),
+                "user_text": user_text,
+            }
+        )
 
         def _parse(text: str) -> CorrectionDiff:
             return CorrectionDiff.model_validate(json.loads(text))
@@ -642,11 +649,13 @@ class AnthropicTextLLMClient(TextLLMClient):
         today,
         tz,
     ) -> tuple[list[ProposedAddItem], Optional[int]]:
-        user_msg = json.dumps({
-            "today": today.isoformat(),
-            "tz": tz,
-            "user_text": user_text,
-        })
+        user_msg = json.dumps(
+            {
+                "today": today.isoformat(),
+                "tz": tz,
+                "user_text": user_text,
+            }
+        )
 
         def _parse(text: str) -> list[ProposedAddItem]:
             data = json.loads(text)
@@ -691,7 +700,7 @@ class OpenAITextLLMClient(TextLLMClient):
                     "text_llm_transport_failed_retrying",
                     extra={"error_class": type(exc).__name__},
                 )
-                await self._sleep(2 ** attempt)
+                await self._sleep(2**attempt)
         raise RuntimeError("unreachable")
 
     async def parse_correct(
@@ -702,12 +711,14 @@ class OpenAITextLLMClient(TextLLMClient):
         user_text,
         today,
     ) -> tuple[CorrectionDiff, Optional[int]]:
-        user_msg = json.dumps({
-            "item_snapshot": item_snapshot,
-            "cache_snapshot": cache_snapshot,
-            "today": today.isoformat(),
-            "user_text": user_text,
-        })
+        user_msg = json.dumps(
+            {
+                "item_snapshot": item_snapshot,
+                "cache_snapshot": cache_snapshot,
+                "today": today.isoformat(),
+                "user_text": user_text,
+            }
+        )
         response = await self._create_response(
             CORRECTION_SYSTEM_PROMPT,
             user_msg,
@@ -722,11 +733,13 @@ class OpenAITextLLMClient(TextLLMClient):
         today,
         tz,
     ) -> tuple[list[ProposedAddItem], Optional[int]]:
-        user_msg = json.dumps({
-            "today": today.isoformat(),
-            "tz": tz,
-            "user_text": user_text,
-        })
+        user_msg = json.dumps(
+            {
+                "today": today.isoformat(),
+                "tz": tz,
+                "user_text": user_text,
+            }
+        )
         response = await self._create_response(
             OPENAI_ADD_SYSTEM_PROMPT,
             user_msg,

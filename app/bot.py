@@ -4,7 +4,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, cast
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -135,7 +135,9 @@ def _require_user(user: User | None) -> User:
     return user
 
 
-def _available_llm_providers(llm: LLMClient, text_llm: TextLLMClient) -> tuple[str, ...]:
+def _available_llm_providers(
+    llm: LLMClient, text_llm: TextLLMClient
+) -> tuple[str, ...]:
     image_providers = set(getattr(llm, "available_providers", ("anthropic",)))
     text_providers = set(getattr(text_llm, "available_providers", ("anthropic",)))
     return tuple(sorted(image_providers & text_providers))
@@ -144,14 +146,14 @@ def _available_llm_providers(llm: LLMClient, text_llm: TextLLMClient) -> tuple[s
 def _select_llm_client(llm: LLMClient, provider: str) -> LLMClient:
     selector = getattr(llm, "for_provider", None)
     if callable(selector):
-        return selector(provider)
+        return cast(LLMClient, selector(provider))
     return llm
 
 
 def _select_text_llm_client(text_llm: TextLLMClient, provider: str) -> TextLLMClient:
     selector = getattr(text_llm, "for_provider", None)
     if callable(selector):
-        return selector(provider)
+        return cast(TextLLMClient, selector(provider))
     return text_llm
 
 
@@ -768,11 +770,16 @@ async def handle_photo(
             else None
         )
         refine_user_id = user.telegram_id
-        sent = await msg.answer(render_ingest_reply(summary, today=today), reply_markup=keyboard)
+        sent = await msg.answer(
+            render_ingest_reply(summary, today=today), reply_markup=keyboard
+        )
 
     if (
-        search is not None and spawn is not None and bot is not None
-        and summary.receipt_id is not None and summary.uncached_item_ids
+        search is not None
+        and spawn is not None
+        and bot is not None
+        and summary.receipt_id is not None
+        and summary.uncached_item_ids
     ):
         chat_id = msg.chat.id
         message_id = sent.message_id
@@ -781,19 +788,30 @@ async def handle_photo(
 
         async def _run_refine():
             refined = await run_receipt_refine(
-                session_factory, search, item_ids=item_ids, summary=summary,
-                user_id=refine_user_id, receipt_id=receipt_id, today=today,
+                session_factory,
+                search,
+                item_ids=item_ids,
+                summary=summary,
+                user_id=refine_user_id,
+                receipt_id=receipt_id,
+                today=today,
             )
             if not refined:
                 return
             text = render_ingest_reply(summary, today=today, refined_ids=refined)
             try:
                 await bot.edit_message_text(
-                    chat_id=chat_id, message_id=message_id, text=text,
-                    reply_markup=to_aiogram_keyboard(build_undo_keyboard(receipt_id=receipt_id)),
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=text,
+                    reply_markup=to_aiogram_keyboard(
+                        build_undo_keyboard(receipt_id=receipt_id)
+                    ),
                 )
             except Exception as exc:
-                log.warning("refine_edit_failed", extra={"error_class": type(exc).__name__})
+                log.warning(
+                    "refine_edit_failed", extra={"error_class": type(exc).__name__}
+                )
 
         spawn(_run_refine())
 
@@ -854,7 +872,9 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             try:
                 await cb.message.edit_text(render_undo_result(result))
             except Exception as exc:
-                log.warning("undo_edit_failed", extra={"error_class": type(exc).__name__})
+                log.warning(
+                    "undo_edit_failed", extra={"error_class": type(exc).__name__}
+                )
             await cb.answer("undone" if result.removed_ids else "nothing undone")
             return
 
@@ -958,7 +978,9 @@ async def _handle_pending_callback(
             mark_cancelled(session, pending=pending)
             session.commit()
             try:
-                await cb.message.edit_text("Item is no longer active - proposal cancelled.")
+                await cb.message.edit_text(
+                    "Item is no longer active - proposal cancelled."
+                )
             except Exception as exc:
                 log.warning(
                     "pending_message_edit_failed",
@@ -997,7 +1019,9 @@ async def _handle_pending_callback(
         return
 
     if pending.action_type != "add":
-        log.warning("unknown_pending_action_type", extra={"action_type": pending.action_type})
+        log.warning(
+            "unknown_pending_action_type", extra={"action_type": pending.action_type}
+        )
         await cb.answer("unknown action")
         return
     payload = add_payload_from_json(pending.proposed_json)

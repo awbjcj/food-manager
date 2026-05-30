@@ -37,6 +37,7 @@ from app.llm import (
     OpenAITextLLMClient,
     TextLLMProviderSelector,
 )
+from app.refine_service import AnthropicSearchClient
 from app.scheduler import (
     register_all_user_digests,
     register_sweep_expired_pendings,
@@ -62,6 +63,7 @@ def _configure_logging(env: str, level: str) -> None:
 def _build_llm_clients(settings: Settings):
     image_clients = {}
     text_clients = {}
+    search = None
 
     if settings.anthropic_api_key:
         anthropic_sdk = AsyncAnthropic(api_key=settings.anthropic_api_key)
@@ -72,6 +74,10 @@ def _build_llm_clients(settings: Settings):
         text_clients["anthropic"] = AnthropicTextLLMClient(
             sdk=anthropic_sdk,
             model=settings.anthropic_text_model,
+        )
+        search = AnthropicSearchClient(
+            sdk=anthropic_sdk,
+            model=settings.anthropic_search_model,
         )
 
     if settings.openai_api_key:
@@ -90,6 +96,7 @@ def _build_llm_clients(settings: Settings):
     return (
         LLMProviderSelector(image_clients, settings.llm_provider),
         TextLLMProviderSelector(text_clients, settings.llm_provider),
+        search,
     )
 
 
@@ -123,7 +130,7 @@ async def _amain(settings: Settings) -> None:
     log.info("migration_ok")
 
     bot = Bot(token=settings.telegram_bot_token)
-    llm, text_llm = _build_llm_clients(settings)
+    llm, text_llm, search = _build_llm_clients(settings)
     log.info(
         "llm_provider_configured",
         extra={
@@ -164,6 +171,7 @@ async def _amain(settings: Settings) -> None:
         session_factory=session_factory,
         llm=llm,
         text_llm=text_llm,
+        search=search,
         now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
         on_user_created=reschedule,
         reschedule=reschedule,

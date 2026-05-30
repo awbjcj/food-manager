@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-5.4", alias="OPENAI_MODEL")
     openai_text_model: str = Field(default="gpt-5.4-mini", alias="OPENAI_TEXT_MODEL")
+    anthropic_search_model: str = Field(default="claude-sonnet-4-6", alias="ANTHROPIC_SEARCH_MODEL")
     database_path: str = Field(default="./food.db", alias="DATABASE_PATH")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     env: str = Field(default="dev", alias="ENV")

@@ -13,7 +13,7 @@ Category = Literal[
 ]
 
 Status = Literal["active", "eaten", "tossed", "removed"]
-ShelfLifeSource = Literal["cache", "llm", "manual_fallback", "user_correction"]
+ShelfLifeSource = Literal["cache", "llm", "manual_fallback", "user_correction", "websearch"]
 IngestShelfLifeSource = Literal["cache", "llm", "manual_fallback", "manual_user_hint"]
 CreatedVia = Literal["receipt", "manual"]
 PurchaseDateSource = Literal["receipt", "scan_fallback"]

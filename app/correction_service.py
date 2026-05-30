@@ -8,8 +8,9 @@ from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
-from app.cache import get_cached, write_user_correction
+from app.cache import get_cached, put_cached, write_user_correction
 from app.llm import TextLLMClient
+from app.refine_service import ShelfLifeSearchClient, resolve_search_days
 from app.models import PantryItem, ShelfLifeCache
 from app.normalization import normalize
 from app.shelf_life_defaults import lookup_default
@@ -32,7 +33,7 @@ class AddPayload(BaseModel):
     unit: Optional[str] = None
     shelf_life_days: int = Field(ge=1, le=730)
     expires_on: date
-    shelf_life_source: Literal["user_correction", "cache", "manual_fallback", "llm"]
+    shelf_life_source: Literal["user_correction", "cache", "manual_fallback", "llm", "websearch"]
     ingest_shelf_life_source: Literal[
         "manual_user_hint", "cache", "manual_fallback", "llm"
     ]
@@ -266,6 +267,7 @@ async def propose_add(
     user_text: str,
     today: date,
     tz: str,
+    search: Optional[ShelfLifeSearchClient] = None,
 ) -> tuple[list[AddProposal], Optional[int]]:
     items, total_cost = await llm.parse_add(user_text=user_text, today=today, tz=tz)
     if not items:
@@ -282,6 +284,7 @@ async def propose_add(
     for parsed, cost_share in zip(items, shares):
         normalized = normalize(parsed.name)
         category = parsed.category
+        search_cost: Optional[int] = None
 
         if parsed.explicit_user_expiry:
             if parsed.shelf_life_days is not None:
@@ -303,22 +306,39 @@ async def propose_add(
                 ingest_source = "cache"
                 category = category or cached.category
             else:
-                default = lookup_default(normalized)
-                if default is not None:
-                    days = default.days
-                    shelf_life_source = "manual_fallback"
-                    ingest_source = "manual_fallback"
-                    category = category or default.category
-                elif parsed.estimated_shelf_life_days is not None:
-                    days = parsed.estimated_shelf_life_days
-                    shelf_life_source = "llm"
+                searched = None
+                if search is not None:
+                    search_result = await search.lookup_shelf_life(name=parsed.name, category=category)
+                    search_cost = search_result.cost_micros_usd
+                    searched = resolve_search_days(search_result)
+                if searched is not None:
+                    days = searched
+                    shelf_life_source = "websearch"
                     ingest_source = "llm"
+                    put_cached(
+                        session, user_id, normalized, days=days,
+                        category=category, confidence=0.9, source="llm", commit=False,
+                    )
                 else:
-                    days = CONSERVATIVE_FALLBACK_DAYS
-                    shelf_life_source = "manual_fallback"
-                    ingest_source = "manual_fallback"
+                    default = lookup_default(normalized)
+                    if default is not None:
+                        days = default.days
+                        shelf_life_source = "manual_fallback"
+                        ingest_source = "manual_fallback"
+                        category = category or default.category
+                    elif parsed.estimated_shelf_life_days is not None:
+                        days = parsed.estimated_shelf_life_days
+                        shelf_life_source = "llm"
+                        ingest_source = "llm"
+                    else:
+                        days = CONSERVATIVE_FALLBACK_DAYS
+                        shelf_life_source = "manual_fallback"
+                        ingest_source = "manual_fallback"
             expires_on = today + timedelta(days=days)
 
+        combined_cost = cost_share if search_cost is None else (
+            search_cost if cost_share is None else cost_share + search_cost
+        )
         proposals.append(
             AddProposal(
                 payload=AddPayload(
@@ -334,7 +354,7 @@ async def propose_add(
                     estimated_shelf_life_days=parsed.estimated_shelf_life_days,
                     confidence=parsed.confidence,
                 ),
-                cost_share=cost_share,
+                cost_share=combined_cost,
             )
         )
     return proposals, total_cost

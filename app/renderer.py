@@ -8,8 +8,45 @@ from app.ingest_service import IngestSummary
 from app.pantry_service import Stats
 
 
-def _fmt_date(value: date) -> str:
-    return f"{value:%b} {value.day}"
+def _fmt_date(value: date, *, today: date) -> str:
+    base = f"{value:%b} {value.day}"
+    if value.year != today.year:
+        return f"{base} {value.year}"
+    return base
+
+
+URGENCY_SOON_DAYS = 3
+
+
+def _urgency_icon(expires_on: date, *, today: date) -> str:
+    delta = (expires_on - today).days
+    if delta <= 0:
+        return "🔴"
+    if delta <= URGENCY_SOON_DAYS:
+        return "🟡"
+    return "🟢"
+
+
+def _qty_prefix(qty: float, unit: str | None) -> str:
+    qty_str = str(int(qty)) if float(qty).is_integer() else str(qty)
+    if unit:
+        return f"{qty_str} {unit} "
+    if qty_str != "1":
+        return f"{qty_str} "
+    return ""
+
+
+def render_item_line(item, *, today: date) -> str:
+    icon = _urgency_icon(item.expires_on, today=today)
+    qty = _qty_prefix(item.qty, item.unit)
+    delta = (item.expires_on - today).days
+    if delta < 0:
+        tail = f"expired {-delta}d"
+    elif delta == 0:
+        tail = "today"
+    else:
+        tail = f"{_fmt_date(item.expires_on, today=today)} ({delta}d)"
+    return f"{icon} #{item.id} {qty}{item.raw_name} - {tail}"
 
 
 def _fmt_cost(micros: int | None) -> str:
@@ -18,7 +55,7 @@ def _fmt_cost(micros: int | None) -> str:
     return f"Cost: ${micros / 1_000_000:.3f}"
 
 
-def render_ingest_reply(summary: IngestSummary, *, today: date) -> str:
+def render_ingest_reply(summary: IngestSummary, *, today: date, refined_ids=frozenset()) -> str:
     lines: list[str] = []
     if summary.inserted_food_count == 0:
         if summary.skipped_low_confidence_count:
@@ -28,6 +65,11 @@ def render_ingest_reply(summary: IngestSummary, *, today: date) -> str:
             )
         else:
             lines.append("No food items found in this receipt.")
+        if summary.skipped_excluded_count:
+            names = ", ".join(summary.skipped_excluded_names[:5])
+            more = "" if len(summary.skipped_excluded_names) <= 5 else ", ..."
+            lines.append(f"Skipped (not tracked): {names}{more}")
+            lines.append("Want one tracked? /add <name>")
         lines.append(_fmt_cost(summary.cost_micros_usd))
         return "\n".join(lines)
 
@@ -38,14 +80,15 @@ def render_ingest_reply(summary: IngestSummary, *, today: date) -> str:
         summary.inserted_item_expires_on,
         summary.inserted_item_shelf_life_days,
     ):
+        mark = " ✓refined" if item_id in refined_ids else ""
         lines.append(
-            f"  - #{item_id} {name} - exp {_fmt_date(expires_on)} ({shelf_life_days}d)"
+            f"  - #{item_id} {name} - exp {_fmt_date(expires_on, today=today)} ({shelf_life_days}d){mark}"
         )
 
     if summary.purchase_date is not None and summary.purchase_date != today:
-        lines.append(f"Purchase date: {_fmt_date(summary.purchase_date)}")
+        lines.append(f"Purchase date: {_fmt_date(summary.purchase_date, today=today)}")
     if summary.purchase_date_assumed and summary.purchase_date is not None:
-        lines.append(f"Purchase date assumed: {_fmt_date(summary.purchase_date)}")
+        lines.append(f"Purchase date assumed: {_fmt_date(summary.purchase_date, today=today)}")
 
     if summary.low_confidence_inserted_ids:
         ids = ", ".join(f"#{item_id}" for item_id in summary.low_confidence_inserted_ids[:5])
@@ -58,6 +101,12 @@ def render_ingest_reply(summary: IngestSummary, *, today: date) -> str:
         lines.append(
             f"(skipped {summary.skipped_low_confidence_count} unclear items: {names}{more})"
         )
+
+    if summary.skipped_excluded_count:
+        names = ", ".join(summary.skipped_excluded_names[:5])
+        more = "" if len(summary.skipped_excluded_names) <= 5 else ", ..."
+        lines.append(f"Skipped (not tracked): {names}{more}")
+        lines.append("Want one tracked? /add <name>")
 
     lines.append(_fmt_cost(summary.cost_micros_usd))
     return "\n".join(lines)
@@ -101,16 +150,9 @@ def render_digest(items: list, *, today: date) -> DigestRender:
     weekday_short = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
     def line_for(item) -> str:
-        delta = (item.expires_on - today).days
-        if delta < 0:
-            days = -delta
-            tag = f"({days}d ago)" if days > 1 else "(yesterday)"
-            return f"  - #{item.id} {item.raw_name} {tag}"
-        if delta in (0, 1):
-            return f"  - #{item.id} {item.raw_name}"
-        return f"  - #{item.id} {item.raw_name} - {weekday_short[item.expires_on.weekday()]}"
+        return "  " + render_item_line(item, today=today)
 
-    lines = [f"Pantry digest - {weekday_short[today.weekday()]} {_fmt_date(today)}", ""]
+    lines = [f"Pantry digest - {weekday_short[today.weekday()]} {_fmt_date(today, today=today)}", ""]
     for key, header in (
         ("expired", "Expired"),
         ("today", "Today"),
@@ -190,6 +232,26 @@ def render_add_diff(*, pending_id: int, payload: AddPayload) -> str:
     ])
 
 
+def build_undo_keyboard(*, receipt_id: int) -> list[list[CallbackButton]]:
+    return [[CallbackButton(text="Undo", callback_data=f"undo:receipt:{receipt_id}")]]
+
+
+def build_undo_add_keyboard(*, item_id: int) -> list[list[CallbackButton]]:
+    return [[CallbackButton(text="Undo", callback_data=f"undo:add:{item_id}")]]
+
+
+def render_undo_result(result) -> str:
+    if result.expired:
+        return "Undo window expired (10 min) - use /delete <id> instead."
+    if not result.removed_ids and not result.skipped:
+        return "Nothing to undo."
+    parts = [f"Undone: removed {len(result.removed_ids)} item(s)."]
+    if result.skipped:
+        skipped = ", ".join(f"#{i} ({why})" for i, why in result.skipped)
+        parts.append(f"skipped {skipped}.")
+    return " ".join(parts)
+
+
 def build_apply_cancel_keyboard(*, pending_id: int) -> list[list[CallbackButton]]:
     return [[
         CallbackButton(text="Apply", callback_data=f"apply:{pending_id}"),
@@ -223,21 +285,28 @@ def render_terminal_state(status: str) -> str:
     return _TERMINAL_LABELS.get(status, f"This proposal is no longer pending ({status}).")
 
 
+CATEGORY_ORDER = (
+    "produce", "dairy", "meat", "seafood", "bakery",
+    "frozen", "beverage", "pantry", "other",
+)
+
+
 def render_list(items: list, *, today: date) -> str:
     if not items:
         return "no items match this filter"
-    lines = []
+    by_cat: dict[str, list] = {}
     for item in items:
-        delta = (item.expires_on - today).days
-        if delta < 0:
-            tag = f"expired {-delta}d ago"
-        elif delta == 0:
-            tag = "expires today"
-        elif delta == 1:
-            tag = "expires tomorrow"
-        else:
-            tag = f"expires {_fmt_date(item.expires_on)} ({delta}d)"
-        lines.append(f"#{item.id} {item.raw_name} - {tag}")
+        key = item.category or "other"
+        by_cat.setdefault(key, []).append(item)
+    ordered = sorted(
+        by_cat.keys(),
+        key=lambda c: CATEGORY_ORDER.index(c) if c in CATEGORY_ORDER else len(CATEGORY_ORDER),
+    )
+    lines: list[str] = []
+    for cat in ordered:
+        group = sorted(by_cat[cat], key=lambda i: i.expires_on)
+        lines.append(f"{cat.capitalize()} ({len(group)})")
+        lines.extend(f"  {render_item_line(i, today=today)}" for i in group)
     return "\n".join(lines)
 
 

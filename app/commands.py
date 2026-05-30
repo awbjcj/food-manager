@@ -94,7 +94,7 @@ def parse_llm_provider(args: Sequence[str]) -> Optional[LLMProviderName]:
     return cast(LLMProviderName, token)
 
 
-Verb = Literal["ate", "toss", "snooze2", "show_all", "apply", "cancel"]
+Verb = Literal["ate", "toss", "snooze2", "show_all", "apply", "cancel", "undo_receipt", "undo_add"]
 
 
 @dataclass(frozen=True)
@@ -113,6 +113,16 @@ def parse_callback(data: str) -> CallbackAction:
         except ValueError as exc:
             raise CommandError(f"bad pending id {raw_id!r}") from exc
         return CallbackAction(verb=cast(Verb, verb), item_id=pending_id)
+    if data.startswith("undo:"):
+        _, _, rest = data.partition(":")
+        kind, _, raw_id = rest.partition(":")
+        if kind not in ("receipt", "add"):
+            raise CommandError(f"unknown undo kind {kind!r}")
+        try:
+            target_id = int(raw_id)
+        except ValueError as exc:
+            raise CommandError(f"bad undo id {raw_id!r}") from exc
+        return CallbackAction(verb=cast(Verb, f"undo_{kind}"), item_id=target_id)
     parts = data.split(":")
     if len(parts) != 3 or parts[0] != "act":
         raise CommandError(f"unrecognized callback data {data!r}")

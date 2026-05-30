@@ -155,6 +155,8 @@ _PARSE_RECEIPT_TOOL = {
 _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "claude-sonnet-4-6": {"input": 3, "output": 15},
     "claude-haiku-4-5-20251001": {"input": 1, "output": 5},
+    "gpt-5.4": {"input": 2.5, "output": 15},
+    "gpt-5.4-mini": {"input": 0.75, "output": 4.5},
 }
 
 _OPENAI_WEB_SEARCH_TOOL = {
@@ -181,7 +183,9 @@ def _cost_micros(message, model: str) -> int | None:
     if usage is None:
         return None
     try:
-        return (
+        # round the total to whole micro-USD; per-token rates may be fractional
+        # (e.g. OpenAI), while the integer Anthropic rates are unaffected.
+        return round(
             usage.input_tokens * price["input"] + usage.output_tokens * price["output"]
         )
     except Exception:

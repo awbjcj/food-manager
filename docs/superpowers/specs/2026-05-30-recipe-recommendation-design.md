@@ -24,8 +24,9 @@ and the inline-keyboard + pending-row interaction pattern.
 
 - Recommend a dish that is **healthy, delicious, and uses soon-to-expire items**
   — expiry is a *priority signal*, never a hard rule.
-- Honour a **persistent food profile** (diet, allergies/exclusions, max cook
-  time, household size). Exclusions are a hard safety filter.
+- Honour a **persistent food profile** (diet, allergies/exclusions, preferred
+  cuisines, max cook time, household size) that the user updates by typing a
+  plain sentence. Exclusions are a hard safety filter.
 - Keep the flow **bounded and cheap**: 3 LLM round-trips max, ≤3 button rounds,
   capped web-search uses, per-cook cost backstop.
 - Stay **native to the codebase**: deterministic, unit-testable, single new
@@ -47,7 +48,8 @@ and the inline-keyboard + pending-row interaction pattern.
 - **`/cook`** — trigger. Posts meal-type buttons, then cuisine buttons
   (LLM-generated, profile-aware, always including a `[Surprise me]` option),
   then a `🍳 Thinking…` placeholder that is edited in place with the result.
-- **`/prefs`** — view/edit the persistent profile.
+- **`/prefs`** — view the persistent profile, and update it by typing a plain
+  sentence (an LLM merges the sentence into the stored profile).
 - **`/help`** and **`/stats`** updated to mention `/cook` and show cook cost.
 
 ### Result rendering (option B: summary + source link)
@@ -64,7 +66,7 @@ display-only text, computed lazily for whichever candidate is shown.
 ```
 /cook
   → [round 1] meal-type buttons   (LLM-generated, profile-aware, + "Surprise me")
-  → [round 2] cuisine buttons      (≤2 rounds default, hard max 3)
+  → [round 2] cuisine buttons      (led by profile.preferred_cuisines; ≤2 rounds, hard max 3)
                                     state persisted in CookSession each tap
   → post "🍳 Thinking…" placeholder
   → [LLM 1: selection]  pick pantry items; expiry = priority not law; health+taste lead
@@ -134,14 +136,37 @@ One Alembic migration. Finished rows are retained (feed `/stats`; no hard
 delete). A new `/cook` while one is `collecting` **supersedes** it
 (old → `cancelled`).
 
-### Persistent profile
+### Persistent profile (sentence-driven, hybrid storage)
+
+The user updates the profile by typing a **plain sentence**; an LLM merges it
+into the stored profile. The profile is **hybrid** so that natural-language
+flexibility and code-enforceable safety coexist:
+
+- **Structured slice** (code relies on these):
+  - `diet` (e.g. none/vegetarian/vegan/…)
+  - `exclusions[]` — allergies / hard-avoid ingredients
+  - `preferred_cuisines[]` — e.g. ["chinese", "american"]
+  - `max_cook_minutes`
+  - `household_size`
+- **`profile_note`** — free text for everything that doesn't fit a field
+  ("prefer one-pot meals", "we like it spicy", "no deep-frying").
+
+**Update stage (LLM, text).** A `parse_profile_update`-style call takes
+`(current_profile, new_sentence)` and returns the merged profile (structured
+fields + `profile_note`). It is its own text-LLM stage, *not* part of the
+`/cook` pipeline — triggered by `/prefs <sentence>` and opportunistically when
+the cook conversation surfaces a new constraint (bot offers to save it).
+
+**Usage.** The recipe stage (LLM 2) gets the **whole profile injected**
+(structured fields + `profile_note`) so the model honours every nuance.
+`preferred_cuisines[]` additionally seeds the Q4 cuisine button round.
+
+**Safety.** `exclusions[]` is enforced as a **hard code filter** on candidate
+ingredients (via `normalization.py`), never left to prompt compliance — this is
+why exclusions remain a structured field rather than living only in free text.
 
 Stored on `User` (new columns) or a small dedicated table — to be settled in
-the implementation plan. Fields: `diet`, `exclusions` (incl. allergies, list),
-`max_cook_minutes`, `household_size`. Edited via `/prefs` and opportunistically
-when the conversation surfaces a new constraint (bot offers to save it).
-**Exclusions are enforced as a hard code filter**, not left to prompt
-compliance. One Alembic migration.
+the implementation plan. One Alembic migration.
 
 ## 8. Failure policy
 
@@ -162,8 +187,12 @@ a cook-cost line alongside the existing receipt and text-LLM cost lines.
 
 ## 10. Testing
 
-- Fakes for all three LLM stages and the search client (duck-typed Protocols),
-  mirroring `tests/fakes.py`.
+- Fakes for all three pipeline LLM stages, the search client, and the
+  `parse_profile_update` stage (duck-typed Protocols), mirroring
+  `tests/fakes.py`.
+- Profile-update merge tested deterministically: a sentence merges into the
+  structured slice + `profile_note` without dropping prior fields; a new
+  allergy lands in `exclusions[]` (so the hard filter sees it).
 - Deterministic `today`/`now` injected; no `datetime.now()` inside services.
 - Pure-Python unit tests for: the hard allergy filter, expiry-utilization,
   blend/ranking weights, shopping-list diff + name matching.

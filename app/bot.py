@@ -831,6 +831,8 @@ HELP_TEXT = (
     "  /llm [anthropic|openai] - show or switch LLM provider\n"
     "  /prefs [sentence] - show or update your food profile\n"
     "  /cook - get a recipe from your pantry\n"
+    "  /shopping - view your to-buy list; tap an item when bought\n"
+    "  /favorites - view saved recipes; tap to re-cook against your pantry\n"
     "  /help - this message\n"
     "Send a receipt photo to log it."
 )
@@ -1719,6 +1721,21 @@ def build_dispatcher(
             on_user_created=on_user_created,
         )
 
+    async def on_shopping(message):
+        await handle_shopping(
+            message,
+            session_factory=session_factory,
+            now_provider=now_provider,
+            on_user_created=on_user_created,
+        )
+
+    async def on_favorites(message):
+        await handle_favorites(
+            message,
+            session_factory=session_factory,
+            on_user_created=on_user_created,
+        )
+
     async def on_llm(message):
         await handle_llm(
             message,
@@ -1790,6 +1807,8 @@ def build_dispatcher(
     dispatcher.message.register(on_correct, Command("correct"))
     dispatcher.message.register(on_stats, Command("stats"))
     dispatcher.message.register(on_cook, Command("cook"))
+    dispatcher.message.register(on_shopping, Command("shopping"))
+    dispatcher.message.register(on_favorites, Command("favorites"))
     dispatcher.message.register(on_llm, Command("llm"))
     dispatcher.message.register(on_prefs, Command("prefs"))
     dispatcher.message.register(on_help, Command("help"))

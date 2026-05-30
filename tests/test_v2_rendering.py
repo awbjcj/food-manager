@@ -63,6 +63,7 @@ def test_render_list_groups_by_category_then_expiry():
     assert text.index("Produce (2)") < text.index("Meat (1)")
     assert text.index("#9 Spinach") < text.index("#4 Bananas")
     assert "🔴 #7 2 lb Chicken" in text
+    assert "\n\nMeat (1)" in text  # blank line separates categories
 
 
 def test_render_list_empty_unchanged():

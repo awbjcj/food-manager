@@ -21,6 +21,7 @@ CacheSource = Literal["llm", "user_correction"]
 PendingActionType = Literal["correct", "add"]
 PendingStatus = Literal["pending", "applied", "cancelled", "expired", "stale"]
 CacheAction = Literal["move", "add_new", "leave"]
+CookStatus = Literal["collecting", "ready", "done", "cancelled", "expired"]
 
 
 class User(SQLModel, table=True):
@@ -29,6 +30,12 @@ class User(SQLModel, table=True):
     tz: str = "America/Detroit"
     digest_hour: int = 8
     llm_provider: str = "anthropic"
+    diet: str = "none"
+    exclusions_json: str = "[]"
+    preferred_cuisines_json: str = "[]"
+    max_cook_minutes: Optional[int] = None
+    household_size: int = 1
+    profile_note: str = ""
     created_at: datetime
 
 
@@ -101,5 +108,25 @@ class PendingCorrection(SQLModel, table=True):
     chat_id: int
     message_id: Optional[int] = None
     status: str = "pending"
+    created_at: datetime
+    expires_at: datetime
+
+
+class CookSession(SQLModel, table=True):
+    __table_args__ = (
+        Index("ix_cook_user_status_created", "user_id", "status", "created_at"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.telegram_id", index=True)
+    status: str = "collecting"
+    meal_type: Optional[str] = None
+    cuisine: Optional[str] = None
+    selected_item_ids: str = "[]"
+    candidates_json: Optional[str] = None
+    chosen_index: Optional[int] = None
+    chat_id: int
+    message_id: Optional[int] = None
+    llm_cost_micros_usd: Optional[int] = None
     created_at: datetime
     expires_at: datetime

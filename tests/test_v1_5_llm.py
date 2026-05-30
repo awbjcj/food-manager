@@ -166,7 +166,8 @@ async def test_openai_llm_parse_receipt_image_and_usage():
     result = await client.extract_items_from_image(b"\x89PNG\r\n\x1a\npng")
 
     assert result.parse.items == []
-    assert result.cost_micros_usd is None
+    # gpt-5.4: 123*2.5 + 45*15 = 982.5 -> round() -> 982 micro-USD
+    assert result.cost_micros_usd == 982
     assert result.provider_usage == {
         "input_tokens": 123,
         "output_tokens": 45,
@@ -182,6 +183,20 @@ async def test_openai_llm_parse_receipt_image_and_usage():
     assert content[1]["type"] == "input_image"
     assert content[1]["image_url"].startswith("data:image/png;base64,")
     assert content[1]["detail"] == "high"
+
+
+def test_cost_micros_prices_openai_models():
+    from types import SimpleNamespace
+
+    from app.llm import _cost_micros
+
+    usage = SimpleNamespace(usage=SimpleNamespace(input_tokens=1000, output_tokens=200))
+    # gpt-5.4: 1000*2.5 + 200*15 = 5500
+    assert _cost_micros(usage, "gpt-5.4") == 5500
+    # gpt-5.4-mini: 1000*0.75 + 200*4.5 = 1650
+    assert _cost_micros(usage, "gpt-5.4-mini") == 1650
+    # unknown model still yields None
+    assert _cost_micros(usage, "gpt-unknown") is None
 
 
 @pytest.mark.asyncio
@@ -207,7 +222,8 @@ async def test_openai_text_llm_parse_add_uses_mini_model_and_wrapper_schema():
     )
 
     assert [item.name for item in items] == ["Oat Milk"]
-    assert cost is None
+    # gpt-5.4-mini: 200*0.75 + 60*4.5 = 420 micro-USD
+    assert cost == 420
     kwargs = sdk.responses.parse.call_args.kwargs
     assert kwargs["model"] == "gpt-5.4-mini"
     assert kwargs["text_format"] is ProposedAddItems

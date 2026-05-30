@@ -17,6 +17,7 @@ import asyncio
 import logging
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -26,20 +27,36 @@ from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import app.bot as bot_mod
+import app.cook_service as cook_service_mod
 from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
+from app.cook_llm import (
+    AnthropicNutritionLLM,
+    AnthropicRecipeLLM,
+    AnthropicSelectionLLM,
+    OpenAINutritionLLM,
+    OpenAIRecipeLLM,
+    OpenAISelectionLLM,
+)
 from app.db import make_engine, make_session_factory
 from app.llm import (
     AnthropicLLMClient,
+    AnthropicProfileLLMClient,
     AnthropicTextLLMClient,
     LLMProviderSelector,
+    NutritionLLMProviderSelector,
     OpenAILLMClient,
+    OpenAIProfileLLMClient,
     OpenAITextLLMClient,
+    ProfileLLMProviderSelector,
+    RecipeLLMProviderSelector,
+    SelectionLLMProviderSelector,
     TextLLMProviderSelector,
 )
 from app.refine_service import AnthropicSearchClient
 from app.scheduler import (
     register_all_user_digests,
+    register_sweep_expired_cooks,
     register_sweep_expired_pendings,
     schedule_user_digest,
     send_digest_with_retry,
@@ -60,9 +77,24 @@ def _configure_logging(env: str, level: str) -> None:
     )
 
 
-def _build_llm_clients(settings: Settings):
+@dataclass
+class LLMBundle:
+    image: LLMProviderSelector
+    text: TextLLMProviderSelector
+    search: object
+    selection: SelectionLLMProviderSelector
+    recipe: RecipeLLMProviderSelector
+    nutrition: NutritionLLMProviderSelector
+    profile: ProfileLLMProviderSelector
+
+
+def _build_llm_clients(settings: Settings) -> LLMBundle:
     image_clients = {}
     text_clients = {}
+    profile_clients = {}
+    selection_clients = {}
+    recipe_clients = {}
+    nutrition_clients = {}
     search = None
 
     if settings.anthropic_api_key:
@@ -74,6 +106,19 @@ def _build_llm_clients(settings: Settings):
         text_clients["anthropic"] = AnthropicTextLLMClient(
             sdk=anthropic_sdk,
             model=settings.anthropic_text_model,
+        )
+        profile_clients["anthropic"] = AnthropicProfileLLMClient(
+            sdk=anthropic_sdk,
+            model=settings.anthropic_text_model,
+        )
+        selection_clients["anthropic"] = AnthropicSelectionLLM(
+            anthropic_sdk, settings.anthropic_model
+        )
+        recipe_clients["anthropic"] = AnthropicRecipeLLM(
+            anthropic_sdk, settings.anthropic_search_model
+        )
+        nutrition_clients["anthropic"] = AnthropicNutritionLLM(
+            anthropic_sdk, settings.anthropic_model
         )
         search = AnthropicSearchClient(
             sdk=anthropic_sdk,
@@ -92,11 +137,28 @@ def _build_llm_clients(settings: Settings):
             sdk=openai_sdk,
             model=settings.openai_text_model,
         )
+        profile_clients["openai"] = OpenAIProfileLLMClient(
+            sdk=openai_sdk,
+            model=settings.openai_text_model,
+        )
+        selection_clients["openai"] = OpenAISelectionLLM(
+            openai_sdk, settings.openai_model
+        )
+        recipe_clients["openai"] = OpenAIRecipeLLM(
+            openai_sdk, settings.openai_model
+        )
+        nutrition_clients["openai"] = OpenAINutritionLLM(
+            openai_sdk, settings.openai_model
+        )
 
-    return (
-        LLMProviderSelector(image_clients, settings.llm_provider),
-        TextLLMProviderSelector(text_clients, settings.llm_provider),
-        search,
+    return LLMBundle(
+        image=LLMProviderSelector(image_clients, settings.llm_provider),
+        text=TextLLMProviderSelector(text_clients, settings.llm_provider),
+        search=search,
+        selection=SelectionLLMProviderSelector(selection_clients, settings.llm_provider),
+        recipe=RecipeLLMProviderSelector(recipe_clients, settings.llm_provider),
+        nutrition=NutritionLLMProviderSelector(nutrition_clients, settings.llm_provider),
+        profile=ProfileLLMProviderSelector(profile_clients, settings.llm_provider),
     )
 
 
@@ -130,7 +192,7 @@ async def _amain(settings: Settings) -> None:
     log.info("migration_ok")
 
     bot = Bot(token=settings.telegram_bot_token)
-    llm, text_llm, search = _build_llm_clients(settings)
+    bundle = _build_llm_clients(settings)
     log.info(
         "llm_provider_configured",
         extra={
@@ -149,6 +211,7 @@ async def _amain(settings: Settings) -> None:
     )
     bot_mod.DEFAULT_LLM_PROVIDER = settings.llm_provider
     bot_mod.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
+    cook_service_mod.COOK_COST_CEILING_MICROS = settings.cook_cost_ceiling_micros
 
     scheduler = AsyncIOScheduler()
 
@@ -162,6 +225,7 @@ async def _amain(settings: Settings) -> None:
 
     register_all_user_digests(scheduler, session_factory=session_factory, send=send)
     register_sweep_expired_pendings(scheduler, session_factory=session_factory)
+    register_sweep_expired_cooks(scheduler, session_factory=session_factory)
 
     def reschedule(user) -> None:
         schedule_user_digest(scheduler, user, send=send)
@@ -169,9 +233,13 @@ async def _amain(settings: Settings) -> None:
     dispatcher = build_dispatcher(
         bot=bot,
         session_factory=session_factory,
-        llm=llm,
-        text_llm=text_llm,
-        search=search,
+        llm=bundle.image,
+        text_llm=bundle.text,
+        profile_llm=bundle.profile,
+        search=bundle.search,
+        selection_llm=bundle.selection,
+        recipe_llm=bundle.recipe,
+        nutrition_llm=bundle.nutrition,
         now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
         on_user_created=reschedule,
         reschedule=reschedule,

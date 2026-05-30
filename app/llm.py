@@ -9,10 +9,18 @@ from typing import Any, Literal, Optional, Protocol
 
 from pydantic import BaseModel, Field
 
+from app.profile_service import FoodProfile
 
 Category = Literal[
-    "dairy", "produce", "meat", "seafood", "bakery",
-    "pantry", "frozen", "beverage", "other",
+    "dairy",
+    "produce",
+    "meat",
+    "seafood",
+    "bakery",
+    "pantry",
+    "frozen",
+    "beverage",
+    "other",
 ]
 
 
@@ -97,6 +105,12 @@ class TextLLMClient(Protocol):
     ) -> tuple[list[ProposedAddItem], Optional[int]]: ...
 
 
+class ProfileUpdateLLMClient(Protocol):
+    async def parse_profile_update(
+        self, *, current: FoodProfile, sentence: str
+    ) -> tuple[FoodProfile, Optional[int]]: ...
+
+
 log = logging.getLogger(__name__)
 LLMProviderName = Literal["anthropic", "openai"]
 
@@ -141,6 +155,8 @@ _PARSE_RECEIPT_TOOL = {
 _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "claude-sonnet-4-6": {"input": 3, "output": 15},
     "claude-haiku-4-5-20251001": {"input": 1, "output": 5},
+    "gpt-5.4": {"input": 2.5, "output": 15},
+    "gpt-5.4-mini": {"input": 0.75, "output": 4.5},
 }
 
 _OPENAI_WEB_SEARCH_TOOL = {
@@ -167,9 +183,10 @@ def _cost_micros(message, model: str) -> int | None:
     if usage is None:
         return None
     try:
-        return (
-            usage.input_tokens * price["input"]
-            + usage.output_tokens * price["output"]
+        # round the total to whole micro-USD; per-token rates may be fractional
+        # (e.g. OpenAI), while the integer Anthropic rates are unaffected.
+        return round(
+            usage.input_tokens * price["input"] + usage.output_tokens * price["output"]
         )
     except Exception:
         return None
@@ -223,7 +240,7 @@ class LLMProviderSelector(LLMClient):
         if default_provider not in clients:
             raise LLMProviderNotConfigured(default_provider)
         self._clients = clients
-        self._default_provider = default_provider
+        self._default_provider: LLMProviderName = default_provider
 
     @property
     def available_providers(self) -> tuple[str, ...]:
@@ -260,7 +277,7 @@ class TextLLMProviderSelector(TextLLMClient):
         if default_provider not in clients:
             raise LLMProviderNotConfigured(default_provider)
         self._clients = clients
-        self._default_provider = default_provider
+        self._default_provider: LLMProviderName = default_provider
 
     @property
     def available_providers(self) -> tuple[str, ...]:
@@ -305,6 +322,118 @@ class TextLLMProviderSelector(TextLLMClient):
         )
 
 
+class ProfileLLMProviderSelector(ProfileUpdateLLMClient):
+    def __init__(
+        self,
+        clients: dict[str, ProfileUpdateLLMClient],
+        default_provider: LLMProviderName,
+    ):
+        if default_provider not in clients:
+            raise LLMProviderNotConfigured(default_provider)
+        self._clients = clients
+        self._default_provider: LLMProviderName = default_provider
+
+    @property
+    def available_providers(self) -> tuple[str, ...]:
+        return tuple(sorted(self._clients))
+
+    @property
+    def default_provider(self) -> LLMProviderName:
+        return self._default_provider
+
+    def for_provider(self, provider: str) -> ProfileUpdateLLMClient:
+        try:
+            return self._clients[provider]
+        except KeyError as exc:
+            raise LLMProviderNotConfigured(provider) from exc
+
+    async def parse_profile_update(
+        self, *, current: FoodProfile, sentence: str
+    ) -> tuple[FoodProfile, Optional[int]]:
+        return await self.for_provider(self._default_provider).parse_profile_update(
+            current=current,
+            sentence=sentence,
+        )
+
+
+# The cook-pipeline selectors are duck-typed rather than subclassing the cook
+# Protocols (which live in app.cook_llm and import from this module), so that
+# app.llm has no import dependency on app.cook_llm.
+class SelectionLLMProviderSelector:
+    def __init__(self, clients: dict, default_provider: LLMProviderName):
+        if default_provider not in clients:
+            raise LLMProviderNotConfigured(default_provider)
+        self._clients = clients
+        self._default_provider: LLMProviderName = default_provider
+
+    @property
+    def available_providers(self) -> tuple[str, ...]:
+        return tuple(sorted(self._clients))
+
+    @property
+    def default_provider(self) -> LLMProviderName:
+        return self._default_provider
+
+    def for_provider(self, provider: str):
+        try:
+            return self._clients[provider]
+        except KeyError as exc:
+            raise LLMProviderNotConfigured(provider) from exc
+
+    async def select_items(self, *, prompt: str):
+        return await self.for_provider(self._default_provider).select_items(prompt=prompt)
+
+
+class RecipeLLMProviderSelector:
+    def __init__(self, clients: dict, default_provider: LLMProviderName):
+        if default_provider not in clients:
+            raise LLMProviderNotConfigured(default_provider)
+        self._clients = clients
+        self._default_provider: LLMProviderName = default_provider
+
+    @property
+    def available_providers(self) -> tuple[str, ...]:
+        return tuple(sorted(self._clients))
+
+    @property
+    def default_provider(self) -> LLMProviderName:
+        return self._default_provider
+
+    def for_provider(self, provider: str):
+        try:
+            return self._clients[provider]
+        except KeyError as exc:
+            raise LLMProviderNotConfigured(provider) from exc
+
+    async def fetch_recipes(self, *, prompt: str):
+        return await self.for_provider(self._default_provider).fetch_recipes(prompt=prompt)
+
+
+class NutritionLLMProviderSelector:
+    def __init__(self, clients: dict, default_provider: LLMProviderName):
+        if default_provider not in clients:
+            raise LLMProviderNotConfigured(default_provider)
+        self._clients = clients
+        self._default_provider: LLMProviderName = default_provider
+
+    @property
+    def available_providers(self) -> tuple[str, ...]:
+        return tuple(sorted(self._clients))
+
+    @property
+    def default_provider(self) -> LLMProviderName:
+        return self._default_provider
+
+    def for_provider(self, provider: str):
+        try:
+            return self._clients[provider]
+        except KeyError as exc:
+            raise LLMProviderNotConfigured(provider) from exc
+
+    async def score(self, *, prompt: str):
+        return await self.for_provider(self._default_provider).score(prompt=prompt)
+
+
 class AnthropicLLMClient(LLMClient):
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
         self._sdk = sdk
@@ -333,7 +462,7 @@ class AnthropicLLMClient(LLMClient):
                     "llm_transport_failed_retrying",
                     extra={"error_class": type(exc).__name__},
                 )
-                await self._sleep(2 ** attempt)
+                await self._sleep(2**attempt)
         raise RuntimeError("unreachable")
 
     async def extract_items_from_image(
@@ -404,7 +533,7 @@ class OpenAILLMClient(LLMClient):
                     "llm_transport_failed_retrying",
                     extra={"error_class": type(exc).__name__},
                 )
-                await self._sleep(2 ** attempt)
+                await self._sleep(2**attempt)
         raise RuntimeError("unreachable")
 
     async def extract_items_from_image(
@@ -436,7 +565,7 @@ class OpenAILLMClient(LLMClient):
 
         return LLMResult(
             parse=parsed,
-            cost_micros_usd=None,
+            cost_micros_usd=_cost_micros(response, self._model),
             provider_usage=_usage_dict(response),
         )
 
@@ -534,6 +663,22 @@ against the user's typical /add patterns.
 """
 
 
+PROFILE_SYSTEM_PROMPT = """You maintain a user's food profile. You are given the
+current profile as JSON and a new sentence. Return ONLY the updated profile as
+JSON matching this schema (merge, do not drop existing values unless the user
+clearly retracts them):
+{
+  "diet": "none|vegetarian|vegan|pescatarian|halal|kosher|other",
+  "exclusions": [string],          // allergies and hard-avoid ingredients (lowercase singular)
+  "preferred_cuisines": [string],  // e.g. ["chinese","american"]
+  "max_cook_minutes": integer or null,
+  "household_size": integer >= 1,
+  "note": string                   // free-text preferences that don't fit a field
+}
+Add any newly stated allergy to "exclusions". No prose.
+"""
+
+
 def _extract_json_text(message) -> str:
     chunks: list[str] = []
     for block in message.content:
@@ -578,7 +723,7 @@ class AnthropicTextLLMClient(TextLLMClient):
                     "text_llm_transport_failed_retrying",
                     extra={"error_class": type(exc).__name__},
                 )
-                await self._sleep(2 ** attempt)
+                await self._sleep(2**attempt)
         raise RuntimeError("unreachable")
 
     async def _call_with_schema(self, system: str, user_text: str, parse_fn):
@@ -623,12 +768,14 @@ class AnthropicTextLLMClient(TextLLMClient):
         user_text,
         today,
     ) -> tuple[CorrectionDiff, Optional[int]]:
-        user_msg = json.dumps({
-            "item_snapshot": item_snapshot,
-            "cache_snapshot": cache_snapshot,
-            "today": today.isoformat(),
-            "user_text": user_text,
-        })
+        user_msg = json.dumps(
+            {
+                "item_snapshot": item_snapshot,
+                "cache_snapshot": cache_snapshot,
+                "today": today.isoformat(),
+                "user_text": user_text,
+            }
+        )
 
         def _parse(text: str) -> CorrectionDiff:
             return CorrectionDiff.model_validate(json.loads(text))
@@ -642,11 +789,13 @@ class AnthropicTextLLMClient(TextLLMClient):
         today,
         tz,
     ) -> tuple[list[ProposedAddItem], Optional[int]]:
-        user_msg = json.dumps({
-            "today": today.isoformat(),
-            "tz": tz,
-            "user_text": user_text,
-        })
+        user_msg = json.dumps(
+            {
+                "today": today.isoformat(),
+                "tz": tz,
+                "user_text": user_text,
+            }
+        )
 
         def _parse(text: str) -> list[ProposedAddItem]:
             data = json.loads(text)
@@ -691,7 +840,7 @@ class OpenAITextLLMClient(TextLLMClient):
                     "text_llm_transport_failed_retrying",
                     extra={"error_class": type(exc).__name__},
                 )
-                await self._sleep(2 ** attempt)
+                await self._sleep(2**attempt)
         raise RuntimeError("unreachable")
 
     async def parse_correct(
@@ -702,18 +851,23 @@ class OpenAITextLLMClient(TextLLMClient):
         user_text,
         today,
     ) -> tuple[CorrectionDiff, Optional[int]]:
-        user_msg = json.dumps({
-            "item_snapshot": item_snapshot,
-            "cache_snapshot": cache_snapshot,
-            "today": today.isoformat(),
-            "user_text": user_text,
-        })
+        user_msg = json.dumps(
+            {
+                "item_snapshot": item_snapshot,
+                "cache_snapshot": cache_snapshot,
+                "today": today.isoformat(),
+                "user_text": user_text,
+            }
+        )
         response = await self._create_response(
             CORRECTION_SYSTEM_PROMPT,
             user_msg,
             CorrectionDiff,
         )
-        return CorrectionDiff.model_validate(_extract_openai_parsed(response)), None
+        return (
+            CorrectionDiff.model_validate(_extract_openai_parsed(response)),
+            _cost_micros(response, self._model),
+        )
 
     async def parse_add(
         self,
@@ -722,18 +876,50 @@ class OpenAITextLLMClient(TextLLMClient):
         today,
         tz,
     ) -> tuple[list[ProposedAddItem], Optional[int]]:
-        user_msg = json.dumps({
-            "today": today.isoformat(),
-            "tz": tz,
-            "user_text": user_text,
-        })
+        user_msg = json.dumps(
+            {
+                "today": today.isoformat(),
+                "tz": tz,
+                "user_text": user_text,
+            }
+        )
         response = await self._create_response(
             OPENAI_ADD_SYSTEM_PROMPT,
             user_msg,
             ProposedAddItems,
         )
         parsed = ProposedAddItems.model_validate(_extract_openai_parsed(response))
-        return parsed.items, None
+        return parsed.items, _cost_micros(response, self._model)
+
+
+class AnthropicProfileLLMClient(ProfileUpdateLLMClient):
+    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
+        self._delegate = AnthropicTextLLMClient(sdk, model, sleep)
+
+    async def parse_profile_update(self, *, current, sentence):
+        user_msg = json.dumps({"current": current.model_dump(), "sentence": sentence})
+
+        def _parse(text: str) -> FoodProfile:
+            return FoodProfile.model_validate(json.loads(text))
+
+        return await self._delegate._call_with_schema(
+            PROFILE_SYSTEM_PROMPT, user_msg, _parse
+        )
+
+
+class OpenAIProfileLLMClient(ProfileUpdateLLMClient):
+    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
+        self._delegate = OpenAITextLLMClient(sdk, model, sleep)
+
+    async def parse_profile_update(self, *, current, sentence):
+        user_msg = json.dumps({"current": current.model_dump(), "sentence": sentence})
+        response = await self._delegate._create_response(
+            PROFILE_SYSTEM_PROMPT, user_msg, FoodProfile
+        )
+        return (
+            FoodProfile.model_validate(_extract_openai_parsed(response)),
+            _cost_micros(response, self._delegate._model),
+        )
 
 
 def _detect_media_type(image_bytes: bytes) -> str:

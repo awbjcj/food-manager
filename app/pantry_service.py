@@ -188,6 +188,8 @@ class Stats:
     avg_cost_micros_usd: Optional[int]
     unknown_cost_receipt_count: int
     waste_rate_percent: Optional[float]
+    cook_cost_micros_usd: int = 0
+    cook_count: int = 0
     text_llm: TextLLMCost = TextLLMCost(
         correction_proposal_count=0,
         correction_cost_micros=0,
@@ -266,6 +268,18 @@ def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
         ),
     )
 
+    from app.models import CookSession  # local import; avoids top-level churn
+
+    cook_rows = list(
+        session.exec(
+            select(CookSession).where(
+                CookSession.user_id == user_id,
+                CookSession.created_at >= since.replace(tzinfo=None),
+            )
+        ).all()
+    )
+    cook_cost = sum(row.llm_cost_micros_usd or 0 for row in cook_rows)
+
     return Stats(
         receipt_count=len(receipts),
         tracked_item_count=len(tracked),
@@ -277,6 +291,8 @@ def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
             1 for receipt in receipts if receipt.llm_cost_micros_usd is None
         ),
         waste_rate_percent=waste_rate,
+        cook_cost_micros_usd=cook_cost,
+        cook_count=len(cook_rows),
         text_llm=text_llm,
     )
 

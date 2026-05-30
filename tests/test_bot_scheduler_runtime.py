@@ -18,7 +18,13 @@ from app.bot import (
     handle_llm,
     handle_start,
 )
-from app.llm import LLMProviderSelector, LLMResult, ParseResult, TextLLMProviderSelector
+from app.llm import (
+    LLMProviderSelector,
+    LLMResult,
+    ParseResult,
+    ProfileLLMProviderSelector,
+    TextLLMProviderSelector,
+)
 from app.models import PantryItem, User
 from app.scheduler import (
     build_digest_payload,
@@ -26,7 +32,7 @@ from app.scheduler import (
     schedule_user_digest,
     send_digest_once,
 )
-from tests.fakes import FakeLLMClient, FakeTextLLMClient
+from tests.fakes import FakeLLMClient, FakeProfileLLMClient, FakeTextLLMClient
 
 
 @pytest.fixture
@@ -275,11 +281,32 @@ def test_build_dispatcher_imports_and_registers():
         session_factory=lambda: MagicMock(),
         llm=fake_llm,
         text_llm=FakeTextLLMClient(),
+        profile_llm=FakeProfileLLMClient(),
         now_provider=lambda tz: datetime.now(timezone.utc),
         on_user_created=lambda user: None,
         reschedule=lambda user: None,
     )
     assert dispatcher is not None
+
+
+def test_build_llm_clients_includes_profile_llm():
+    from bin.run import _build_llm_clients
+    from app.settings import Settings
+
+    settings = Settings(
+        TELEGRAM_BOT_TOKEN="token",
+        ALLOWED_TELEGRAM_USER_ID=1,
+        LLM_PROVIDER="anthropic",
+        ANTHROPIC_API_KEY="anthropic-key",
+        OPENAI_API_KEY=None,
+    )
+    bundle = _build_llm_clients(settings)
+
+    assert isinstance(bundle.image, LLMProviderSelector)
+    assert isinstance(bundle.text, TextLLMProviderSelector)
+    assert isinstance(bundle.profile, ProfileLLMProviderSelector)
+    assert bundle.profile.available_providers == ("anthropic",)
+    assert bundle.search is not None
 
 
 def test_scheduler_payload_and_registration(session):

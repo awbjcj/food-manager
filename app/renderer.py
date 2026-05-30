@@ -4,8 +4,10 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from app.correction_service import AddPayload, CorrectPayload
+from app.cook_models import ScoredCandidate
 from app.ingest_service import IngestSummary
 from app.pantry_service import Stats
+from app.profile_service import FoodProfile
 
 
 def _fmt_date(value: date, *, today: date) -> str:
@@ -259,6 +261,55 @@ def build_apply_cancel_keyboard(*, pending_id: int) -> list[list[CallbackButton]
     ]]
 
 
+def _render_card(card: ScoredCandidate, *, rank: int) -> str:
+    r = card.recipe
+    n = card.nutrition
+    header = f"{'* ' if rank == 0 else ''}{r.title} ({r.cuisine})"
+    lines = [
+        header,
+        f"  Health {n.health_score}/100 - {n.effort} - {n.est_minutes} min",
+    ]
+    ingredients = ", ".join(i.name for i in r.ingredients)
+    if ingredients:
+        lines.append(f"  Ingredients: {ingredients}")
+    lines.append(f"  {r.method_gist}")
+    if r.source_url:
+        lines.append(f"  Recipe: {r.source_url}")
+    if rank == 0 and card.shopping_list:
+        lines.append("  Need to buy: " + ", ".join(card.shopping_list))
+    elif rank == 0:
+        lines.append("  Need to buy: nothing - you have it all!")
+    return "\n".join(lines)
+
+
+def render_cook_result(cards: list[ScoredCandidate], *, show_alternatives: bool) -> str:
+    if not cards:
+        return "Couldn't find a recipe that fits your pantry and restrictions."
+    blocks = [_render_card(cards[0], rank=0)]
+    if show_alternatives:
+        for idx, card in enumerate(cards[1:], start=1):
+            blocks.append(_render_card(card, rank=idx))
+    return "\n\n".join(blocks)
+
+
+def build_cook_alternatives_keyboard(cook_id: int) -> list[list[CallbackButton]]:
+    return [[CallbackButton(text="Show alternatives", callback_data=f"cookalt:{cook_id}")]]
+
+
+def build_cook_round_keyboard(
+    cook_id: int, options: list[str], *, round_name: str | None = None
+) -> list[list[CallbackButton]]:
+    def callback_data(idx: int) -> str:
+        if round_name is None:
+            return f"cookpick:{cook_id}:{idx}"
+        return f"cookpick:{cook_id}:{round_name}:{idx}"
+
+    return [
+        [CallbackButton(text=option, callback_data=callback_data(idx))]
+        for idx, option in enumerate(options)
+    ]
+
+
 def render_applied_correction(*, item_id: int, payload: CorrectPayload) -> str:
     changes = []
     for field_name in ("name", "category", "expires_on", "shelf_life_days"):
@@ -302,12 +353,13 @@ def render_list(items: list, *, today: date) -> str:
         by_cat.keys(),
         key=lambda c: CATEGORY_ORDER.index(c) if c in CATEGORY_ORDER else len(CATEGORY_ORDER),
     )
-    lines: list[str] = []
+    blocks: list[str] = []
     for cat in ordered:
         group = sorted(by_cat[cat], key=lambda i: i.expires_on)
-        lines.append(f"{cat.capitalize()} ({len(group)})")
-        lines.extend(f"  {render_item_line(i, today=today)}" for i in group)
-    return "\n".join(lines)
+        block = [f"{cat.capitalize()} ({len(group)})"]
+        block.extend(f"  {render_item_line(i, today=today)}" for i in group)
+        blocks.append("\n".join(block))
+    return "\n\n".join(blocks)
 
 
 def _fmt_cost_short(micros: int | None) -> str:
@@ -348,5 +400,26 @@ def render_stats(stats: Stats) -> str:
         f"  Adds:        {tl.add_proposal_count}  "
         f"(${tl.add_cost_micros / 1_000_000:.4f} total{add_unknown})"
     )
+    lines.append(
+        f"Cook sessions: {stats.cook_count} "
+        f"(${stats.cook_cost_micros_usd / 1_000_000:.3f})"
+    )
     lines.append(f"Waste rate: {waste_rate}")
     return "\n".join(lines)
+
+
+def render_profile(profile: FoodProfile) -> str:
+    exclusions = ", ".join(profile.exclusions) or "none"
+    cuisines = ", ".join(profile.preferred_cuisines) or "any"
+    cook = f"{profile.max_cook_minutes} min" if profile.max_cook_minutes else "no limit"
+    note = profile.note or "(none)"
+    return (
+        "Your food profile:\n"
+        f"  Diet: {profile.diet}\n"
+        f"  Avoid: {exclusions}\n"
+        f"  Cuisines: {cuisines}\n"
+        f"  Max cook time: {cook}\n"
+        f"  Household size: {profile.household_size}\n"
+        f"  Notes: {note}\n"
+        "Update by typing: /prefs <sentence>  (e.g. /prefs I'm vegan, no peanuts)"
+    )

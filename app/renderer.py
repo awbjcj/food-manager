@@ -473,6 +473,9 @@ def render_stats(stats: Stats) -> str:
         f"Cook sessions: {stats.cook_count} "
         f"(${stats.cook_cost_micros_usd / 1_000_000:.3f})"
     )
+    lines.append(
+        f"  Cooked: {stats.cook_feedback_count} (liked {stats.cook_liked_count})"
+    )
     lines.append(f"Waste rate: {waste_rate}")
     return "\n".join(lines)
 

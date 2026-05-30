@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from app.correction_service import AddPayload, CorrectPayload
+from app.cook_models import ScoredCandidate
 from app.ingest_service import IngestSummary
 from app.pantry_service import Stats
 from app.profile_service import FoodProfile
@@ -258,6 +259,45 @@ def build_apply_cancel_keyboard(*, pending_id: int) -> list[list[CallbackButton]
         CallbackButton(text="Apply", callback_data=f"apply:{pending_id}"),
         CallbackButton(text="Cancel", callback_data=f"cancel:{pending_id}"),
     ]]
+
+
+def _render_card(card: ScoredCandidate, *, rank: int) -> str:
+    r = card.recipe
+    n = card.nutrition
+    header = f"{'* ' if rank == 0 else ''}{r.title} ({r.cuisine})"
+    lines = [
+        header,
+        f"  Health {n.health_score}/100 - {n.effort} - {n.est_minutes} min",
+        f"  {r.method_gist}",
+    ]
+    if r.source_url:
+        lines.append(f"  Recipe: {r.source_url}")
+    if rank == 0 and card.shopping_list:
+        lines.append("  Need to buy: " + ", ".join(card.shopping_list))
+    elif rank == 0:
+        lines.append("  Need to buy: nothing - you have it all!")
+    return "\n".join(lines)
+
+
+def render_cook_result(cards: list[ScoredCandidate], *, show_alternatives: bool) -> str:
+    if not cards:
+        return "Couldn't find a recipe that fits your pantry and restrictions."
+    blocks = [_render_card(cards[0], rank=0)]
+    if show_alternatives:
+        for idx, card in enumerate(cards[1:], start=1):
+            blocks.append(_render_card(card, rank=idx))
+    return "\n\n".join(blocks)
+
+
+def build_cook_alternatives_keyboard(cook_id: int) -> list[list[CallbackButton]]:
+    return [[CallbackButton(text="Show alternatives", callback_data=f"cookalt:{cook_id}")]]
+
+
+def build_cook_round_keyboard(cook_id: int, options: list[str]) -> list[list[CallbackButton]]:
+    return [
+        [CallbackButton(text=option, callback_data=f"cookpick:{cook_id}:{idx}")]
+        for idx, option in enumerate(options)
+    ]
 
 
 def render_applied_correction(*, item_id: int, payload: CorrectPayload) -> str:

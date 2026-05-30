@@ -45,9 +45,11 @@ and the inline-keyboard + pending-row interaction pattern.
 
 ## 4. User-facing surface
 
-- **`/cook`** — trigger. Posts meal-type buttons, then cuisine buttons
-  (LLM-generated, profile-aware, always including a `[Surprise me]` option),
-  then a `🍳 Thinking…` placeholder that is edited in place with the result.
+- **`/cook`** — trigger. Posts a **static** meal-type button row, then a cuisine
+  button row **seeded from `profile.preferred_cuisines`** (falling back to a
+  default set), both including a `[Surprise me]` option. Options are built in
+  code — no extra LLM call to generate them. Then a `🍳 Thinking…` placeholder
+  that is edited in place with the result.
 - **`/prefs`** — view the persistent profile, and update it by typing a plain
   sentence (an LLM merges the sentence into the stored profile).
 - **`/help`** and **`/stats`** updated to mention `/cook` and show cook cost.
@@ -65,7 +67,7 @@ display-only text, computed lazily for whichever candidate is shown.
 
 ```
 /cook
-  → [round 1] meal-type buttons   (LLM-generated, profile-aware, + "Surprise me")
+  → [round 1] meal-type buttons   (static list, incl. "Surprise me")
   → [round 2] cuisine buttons      (led by profile.preferred_cuisines; ≤2 rounds, hard max 3)
                                     state persisted in CookSession each tap
   → post "🍳 Thinking…" placeholder

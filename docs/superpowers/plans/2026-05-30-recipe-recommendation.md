@@ -1508,7 +1508,9 @@ from sqlmodel import SQLModel, Session, create_engine
 
 from app.models import CookSession, PantryItem, User
 from app.cook_models import RecipeCandidate, RecipeIngredient, RecipeCandidates, NutritionScore, NutritionScores, SelectedItems
-from app.cook_service import run_cook, MIN_USABLE_ITEMS, NotEnoughItems
+from app.cook_service import (
+    run_cook, MIN_USABLE_ITEMS, NotEnoughItems, COOK_COST_CEILING_MICROS,
+)
 from app.profile_service import FoodProfile
 from tests.fakes import FakeSelectionLLM, FakeRecipeLLM, FakeNutritionLLM
 
@@ -1583,6 +1585,45 @@ def test_run_cook_ranks_and_filters_allergens():
     assert "pasta" in result[0].shopping_list
     db.refresh(cook)
     assert cook.llm_cost_micros_usd == 17  # 5 + 9 + 3
+
+
+def test_run_cook_halts_on_cost_ceiling():
+    import asyncio
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
+    recipe = FakeRecipeLLM(canned=(RecipeCandidates(candidates=[]), 0))
+    result = asyncio.run(run_cook(
+        db, cook=cook, profile=FoodProfile(),
+        selection_llm=FakeSelectionLLM(
+            canned=(SelectedItems(item_ids=ids), COOK_COST_CEILING_MICROS + 1)),
+        recipe_llm=recipe,
+        nutrition_llm=FakeNutritionLLM(canned=(NutritionScores(scores=[]), 0)),
+        today=today,
+    ))
+    assert result == []
+    assert recipe.calls == []  # recipe stage never reached after ceiling hit
+
+
+def test_run_cook_regenerates_once_then_refuses_on_allergen_wipeout():
+    import asyncio
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
+    peanut_only = RecipeCandidates(candidates=[
+        RecipeCandidate(title="Peanut", cuisine="thai", source_url="u",
+                        ingredients=[RecipeIngredient(name="peanut")],
+                        method_gist="x", deliciousness=0.9)])
+    recipe = FakeRecipeLLM(canned_sequence=[(peanut_only, 9), (peanut_only, 9)])
+    nutrition = FakeNutritionLLM(canned=(NutritionScores(scores=[]), 3))
+    result = asyncio.run(run_cook(
+        db, cook=cook, profile=FoodProfile(exclusions=["peanut"]),
+        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=ids), 5)),
+        recipe_llm=recipe, nutrition_llm=nutrition, today=today,
+    ))
+    assert result == []
+    assert len(recipe.calls) == 2  # regenerated exactly once
+    assert nutrition.calls == []   # never reached the nutrition stage
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1617,10 +1658,17 @@ log = logging.getLogger(__name__)
 
 MIN_USABLE_ITEMS = 3
 URGENT_DAYS = 5
+# Per-cook spend backstop (spec §8/§9). Halts further stages once exceeded.
+# Configurable: bump this constant (or later read it from Settings).
+COOK_COST_CEILING_MICROS = 100_000  # $0.10
 
 
 class NotEnoughItems(Exception):
     pass
+
+
+def _over_ceiling(cook: CookSession) -> bool:
+    return (cook.llm_cost_micros_usd or 0) > COOK_COST_CEILING_MICROS
 
 
 def _ingredient_names(recipe: RecipeCandidate) -> list[str]:
@@ -1652,6 +1700,9 @@ async def run_cook(
     })
     selected, c1 = await selection_llm.select_items(prompt=sel_prompt)
     accrue_cost(session, cook=cook, add_micros=c1)
+    if _over_ceiling(cook):
+        log.warning("cook_cost_ceiling_hit", extra={"stage": "selection"})
+        return []
 
     chosen = [i for i in active if i.id in set(selected.item_ids)] or active
     cook.selected_item_ids = json.dumps([i.id for i in chosen])
@@ -1680,6 +1731,9 @@ async def run_cook(
         safe = [c for c in candidates.candidates
                 if not violates_exclusions(_ingredient_names(c), exclusions=profile.exclusions)]
     if not safe:
+        return []
+    if _over_ceiling(cook):
+        log.warning("cook_cost_ceiling_hit", extra={"stage": "recipe"})
         return []
 
     nut_prompt = json.dumps({
@@ -1978,7 +2032,7 @@ Expected: FAIL (`handle_cook` undefined).
 from app.cook_session_service import create_cook_session, set_message_id as set_cook_message_id
 from app.renderer import build_cook_round_keyboard
 
-MEAL_TYPES = ["Dinner", "Lunch", "Breakfast", "Dessert", "Snack"]
+MEAL_TYPES = ["Dinner", "Lunch", "Breakfast", "Dessert", "Snack", "Surprise me"]
 
 
 async def handle_cook(
@@ -2019,11 +2073,18 @@ git add app/bot.py tests/test_cook_bot.py
 git commit -m "feat(cook): /cook round 1 (meal-type selection)"
 ```
 
-- [ ] **Step 5: Write the failing test for `cook_pick` advancing rounds + running the pipeline**
+- [ ] **Step 5: Write the failing tests — round advancement, auth, and the pipeline**
+
+> Why three tests, not one: the round-advancement and pipeline phases are tested
+> **separately** so we never nest event loops. The callback handler only
+> *schedules* the pipeline via the injected `spawn`; the pipeline itself
+> (`run_cook_and_render`) is awaited directly in its own test. This avoids the
+> `RuntimeError: This event loop is already running` you'd hit if `spawn` tried
+> to `run_until_complete` inside `asyncio.run(handle_cook_callback(...))`.
 
 ```python
 # add to tests/test_cook_bot.py
-from app.bot import handle_cook_callback
+from app.bot import handle_cook_callback, run_cook_and_render
 from app.cook_models import (
     RecipeCandidate, RecipeIngredient, RecipeCandidates, NutritionScore, NutritionScores, SelectedItems,
 )
@@ -2043,10 +2104,69 @@ class _Cb:
         self.answer = AsyncMock()
 
 
-def test_cook_pick_cuisine_then_runs_pipeline(monkeypatch):
+def _recording_spawn():
+    spawned = []
+    def spawn(coro):
+        spawned.append(coro)
+        coro.close()  # we only assert it was scheduled; don't execute it here
+    return spawn, spawned
+
+
+def _fakes():
+    return dict(selection_llm=FakeSelectionLLM(), recipe_llm=FakeRecipeLLM(),
+                nutrition_llm=FakeNutritionLLM())
+
+
+_NOW = lambda tz: datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+
+
+def test_cook_pick_advances_rounds_without_running_pipeline(monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    today = date(2026, 5, 30)
+    asyncio.run(handle_cook(_Msg(), session_factory=lambda: Session(engine),
+                            now_provider=_NOW))
+    with Session(engine) as db:
+        cook_id = db.exec(__import__("sqlmodel").select(CookSession)).all()[0].id
+
+    spawn, spawned = _recording_spawn()
+
+    # round 1: pick meal-type -> meal_type set, cuisine asked, still collecting, no spawn
+    asyncio.run(handle_cook_callback(
+        _Cb(f"cookpick:{cook_id}:0"), session_factory=lambda: Session(engine),
+        now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
+    with Session(engine) as db:
+        cook = db.get(CookSession, cook_id)
+        assert cook.meal_type == "Dinner" and cook.cuisine is None
+        assert cook.status == "collecting"
+    assert spawned == []
+
+    # round 2: pick cuisine -> status ready, pipeline scheduled exactly once
+    asyncio.run(handle_cook_callback(
+        _Cb(f"cookpick:{cook_id}:0"), session_factory=lambda: Session(engine),
+        now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
+    with Session(engine) as db:
+        cook = db.get(CookSession, cook_id)
+        assert cook.cuisine == "Italian" and cook.status == "ready"
+    assert len(spawned) == 1
+
+
+def test_cook_callback_rejects_unauthorized(monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    engine = _engine_with_user()
+    cb = _Cb("cookpick:1:0", user_id=999)
+    spawn, spawned = _recording_spawn()
+    asyncio.run(handle_cook_callback(
+        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
+        spawn=spawn, bot=None, **_fakes()))
+    cb.answer.assert_awaited_with("not authorized", show_alert=False)
+    assert spawned == []
+
+
+def test_run_cook_and_render_completes_and_edits(monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    engine = _engine_with_user()
+    today_dt = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+    today = today_dt.date()
     with Session(engine) as db:
         for i in range(4):
             db.add(PantryItem(
@@ -2055,12 +2175,11 @@ def test_cook_pick_cuisine_then_runs_pipeline(monkeypatch):
                 shelf_life_source="llm", ingest_shelf_life_source="llm",
                 expires_on=today + timedelta(days=2), status="active",
                 created_via="receipt", created_at=datetime.now(timezone.utc)))
+        now = today_dt.replace(tzinfo=None)
+        db.add(CookSession(user_id=1, status="ready", chat_id=1, meal_type="Dinner",
+                           cuisine="Italian", selected_item_ids="[]", message_id=99,
+                           created_at=now, expires_at=now + timedelta(minutes=10)))
         db.commit()
-    # round 1 to create the session + record meal_type
-    msg = _Msg()
-    asyncio.run(handle_cook(msg, session_factory=lambda: Session(engine),
-                            now_provider=lambda tz: datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)))
-    with Session(engine) as db:
         cook_id = db.exec(__import__("sqlmodel").select(CookSession)).all()[0].id
 
     selection = FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5))
@@ -2070,34 +2189,24 @@ def test_cook_pick_cuisine_then_runs_pipeline(monkeypatch):
                         method_gist="x", deliciousness=0.6)]), 9))
     nutrition = FakeNutritionLLM(canned=(NutritionScores(scores=[
         NutritionScore(health_score=80, effort="easy", est_minutes=20, rationale="ok")]), 3))
+    bot = type("B", (), {"edit_message_text": AsyncMock()})()
 
-    # pick meal-type (option 0), then cuisine (option 0)
-    cb_meal = _Cb(f"cookpick:{cook_id}:0")
-    asyncio.run(handle_cook_callback(
-        cb_meal, session_factory=lambda: Session(engine),
-        now_provider=lambda tz: datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc),
+    asyncio.run(run_cook_and_render(
+        lambda: Session(engine), user_id=1, user_tz="America/Detroit", cook_id=cook_id,
         selection_llm=selection, recipe_llm=recipe, nutrition_llm=nutrition,
-        spawn=lambda coro: asyncio.get_event_loop().run_until_complete(coro), bot=None,
-    ))
-    cb_cuisine = _Cb(f"cookpick:{cook_id}:0")
-    asyncio.run(handle_cook_callback(
-        cb_cuisine, session_factory=lambda: Session(engine),
-        now_provider=lambda tz: datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc),
-        selection_llm=selection, recipe_llm=recipe, nutrition_llm=nutrition,
-        spawn=lambda coro: asyncio.get_event_loop().run_until_complete(coro), bot=None,
+        now_provider=lambda tz: today_dt, bot=bot,
     ))
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
         assert cook.status == "done"
         assert "Safe" in (cook.candidates_json or "")
+    bot.edit_message_text.assert_awaited()
 ```
-
-> NOTE: `spawn` is injected (like `handle_photo`'s `spawn=asyncio.create_task`) so the test can run the pipeline synchronously. Round-tracking: a session with `meal_type is None` is on round 1; with `meal_type` set but `cuisine is None` is on round 2; once `cuisine` is set, run the pipeline.
 
 - [ ] **Step 6: Run test to verify it fails**
 
-Run: `uv run pytest tests/test_cook_bot.py::test_cook_pick_cuisine_then_runs_pipeline -v`
-Expected: FAIL (`handle_cook_callback` undefined).
+Run: `uv run pytest tests/test_cook_bot.py -k "advances_rounds or rejects_unauthorized or run_cook_and_render" -v`
+Expected: FAIL (`handle_cook_callback` / `run_cook_and_render` undefined).
 
 - [ ] **Step 7: Implement `handle_cook_callback` + cuisine options + pipeline kick-off**
 
@@ -2124,10 +2233,37 @@ def _cuisine_options(user: User) -> list[str]:
     return options[:5]
 
 
+def _select_cook(client, provider: str):
+    # Pick the per-user provider client, mirroring _select_text_llm_client.
+    selector = getattr(client, "for_provider", None)
+    return selector(provider) if callable(selector) else client
+
+
+async def _safe_edit_cb(cb, text, keyboard=None) -> None:
+    try:
+        await cb.message.edit_text(text, reply_markup=keyboard)
+    except Exception as exc:
+        log.warning("cook_edit_failed", extra={"error_class": type(exc).__name__})
+
+
+async def _safe_edit_bot(bot, *, chat_id, message_id, text, keyboard=None) -> None:
+    if bot is None:
+        return
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id, text=text, reply_markup=keyboard)
+    except Exception as exc:
+        log.warning("cook_edit_failed", extra={"error_class": type(exc).__name__})
+
+
 async def handle_cook_callback(
     cb, *, session_factory, now_provider,
     selection_llm, recipe_llm, nutrition_llm, spawn, bot,
 ):
+    if cb.from_user.id != ALLOWED_TELEGRAM_USER_ID:
+        log.info("unauthorized_update_rejected", extra={"telegram_user_id": cb.from_user.id})
+        await cb.answer("not authorized", show_alert=False)
+        return
     action = parse_callback(cb.data)
     with session_factory() as session:
         user = session.get(User, cb.from_user.id)
@@ -2142,77 +2278,78 @@ async def handle_cook_callback(
         if action.verb == "cook_alt":
             cards = [ScoredCandidate.model_validate(c)
                      for c in _json.loads(cook.candidates_json or "[]")]
-            try:
-                await cb.message.edit_text(render_cook_result(cards, show_alternatives=True))
-            except Exception as exc:
-                log.warning("cook_alt_edit_failed", extra={"error_class": type(exc).__name__})
+            await _safe_edit_cb(cb, render_cook_result(cards, show_alternatives=True))
             await cb.answer("showing alternatives")
             return
 
         # cook_pick: advance the rounds
-        options_meal = MEAL_TYPES
         if cook.meal_type is None:
-            cook.meal_type = options_meal[action.option_index]
+            cook.meal_type = MEAL_TYPES[action.option_index]
             session.add(cook); session.commit()
-            keyboard = to_aiogram_keyboard(
-                build_cook_round_keyboard(cook.id, _cuisine_options(user)))
-            try:
-                await cb.message.edit_text("Which cuisine?", reply_markup=keyboard)
-            except Exception as exc:
-                log.warning("cook_round_edit_failed", extra={"error_class": type(exc).__name__})
+            await _safe_edit_cb(
+                cb, "Which cuisine?",
+                to_aiogram_keyboard(build_cook_round_keyboard(cook.id, _cuisine_options(user))))
             await cb.answer()
             return
+        if cook.cuisine is not None:
+            await cb.answer()  # round already answered; ignore a stray tap
+            return
 
-        if cook.cuisine is None:
-            cook.cuisine = _cuisine_options(user)[action.option_index]
-            cook.status = "ready"
-            session.add(cook); session.commit()
-            try:
-                await cb.message.edit_text("🍳 Thinking…")
-            except Exception as exc:
-                log.warning("cook_thinking_edit_failed", extra={"error_class": type(exc).__name__})
-            await cb.answer()
-
+        cook.cuisine = _cuisine_options(user)[action.option_index]
+        cook.status = "ready"
+        session.add(cook); session.commit()
+        await _safe_edit_cb(cb, "🍳 Thinking…")
+        await cb.answer()
+        # capture primitives BEFORE the session closes (avoids DetachedInstanceError
+        # when _run reads them later on a fresh session)
+        user_id = user.telegram_id
+        user_tz = user.tz
         cook_id = cook.id
+
+    spawn(run_cook_and_render(
+        session_factory, user_id=user_id, user_tz=user_tz, cook_id=cook_id,
+        selection_llm=selection_llm, recipe_llm=recipe_llm, nutrition_llm=nutrition_llm,
+        now_provider=now_provider, bot=bot,
+    ))
+
+
+async def run_cook_and_render(
+    session_factory, *, user_id, user_tz, cook_id,
+    selection_llm, recipe_llm, nutrition_llm, now_provider, bot,
+) -> None:
+    with session_factory() as session:
+        cook = load_cook_session(session, user_id=user_id, cook_id=cook_id)
+        if cook is None or cook.status != "ready":
+            return
+        user = session.get(User, user_id)
         profile = profile_from_user(user)
-        chat_id = cb.message.chat.id
-
-    async def _run():
-        with session_factory() as s2:
-            cook2 = load_cook_session(s2, user_id=cb.from_user.id, cook_id=cook_id)
-            if cook2 is None or cook2.status != "ready":
-                return
-            today = now_provider(user.tz).date()
-            try:
-                cards = await run_cook(
-                    s2, cook=cook2, profile=profile,
-                    selection_llm=selection_llm, recipe_llm=recipe_llm,
-                    nutrition_llm=nutrition_llm, today=today,
-                )
-            except NotEnoughItems:
-                mark_status(s2, cook=cook2, status="cancelled")
-                if bot is not None:
-                    await bot.edit_message_text(
-                        chat_id=chat_id, message_id=cook2.message_id,
-                        text="Not enough usable items - send a receipt or /add a few things.")
-                return
-            except Exception as exc:
-                log.warning("cook_pipeline_failed", extra={"error_class": type(exc).__name__})
-                mark_status(s2, cook=cook2, status="cancelled")
-                return
-            mark_status(s2, cook=cook2, status="done")
-            text = render_cook_result(cards, show_alternatives=False)
-            keyboard = (to_aiogram_keyboard(build_cook_alternatives_keyboard(cook2.id))
-                        if len(cards) > 1 else None)
-            if bot is not None:
-                try:
-                    await bot.edit_message_text(
-                        chat_id=chat_id, message_id=cook2.message_id,
-                        text=text, reply_markup=keyboard)
-                except Exception as exc:
-                    log.warning("cook_result_edit_failed", extra={"error_class": type(exc).__name__})
-
-    spawn(_run())
+        chat_id = cook.chat_id
+        message_id = cook.message_id
+        today = now_provider(user_tz).date()
+        sel = _select_cook(selection_llm, user.llm_provider)
+        rec = _select_cook(recipe_llm, user.llm_provider)
+        nut = _select_cook(nutrition_llm, user.llm_provider)
+        try:
+            cards = await run_cook(
+                session, cook=cook, profile=profile,
+                selection_llm=sel, recipe_llm=rec, nutrition_llm=nut, today=today,
+            )
+        except NotEnoughItems:
+            mark_status(session, cook=cook, status="cancelled")
+            await _safe_edit_bot(
+                bot, chat_id=chat_id, message_id=message_id,
+                text="Not enough usable items - send a receipt or /add a few things.")
+            return
+        except Exception as exc:
+            log.warning("cook_pipeline_failed", extra={"error_class": type(exc).__name__})
+            mark_status(session, cook=cook, status="cancelled")
+            return
+        mark_status(session, cook=cook, status="done")
+        text = render_cook_result(cards, show_alternatives=False)
+        keyboard = (to_aiogram_keyboard(build_cook_alternatives_keyboard(cook.id))
+                    if len(cards) > 1 else None)
+        await _safe_edit_bot(
+            bot, chat_id=chat_id, message_id=message_id, text=text, keyboard=keyboard)
 ```
 
 Route cook callbacks: in `handle_callback` (`app/bot.py:801`), the existing `parse_callback` now yields `cook_pick`/`cook_alt`. Add an early dispatch so they reach `handle_cook_callback`. Because `handle_callback`'s signature lacks the cook clients, register a **separate** callback handler in `build_dispatcher` filtered to cook data, OR thread the cook clients through. Simplest, lowest-risk: register a dedicated callback handler before the generic one:
@@ -2459,7 +2596,10 @@ git commit -m "feat(cook): cook-cost stats, /cook help, expired-cook sweep job"
 
 ## Self-review notes (resolved)
 
-- **Spec coverage:** profile (Tasks 1-6) ↔ §7; CookSession state (7-8) ↔ §7; pipeline schemas/stages (9-12) ↔ §6; rendering option-B (13) ↔ §4; rounds + supersede + TTL (8, 15) ↔ §5/§8; failure policy (12, 15) ↔ §8; cost+stats (17) ↔ §9; provider-agnostic selection (16) ↔ §11; web search via existing tool configs (11) ↔ §6.
+- **Spec coverage:** profile (Tasks 1-6) ↔ §7; CookSession state (7-8) ↔ §7; pipeline schemas/stages (9-12) ↔ §6; rendering option-B (13) ↔ §4; rounds + supersede + TTL (8, 15) ↔ §5/§8; failure policy incl. min-items guard, regenerate-once-then-refuse, and per-cook **cost backstop** (12, 15) ↔ §8; per-user provider selection in the cook flow (15) ↔ §11; cost+stats (17) ↔ §9; web search via existing tool configs (11) ↔ §6.
+- **Button options:** static meal-type list + profile-seeded cuisine list, both with "Surprise me", built in code with no extra LLM call (Task 15) ↔ amended §4/§13.
+- **Auth:** `handle_cook_callback` enforces `ALLOWED_TELEGRAM_USER_ID` like `handle_callback` (Task 15).
+- **Concurrency safety:** the pipeline runs in `run_cook_and_render` (own awaitable) and the callback only schedules it via `spawn`; primitives (`user_id`, `user_tz`, `cook_id`) are captured before the session closes — no nested event loop, no detached-instance reads.
 - **Deferred (non-goals, §3):** no recipe-DB API, no RAG, shopping list display-only, no dedup/history, single-provider-per-request, no free-text FSM. None are implemented — correct.
 - **Type consistency:** `SelectedItems.item_ids`, `RecipeCandidate.ingredients[].name`, `ScoredCandidate.{recipe,nutrition,expiry_use,final_score,shopping_list}`, `CallbackAction.option_index`, `LLMBundle.{selection,recipe,nutrition,profile}` are used consistently across tasks. Method names: `select_items` / `fetch_recipes` / `score` / `parse_profile_update` stable from Task 11/4 through Task 16.
 - **Open implementation choice deliberately left to the worker:** exact wording of system prompts (tune against real output) and blend weights (constants in `cook_logic.BLEND_WEIGHTS`).

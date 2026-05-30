@@ -78,12 +78,11 @@ async def run_cook(
     nutrition_llm: NutritionLLMClient,
     today: date,
 ) -> list[ScoredCandidate]:
-    active_items = list_active(
-        session,
-        user_id=cook.user_id,
-        f=ListFilter.default(),
-        today=today,
-    )
+    active_items = [
+        item
+        for item in list_active(session, user_id=cook.user_id, f=ListFilter.default(), today=today)
+        if item.expires_on >= today
+    ]
     if len(active_items) < MIN_USABLE_ITEMS:
         raise NotEnoughItems("not enough active pantry items to cook")
 

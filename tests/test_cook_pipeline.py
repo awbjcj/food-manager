@@ -82,6 +82,21 @@ def test_run_cook_guards_thin_pantry():
         ))
 
 
+def test_run_cook_excludes_expired_items():
+    import asyncio, pytest
+    # MIN_USABLE_ITEMS active rows that are all past their expiry date
+    db, today = _db_with_items(MIN_USABLE_ITEMS, -1)
+    cook = _cook_row(db)
+    with pytest.raises(NotEnoughItems):
+        asyncio.run(run_cook(
+            db, cook=cook, profile=FoodProfile(),
+            selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 0)),
+            recipe_llm=FakeRecipeLLM(canned=(RecipeCandidates(candidates=[]), 0)),
+            nutrition_llm=FakeNutritionLLM(canned=(NutritionScores(scores=[]), 0)),
+            today=today,
+        ))
+
+
 def test_run_cook_ranks_and_filters_allergens():
     import asyncio
     db, today = _db_with_items(4, 2)

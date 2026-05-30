@@ -52,7 +52,9 @@ def test_create_supersedes_previous_active():
         db.refresh(first)
         assert first.status == "cancelled"
         assert second.status == "collecting"
-        assert load_cook_session(db, user_id=1, cook_id=second.id).id == second.id
+        assert second.id is not None
+        loaded = load_cook_session(db, user_id=1, cook_id=second.id)
+        assert loaded is not None and loaded.id == second.id
 
 
 def test_accrue_cost_sums():

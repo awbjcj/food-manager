@@ -35,16 +35,19 @@ class _Msg:
         self.answer = AsyncMock(return_value=type("S", (), {"message_id": 99}))
 
 
+class _CbMessage:
+    def __init__(self, chat_id: int, message_id: int) -> None:
+        self.chat = type("C", (), {"id": chat_id})
+        self.message_id = message_id
+        self.edit_text = AsyncMock()
+        self.answer = AsyncMock()
+
+
 class _Cb:
     def __init__(self, data, user_id=1, chat_id=1, message_id=99):
         self.data = data
         self.from_user = type("U", (), {"id": user_id})
-        self.message = type("M", (), {
-            "chat": type("C", (), {"id": chat_id}),
-            "message_id": message_id,
-            "edit_text": AsyncMock(),
-            "answer": AsyncMock(),
-        })()
+        self.message = _CbMessage(chat_id, message_id)
         self.answer = AsyncMock()
 
 
@@ -78,6 +81,7 @@ def test_cook_first_round_creates_session_and_asks_meal_type(monkeypatch):
         now_provider=lambda tz: datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc),
     ))
     msg.answer.assert_awaited()
+    assert msg.answer.await_args is not None
     keyboard = msg.answer.await_args.kwargs["reply_markup"]
     assert keyboard.inline_keyboard[0][0].callback_data.startswith("cookpick:")
     assert ":meal:" in keyboard.inline_keyboard[0][0].callback_data
@@ -101,6 +105,7 @@ def test_cook_pick_advances_rounds_without_running_pipeline(monkeypatch):
         now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
+        assert cook is not None
         assert cook.meal_type == "Dinner" and cook.cuisine is None
         assert cook.status == "collecting"
     assert spawned == []
@@ -110,6 +115,7 @@ def test_cook_pick_advances_rounds_without_running_pipeline(monkeypatch):
         now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
+        assert cook is not None
         assert cook.cuisine == "Italian" and cook.status == "ready"
     assert len(spawned) == 1
 
@@ -138,6 +144,7 @@ def test_cook_stale_meal_tap_after_round_one_does_not_pick_cuisine(monkeypatch):
     assert spawned == []
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
+        assert cook is not None
         assert cook.meal_type == "Dinner"
         assert cook.cuisine is None
         assert cook.status == "collecting"
@@ -162,6 +169,7 @@ def test_cook_legacy_stale_meal_tap_after_round_one_does_not_pick_cuisine(monkey
     assert spawned == []
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
+        assert cook is not None
         assert cook.meal_type == "Dinner"
         assert cook.cuisine is None
         assert cook.status == "collecting"
@@ -186,6 +194,7 @@ def test_cook_first_round_edit_failure_does_not_commit_meal_type(monkeypatch):
     assert spawned == []
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
+        assert cook is not None
         assert cook.meal_type is None
         assert cook.status == "collecting"
 
@@ -216,6 +225,7 @@ def test_cook_pick_expires_collecting_session_without_spawning(monkeypatch):
     assert spawned == []
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
+        assert cook is not None
         assert cook.status == "expired"
 
 
@@ -270,9 +280,10 @@ def test_run_cook_and_render_completes_and_edits(monkeypatch):
     ))
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
+        assert cook is not None
         assert cook.status == "done"
         assert "Safe" in (cook.candidates_json or "")
-    bot.edit_message_text.assert_awaited()
+    bot.edit_message_text.assert_awaited()  # type: ignore[attr-defined]
 
 
 def test_build_llm_clients_returns_cook_clients(monkeypatch):

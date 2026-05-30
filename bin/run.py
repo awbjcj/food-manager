@@ -79,13 +79,13 @@ def _configure_logging(env: str, level: str) -> None:
 
 @dataclass
 class LLMBundle:
-    image: object
-    text: object
+    image: LLMProviderSelector
+    text: TextLLMProviderSelector
     search: object
-    selection: object
-    recipe: object
-    nutrition: object
-    profile: object
+    selection: SelectionLLMProviderSelector
+    recipe: RecipeLLMProviderSelector
+    nutrition: NutritionLLMProviderSelector
+    profile: ProfileLLMProviderSelector
 
 
 def _build_llm_clients(settings: Settings) -> LLMBundle:

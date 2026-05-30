@@ -179,9 +179,11 @@ def _select_text_llm_client(text_llm: TextLLMClient, provider: str) -> TextLLMCl
     return text_llm
 
 
-def _select_profile_llm(profile_llm: "ProfileUpdateLLMClient", provider: str):
+def _select_profile_llm(
+    profile_llm: "ProfileUpdateLLMClient", provider: str
+) -> "ProfileUpdateLLMClient":
     selector = getattr(profile_llm, "for_provider", None)
-    return selector(provider) if callable(selector) else profile_llm
+    return cast("ProfileUpdateLLMClient", selector(provider)) if callable(selector) else profile_llm
 
 
 def _render_llm_status(user: User, llm: LLMClient, text_llm: TextLLMClient) -> str:
@@ -1062,9 +1064,9 @@ async def handle_cook_callback(
         result = session.exec(
             update(CookSession)
             .where(
-                CookSession.id == cook.id,
-                CookSession.user_id == user.telegram_id,
-                CookSession.status == "collecting",
+                CookSession.id == cook.id,  # type: ignore[arg-type]
+                CookSession.user_id == user.telegram_id,  # type: ignore[arg-type]
+                CookSession.status == "collecting",  # type: ignore[arg-type]
                 CookSession.meal_type.is_not(None),  # type: ignore[union-attr]
                 CookSession.cuisine.is_(None),  # type: ignore[union-attr]
             )
@@ -1074,6 +1076,7 @@ async def handle_cook_callback(
         if result.rowcount == 0:
             await cb.answer("already cooking")
             return
+        assert cook.id is not None
         cook = load_cook_session(session, user_id=user.telegram_id, cook_id=cook.id)
         if cook is None:
             await cb.answer("this cook session expired - start a new /cook")
@@ -1132,9 +1135,9 @@ async def run_cook_and_render(
                 session,
                 cook=cook,
                 profile=profile,
-                selection_llm=selected_selection_llm,
-                recipe_llm=selected_recipe_llm,
-                nutrition_llm=selected_nutrition_llm,
+                selection_llm=selected_selection_llm,  # type: ignore[arg-type]
+                recipe_llm=selected_recipe_llm,  # type: ignore[arg-type]
+                nutrition_llm=selected_nutrition_llm,  # type: ignore[arg-type]
                 today=today,
             )
         except NotEnoughItems:

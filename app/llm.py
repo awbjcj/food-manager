@@ -63,6 +63,10 @@ class ProposedAddItem(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
+class ProposedAddItems(BaseModel):
+    items: list[ProposedAddItem]
+
+
 class LLMClient(Protocol):
     async def extract_items_from_image(
         self,
@@ -92,6 +96,7 @@ class TextLLMClient(Protocol):
 
 
 log = logging.getLogger(__name__)
+LLMProviderName = Literal["anthropic", "openai"]
 
 
 SYSTEM_PROMPT = """You parse grocery receipt photos.
@@ -129,6 +134,12 @@ _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "claude-haiku-4-5-20251001": {"input": 1, "output": 5},
 }
 
+_OPENAI_WEB_SEARCH_TOOL = {
+    "type": "web_search",
+    "search_context_size": "low",
+}
+_OPENAI_REASONING = {"effort": "low"}
+
 
 def _extract_tool_input(message) -> dict:
     for block in message.content:
@@ -153,6 +164,136 @@ def _cost_micros(message, model: str) -> int | None:
         )
     except Exception:
         return None
+
+
+def _usage_dict(message) -> dict[str, Any] | None:
+    usage = getattr(message, "usage", None)
+    if usage is None:
+        return None
+    model_dump = getattr(usage, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump()
+        if isinstance(dumped, dict):
+            return dumped
+    data = {
+        key: getattr(usage, key)
+        for key in ("input_tokens", "output_tokens", "total_tokens")
+        if getattr(usage, key, None) is not None
+    }
+    return data or None
+
+
+def _extract_openai_parsed(response):
+    parsed = getattr(response, "output_parsed", None)
+    if parsed is not None:
+        return parsed
+
+    for output in getattr(response, "output", []) or []:
+        if getattr(output, "type", None) != "message":
+            continue
+        for item in getattr(output, "content", []) or []:
+            refusal = getattr(item, "refusal", None)
+            if getattr(item, "type", None) == "refusal" or refusal:
+                raise ValueError(f"OpenAI refused response: {refusal or ''}".strip())
+            parsed = getattr(item, "parsed", None)
+            if parsed is not None:
+                return parsed
+    raise ValueError("no parsed content in OpenAI response")
+
+
+class LLMProviderNotConfigured(ValueError):
+    pass
+
+
+class LLMProviderSelector(LLMClient):
+    def __init__(
+        self,
+        clients: dict[str, LLMClient],
+        default_provider: LLMProviderName,
+    ):
+        if default_provider not in clients:
+            raise LLMProviderNotConfigured(default_provider)
+        self._clients = clients
+        self._default_provider = default_provider
+
+    @property
+    def available_providers(self) -> tuple[str, ...]:
+        return tuple(sorted(self._clients))
+
+    @property
+    def default_provider(self) -> LLMProviderName:
+        return self._default_provider
+
+    def for_provider(self, provider: str) -> LLMClient:
+        try:
+            return self._clients[provider]
+        except KeyError as exc:
+            raise LLMProviderNotConfigured(provider) from exc
+
+    async def extract_items_from_image(
+        self,
+        image_bytes: bytes,
+        *,
+        image_media_type: str | None = None,
+    ) -> LLMResult:
+        return await self.for_provider(self._default_provider).extract_items_from_image(
+            image_bytes,
+            image_media_type=image_media_type,
+        )
+
+
+class TextLLMProviderSelector(TextLLMClient):
+    def __init__(
+        self,
+        clients: dict[str, TextLLMClient],
+        default_provider: LLMProviderName,
+    ):
+        if default_provider not in clients:
+            raise LLMProviderNotConfigured(default_provider)
+        self._clients = clients
+        self._default_provider = default_provider
+
+    @property
+    def available_providers(self) -> tuple[str, ...]:
+        return tuple(sorted(self._clients))
+
+    @property
+    def default_provider(self) -> LLMProviderName:
+        return self._default_provider
+
+    def for_provider(self, provider: str) -> TextLLMClient:
+        try:
+            return self._clients[provider]
+        except KeyError as exc:
+            raise LLMProviderNotConfigured(provider) from exc
+
+    async def parse_correct(
+        self,
+        *,
+        item_snapshot: dict[str, Any],
+        cache_snapshot: Optional[dict[str, Any]],
+        user_text: str,
+        today: date,
+    ) -> tuple[CorrectionDiff, Optional[int]]:
+        return await self.for_provider(self._default_provider).parse_correct(
+            item_snapshot=item_snapshot,
+            cache_snapshot=cache_snapshot,
+            user_text=user_text,
+            today=today,
+        )
+
+    async def parse_add(
+        self,
+        *,
+        user_text: str,
+        today: date,
+        tz: str,
+    ) -> tuple[list[ProposedAddItem], Optional[int]]:
+        return await self.for_provider(self._default_provider).parse_add(
+            user_text=user_text,
+            today=today,
+            tz=tz,
+        )
 
 
 class AnthropicLLMClient(LLMClient):
@@ -223,6 +364,74 @@ class AnthropicLLMClient(LLMClient):
         )
 
 
+class OpenAILLMClient(LLMClient):
+    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
+        self._sdk = sdk
+        self._model = model
+        self._sleep = sleep
+
+    async def _create_response(self, user_content):
+        for attempt in range(3):
+            try:
+                return await self._sdk.responses.parse(
+                    model=self._model,
+                    input=[
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": user_content},
+                    ],
+                    tools=[_OPENAI_WEB_SEARCH_TOOL],
+                    reasoning=_OPENAI_REASONING,
+                    text_format=ParseResult,
+                    max_output_tokens=2048,
+                )
+            except Exception as exc:
+                if attempt == 2:
+                    log.warning(
+                        "llm_transport_failed_final",
+                        extra={"error_class": type(exc).__name__},
+                    )
+                    raise
+                log.warning(
+                    "llm_transport_failed_retrying",
+                    extra={"error_class": type(exc).__name__},
+                )
+                await self._sleep(2 ** attempt)
+        raise RuntimeError("unreachable")
+
+    async def extract_items_from_image(
+        self,
+        image_bytes: bytes,
+        *,
+        image_media_type: str | None = None,
+    ) -> LLMResult:
+        media_type = image_media_type or _detect_media_type(image_bytes)
+        encoded = base64.b64encode(image_bytes).decode()
+        user_content = [
+            {"type": "input_text", "text": "Parse this receipt."},
+            {
+                "type": "input_image",
+                "image_url": f"data:{media_type};base64,{encoded}",
+                "detail": "high",
+            },
+        ]
+
+        response = await self._create_response(user_content)
+        try:
+            parsed = ParseResult.model_validate(_extract_openai_parsed(response))
+        except Exception as exc:
+            log.warning(
+                "llm_json_validation_failed_final",
+                extra={"error_class": type(exc).__name__, "error": str(exc)},
+            )
+            raise
+
+        return LLMResult(
+            parse=parsed,
+            cost_micros_usd=None,
+            provider_usage=_usage_dict(response),
+        )
+
+
 CORRECTION_SYSTEM_PROMPT = """You parse a user-supplied correction for a single pantry item.
 Return ONLY valid JSON with exactly these snake_case keys. No prose.
 
@@ -264,6 +473,33 @@ the user's typical correction patterns.
 ADD_SYSTEM_PROMPT = """You parse a user-supplied "add to pantry" message into one or
 more discrete items. Return ONLY valid JSON: a list of items matching
 the ProposedAddItem schema.
+
+For each item:
+  - name: clean, expanded ("Oat Milk", not "OM 1/2 gal").
+  - category: one of dairy|produce|meat|seafood|bakery|pantry|frozen|
+              beverage|other. Null if unsure.
+  - qty / unit: as the user stated; default qty=1.0; unit may be null.
+  - explicit_user_expiry: true if the user explicitly stated a shelf
+                          life ("keeps 10 days", "expires June 5"),
+                          else false.
+  - shelf_life_days: integer 1..730 ONLY if explicit_user_expiry is
+                     true. Null otherwise.
+  - expires_on: YYYY-MM-DD if the user stated an absolute date.
+  - estimated_shelf_life_days: conservative food-domain estimate
+                under normal storage, even when the user did not
+                state expiry. Null only if genuinely unknown.
+  - confidence: 0.0-1.0 of your parse.
+
+Comma, semicolon, "and", and newline are valid item separators. Do
+NOT invent items the user didn't mention.
+
+TODO(user): tune separator handling and the "do not invent" guidance
+against the user's typical /add patterns.
+"""
+
+OPENAI_ADD_SYSTEM_PROMPT = """You parse a user-supplied "add to pantry" message into
+one or more discrete items. Return ONLY valid JSON matching the supplied schema:
+an object with an "items" array of ProposedAddItem objects.
 
 For each item:
   - name: clean, expanded ("Oat Milk", not "OM 1/2 gal").
@@ -410,6 +646,85 @@ class AnthropicTextLLMClient(TextLLMClient):
             return [ProposedAddItem.model_validate(item) for item in data]
 
         return await self._call_with_schema(ADD_SYSTEM_PROMPT, user_msg, _parse)
+
+
+class OpenAITextLLMClient(TextLLMClient):
+    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
+        self._sdk = sdk
+        self._model = model
+        self._sleep = sleep
+
+    async def _create_response(self, system: str, user_text: str, text_format):
+        for attempt in range(3):
+            try:
+                return await self._sdk.responses.parse(
+                    model=self._model,
+                    input=[
+                        {"role": "system", "content": system},
+                        {
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": user_text}],
+                        },
+                    ],
+                    tools=[_OPENAI_WEB_SEARCH_TOOL],
+                    reasoning=_OPENAI_REASONING,
+                    text_format=text_format,
+                    max_output_tokens=1024,
+                )
+            except Exception as exc:
+                if attempt == 2:
+                    log.warning(
+                        "text_llm_transport_failed_final",
+                        extra={"error_class": type(exc).__name__},
+                    )
+                    raise
+                log.warning(
+                    "text_llm_transport_failed_retrying",
+                    extra={"error_class": type(exc).__name__},
+                )
+                await self._sleep(2 ** attempt)
+        raise RuntimeError("unreachable")
+
+    async def parse_correct(
+        self,
+        *,
+        item_snapshot,
+        cache_snapshot,
+        user_text,
+        today,
+    ) -> tuple[CorrectionDiff, Optional[int]]:
+        user_msg = json.dumps({
+            "item_snapshot": item_snapshot,
+            "cache_snapshot": cache_snapshot,
+            "today": today.isoformat(),
+            "user_text": user_text,
+        })
+        response = await self._create_response(
+            CORRECTION_SYSTEM_PROMPT,
+            user_msg,
+            CorrectionDiff,
+        )
+        return CorrectionDiff.model_validate(_extract_openai_parsed(response)), None
+
+    async def parse_add(
+        self,
+        *,
+        user_text,
+        today,
+        tz,
+    ) -> tuple[list[ProposedAddItem], Optional[int]]:
+        user_msg = json.dumps({
+            "today": today.isoformat(),
+            "tz": tz,
+            "user_text": user_text,
+        })
+        response = await self._create_response(
+            OPENAI_ADD_SYSTEM_PROMPT,
+            user_msg,
+            ProposedAddItems,
+        )
+        parsed = ProposedAddItems.model_validate(_extract_openai_parsed(response))
+        return parsed.items, None
 
 
 def _detect_media_type(image_bytes: bytes) -> str:

@@ -28,6 +28,7 @@ class User(SQLModel, table=True):
     chat_id: int
     tz: str = "America/Detroit"
     digest_hour: int = 8
+    llm_provider: str = "anthropic"
     created_at: datetime
 
 

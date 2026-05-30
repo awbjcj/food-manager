@@ -94,13 +94,25 @@ def parse_llm_provider(args: Sequence[str]) -> Optional[LLMProviderName]:
     return cast(LLMProviderName, token)
 
 
-Verb = Literal["ate", "toss", "snooze2", "show_all", "apply", "cancel", "undo_receipt", "undo_add"]
+Verb = Literal[
+    "ate",
+    "toss",
+    "snooze2",
+    "show_all",
+    "apply",
+    "cancel",
+    "undo_receipt",
+    "undo_add",
+    "cook_pick",
+    "cook_alt",
+]
 
 
 @dataclass(frozen=True)
 class CallbackAction:
     verb: Verb
     item_id: Optional[int]
+    option_index: Optional[int] = None
 
 
 def parse_callback(data: str) -> CallbackAction:
@@ -123,6 +135,27 @@ def parse_callback(data: str) -> CallbackAction:
         except ValueError as exc:
             raise CommandError(f"bad undo id {raw_id!r}") from exc
         return CallbackAction(verb=cast(Verb, f"undo_{kind}"), item_id=target_id)
+    if data.startswith("cookalt:"):
+        _, _, raw_id = data.partition(":")
+        try:
+            cook_id = int(raw_id)
+        except ValueError as exc:
+            raise CommandError(f"bad cook id {raw_id!r}") from exc
+        return CallbackAction(verb="cook_alt", item_id=cook_id)
+    if data.startswith("cookpick:"):
+        parts = data.split(":")
+        if len(parts) != 3:
+            raise CommandError(f"bad cookpick data {data!r}")
+        _, raw_id, raw_idx = parts
+        try:
+            option_index = int(raw_idx)
+            if option_index < 0:
+                raise CommandError(f"bad cookpick data {data!r}")
+            return CallbackAction(
+                verb="cook_pick", item_id=int(raw_id), option_index=option_index
+            )
+        except ValueError as exc:
+            raise CommandError(f"bad cookpick data {data!r}") from exc
     parts = data.split(":")
     if len(parts) != 3 or parts[0] != "act":
         raise CommandError(f"unrecognized callback data {data!r}")

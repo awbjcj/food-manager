@@ -3,10 +3,13 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import sqlalchemy as sa
 from sqlmodel import SQLModel, Session, create_engine
 
+import app.bot as bot_mod
+from app.bot import handle_prefs
 from app.models import User
 from app.profile_service import (
     FoodProfile,
@@ -14,6 +17,7 @@ from app.profile_service import (
     profile_from_user,
     update_profile_from_sentence,
 )
+from app.renderer import render_profile
 from tests.fakes import FakeProfileLLMClient
 
 
@@ -80,6 +84,18 @@ def test_profile_defaults_from_blank_user():
     assert profile_from_user(user) == FoodProfile()
 
 
+def test_render_profile_shows_fields():
+    text = render_profile(FoodProfile(
+        diet="vegetarian", exclusions=["peanut"], preferred_cuisines=["chinese"],
+        max_cook_minutes=30, household_size=2, note="spicy ok",
+    ))
+    assert "vegetarian" in text
+    assert "peanut" in text
+    assert "chinese" in text
+    assert "30" in text
+    assert "spicy ok" in text
+
+
 def test_fake_profile_client_returns_merged_profile():
     merged = FoodProfile(diet="vegan", exclusions=["peanut"])
     fake = FakeProfileLLMClient(canned=(merged, 42))
@@ -115,6 +131,46 @@ def test_update_profile_persists_merge_and_keeps_allergy_structured():
         db.refresh(user)
         assert profile_from_user(user) == merged
         assert "peanut" in profile.exclusions
+
+
+class _Msg:
+    def __init__(self, text, user_id=1, chat_id=1):
+        self.text = text
+        self.from_user = type("U", (), {"id": user_id})
+        self.chat = type("C", (), {"id": chat_id, "type": "private"})
+        self.answer = AsyncMock()
+
+
+def test_handle_prefs_no_args_shows_profile(monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        db.commit()
+    msg = _Msg("/prefs")
+    fake = FakeProfileLLMClient(canned=(FoodProfile(), None))
+    asyncio.run(handle_prefs(
+        msg, session_factory=lambda: Session(engine), profile_llm=fake,
+    ))
+    assert "food profile" in msg.answer.call_args[0][0].lower()
+    assert fake.calls == []
+
+
+def test_handle_prefs_with_sentence_updates(monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        db.commit()
+    msg = _Msg("/prefs I'm vegan")
+    fake = FakeProfileLLMClient(canned=(FoodProfile(diet="vegan"), None))
+    asyncio.run(handle_prefs(
+        msg, session_factory=lambda: Session(engine), profile_llm=fake,
+    ))
+    assert fake.calls[0]["sentence"] == "I'm vegan"
+    assert "vegan" in msg.answer.call_args[0][0]
 
 
 def _env():

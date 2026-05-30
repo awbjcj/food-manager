@@ -35,7 +35,12 @@ from app.correction_service import (
     propose_correct,
 )
 from app.ingest_service import DuplicateReceipt, ingest_photo
-from app.llm import LLMClient, LLMProviderNotConfigured, TextLLMClient
+from app.llm import (
+    LLMClient,
+    LLMProviderNotConfigured,
+    ProfileUpdateLLMClient,
+    TextLLMClient,
+)
 from app.models import PantryItem, User
 from app.refine_service import run_receipt_refine
 from app.pantry_service import (
@@ -72,10 +77,12 @@ from app.renderer import (
     render_digest,
     render_ingest_reply,
     render_list,
+    render_profile,
     render_stats,
     render_terminal_state,
     render_undo_result,
 )
+from app.profile_service import profile_from_user, update_profile_from_sentence
 
 DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8
@@ -155,6 +162,11 @@ def _select_text_llm_client(text_llm: TextLLMClient, provider: str) -> TextLLMCl
     if callable(selector):
         return cast(TextLLMClient, selector(provider))
     return text_llm
+
+
+def _select_profile_llm(profile_llm: "ProfileUpdateLLMClient", provider: str):
+    selector = getattr(profile_llm, "for_provider", None)
+    return selector(provider) if callable(selector) else profile_llm
 
 
 def _render_llm_status(user: User, llm: LLMClient, text_llm: TextLLMClient) -> str:
@@ -664,6 +676,44 @@ async def handle_llm(
         await msg.answer(f"LLM provider set to {provider}")
 
 
+async def handle_prefs(
+    msg,
+    *,
+    session_factory,
+    profile_llm: ProfileUpdateLLMClient,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+):
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        parts = (msg.text or "").split(maxsplit=1)
+        if len(parts) != 2 or not parts[1].strip():
+            await msg.answer(render_profile(profile_from_user(user)))
+            return
+        try:
+            selected = _select_profile_llm(profile_llm, user.llm_provider)
+            profile, _ = await update_profile_from_sentence(
+                session, llm=selected, user=user, sentence=parts[1].strip(),
+            )
+        except LLMProviderNotConfigured:
+            await msg.answer(
+                f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
+            )
+            return
+        except Exception as exc:
+            log.warning(
+                "prefs_update_failed",
+                extra={
+                    "user_id": user.telegram_id,
+                    "error_class": type(exc).__name__,
+                },
+            )
+            await msg.answer("couldn't update your profile - try simpler wording")
+            return
+        await msg.answer("Updated.\n\n" + render_profile(profile))
+
+
 HELP_TEXT = (
     "Commands:\n"
     "  /start - setup status\n"
@@ -682,6 +732,7 @@ HELP_TEXT = (
     "  /delete <id> - remove a wrong/duplicate import\n"
     "  /stats - last 30 days\n"
     "  /llm [anthropic|openai] - show or switch LLM provider\n"
+    "  /prefs [sentence] - show or update your food profile\n"
     "  /help - this message\n"
     "Send a receipt photo to log it."
 )
@@ -1091,6 +1142,7 @@ def build_dispatcher(
     session_factory: _SessionFactory,
     llm: LLMClient,
     text_llm: TextLLMClient,
+    profile_llm: ProfileUpdateLLMClient,
     now_provider: NowProvider,
     on_user_created: Callable[[User], None],
     reschedule: Callable[[User], None],
@@ -1198,6 +1250,14 @@ def build_dispatcher(
             on_user_created=on_user_created,
         )
 
+    async def on_prefs(message):
+        await handle_prefs(
+            message,
+            session_factory=session_factory,
+            profile_llm=profile_llm,
+            on_user_created=on_user_created,
+        )
+
     async def on_help(message):
         await handle_help(
             message,
@@ -1235,6 +1295,7 @@ def build_dispatcher(
     dispatcher.message.register(on_correct, Command("correct"))
     dispatcher.message.register(on_stats, Command("stats"))
     dispatcher.message.register(on_llm, Command("llm"))
+    dispatcher.message.register(on_prefs, Command("prefs"))
     dispatcher.message.register(on_help, Command("help"))
     dispatcher.message.register(on_photo, F.photo)
     dispatcher.callback_query.register(on_callback)

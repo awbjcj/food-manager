@@ -26,7 +26,7 @@ from app.scheduler import (
     schedule_user_digest,
     send_digest_once,
 )
-from tests.fakes import FakeLLMClient, FakeTextLLMClient
+from tests.fakes import FakeLLMClient, FakeProfileLLMClient, FakeTextLLMClient
 
 
 @pytest.fixture
@@ -275,6 +275,7 @@ def test_build_dispatcher_imports_and_registers():
         session_factory=lambda: MagicMock(),
         llm=fake_llm,
         text_llm=FakeTextLLMClient(),
+        profile_llm=FakeProfileLLMClient(),
         now_provider=lambda tz: datetime.now(timezone.utc),
         on_user_created=lambda user: None,
         reschedule=lambda user: None,

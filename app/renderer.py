@@ -6,6 +6,7 @@ from datetime import date, timedelta
 from app.correction_service import AddPayload, CorrectPayload
 from app.ingest_service import IngestSummary
 from app.pantry_service import Stats
+from app.profile_service import FoodProfile
 
 
 def _fmt_date(value: date, *, today: date) -> str:
@@ -350,3 +351,20 @@ def render_stats(stats: Stats) -> str:
     )
     lines.append(f"Waste rate: {waste_rate}")
     return "\n".join(lines)
+
+
+def render_profile(profile: FoodProfile) -> str:
+    exclusions = ", ".join(profile.exclusions) or "none"
+    cuisines = ", ".join(profile.preferred_cuisines) or "any"
+    cook = f"{profile.max_cook_minutes} min" if profile.max_cook_minutes else "no limit"
+    note = profile.note or "(none)"
+    return (
+        "Your food profile:\n"
+        f"  Diet: {profile.diet}\n"
+        f"  Avoid: {exclusions}\n"
+        f"  Cuisines: {cuisines}\n"
+        f"  Max cook time: {cook}\n"
+        f"  Household size: {profile.household_size}\n"
+        f"  Notes: {note}\n"
+        "Update by typing: /prefs <sentence>  (e.g. /prefs I'm vegan, no peanuts)"
+    )

@@ -29,7 +29,8 @@ def _engine_with_user():
     return engine
 
 
-_NOW = lambda tz: datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+def _NOW(tz):
+    return datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
 
 
 def test_shopping_lists_pending_with_buttons(monkeypatch):
@@ -39,7 +40,6 @@ def test_shopping_lists_pending_with_buttons(monkeypatch):
         add_missing(db, user_id=1, ingredients=[RecipeIngredient(name="Eggs")], now=_NOW("x"))
     asyncio.run(handle_shopping(
         _Msg(), session_factory=lambda: Session(engine), now_provider=_NOW))
-    msg_text = _Msg().answer  # not used; assert via call below
 
 
 def test_shopping_handler_renders_items(monkeypatch):

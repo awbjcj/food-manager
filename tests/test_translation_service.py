@@ -1,7 +1,19 @@
+import json
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from sqlmodel import Session, SQLModel, create_engine
+
 from app.models import NameTranslation
+from app.translation_llm import (
+    AnthropicTranslationLLMClient,
+    OpenAITranslationLLMClient,
+    TranslationList,
+    TranslationLLMProviderSelector,
+)
 from app.translation_service import translate_texts
 from tests.fakes import FakeTranslationLLM
+from tests.test_v1_5_llm import _OpenAIParsedResponse, _TextResponse
 
 
 def _session() -> Session:
@@ -89,3 +101,43 @@ async def test_count_mismatch_falls_back_to_english():
         out = await translate_texts(s, ["Milk", "Eggs"], lang="zh", llm=_ShortLLM())
         assert out == {"Milk": "Milk", "Eggs": "Eggs"}      # both fall back to English
         assert s.get(NameTranslation, ("zh", "Milk")) is None  # nothing cached
+
+
+async def test_anthropic_translation_parses_json_array():
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(return_value=_TextResponse(json.dumps(["牛奶", "鸡蛋"])))
+    client = AnthropicTranslationLLMClient(sdk=sdk, model="claude-haiku-4-5-20251001")
+    out, cost = await client.translate(texts=["Milk", "Eggs"], lang="zh")
+    assert out == ["牛奶", "鸡蛋"]
+    assert cost == 500
+
+
+async def test_anthropic_translation_rejects_non_array():
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(return_value=_TextResponse(json.dumps({"not": "an array"})))
+    client = AnthropicTranslationLLMClient(sdk=sdk, model="claude-haiku-4-5-20251001")
+    with pytest.raises(ValueError):
+        await client.translate(texts=["Milk"], lang="zh")
+
+
+async def test_openai_translation_parses_items():
+    parsed = TranslationList(items=["牛奶", "鸡蛋"])
+    sdk = MagicMock()
+    sdk.responses.parse = AsyncMock(return_value=_OpenAIParsedResponse(parsed))
+    client = OpenAITranslationLLMClient(sdk=sdk, model="gpt-5.4-mini")
+    out, cost = await client.translate(texts=["Milk", "Eggs"], lang="zh")
+    assert out == ["牛奶", "鸡蛋"]
+    assert cost == 420
+
+
+async def test_selector_delegates_to_default_provider():
+    fake = FakeTranslationLLM(table={"Milk": "牛奶"})
+    sel = TranslationLLMProviderSelector({"anthropic": fake}, "anthropic")
+    out, _ = await sel.translate(texts=["Milk"], lang="zh")
+    assert out == ["牛奶"]
+
+
+def test_selector_rejects_unconfigured_default():
+    from app.llm import LLMProviderNotConfigured
+    with pytest.raises(LLMProviderNotConfigured):
+        TranslationLLMProviderSelector({}, "anthropic")

@@ -53,6 +53,11 @@ from app.llm import (
     SelectionLLMProviderSelector,
     TextLLMProviderSelector,
 )
+from app.translation_llm import (
+    AnthropicTranslationLLMClient,
+    OpenAITranslationLLMClient,
+    TranslationLLMProviderSelector,
+)
 from app.refine_service import AnthropicSearchClient
 from app.scheduler import (
     register_all_user_digests,
@@ -86,6 +91,7 @@ class LLMBundle:
     recipe: RecipeLLMProviderSelector
     nutrition: NutritionLLMProviderSelector
     profile: ProfileLLMProviderSelector
+    translation: object
 
 
 def _build_llm_clients(settings: Settings) -> LLMBundle:
@@ -95,6 +101,7 @@ def _build_llm_clients(settings: Settings) -> LLMBundle:
     selection_clients = {}
     recipe_clients = {}
     nutrition_clients = {}
+    translation_clients: dict = {}
     search = None
 
     if settings.anthropic_api_key:
@@ -119,6 +126,9 @@ def _build_llm_clients(settings: Settings) -> LLMBundle:
         )
         nutrition_clients["anthropic"] = AnthropicNutritionLLM(
             anthropic_sdk, settings.anthropic_model
+        )
+        translation_clients["anthropic"] = AnthropicTranslationLLMClient(
+            anthropic_sdk, settings.anthropic_text_model
         )
         search = AnthropicSearchClient(
             sdk=anthropic_sdk,
@@ -150,6 +160,15 @@ def _build_llm_clients(settings: Settings) -> LLMBundle:
         nutrition_clients["openai"] = OpenAINutritionLLM(
             openai_sdk, settings.openai_model
         )
+        translation_clients["openai"] = OpenAITranslationLLMClient(
+            openai_sdk, settings.openai_text_model
+        )
+
+    translation_llm = (
+        TranslationLLMProviderSelector(translation_clients, settings.llm_provider)
+        if translation_clients
+        else None
+    )
 
     return LLMBundle(
         image=LLMProviderSelector(image_clients, settings.llm_provider),
@@ -159,6 +178,7 @@ def _build_llm_clients(settings: Settings) -> LLMBundle:
         recipe=RecipeLLMProviderSelector(recipe_clients, settings.llm_provider),
         nutrition=NutritionLLMProviderSelector(nutrition_clients, settings.llm_provider),
         profile=ProfileLLMProviderSelector(profile_clients, settings.llm_provider),
+        translation=translation_llm,
     )
 
 
@@ -215,8 +235,7 @@ async def _amain(settings: Settings) -> None:
 
     scheduler = AsyncIOScheduler()
 
-    # TODO(task19): pass the translation selector here once built
-    _translation_llm = None
+    translation_llm = bundle.translation
 
     async def send(user_id: int) -> None:
         await send_digest_with_retry(
@@ -224,7 +243,7 @@ async def _amain(settings: Settings) -> None:
             bot=bot,
             session_factory=session_factory,
             today_provider=lambda tz: datetime.now(ZoneInfo(tz)).date(),
-            translation_llm=_translation_llm,
+            translation_llm=translation_llm,
         )
 
     register_all_user_digests(scheduler, session_factory=session_factory, send=send)
@@ -247,6 +266,7 @@ async def _amain(settings: Settings) -> None:
         now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
         on_user_created=reschedule,
         reschedule=reschedule,
+        translation_llm=translation_llm,
     )
 
     scheduler.start()

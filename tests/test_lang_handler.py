@@ -63,3 +63,38 @@ async def test_lang_rejects_unknown(session_factory, monkeypatch):
     assert "usage" in answer_text.lower()
     with session_factory() as db:
         assert db.get(User, 1).lang == "en"  # unchanged
+
+
+async def test_help_zh_returns_translated_text(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    # Set user lang to zh first
+    with session_factory() as db:
+        user = db.get(User, 1)
+        user.lang = "zh"
+        db.add(user)
+        db.commit()
+    msg = _msg("/help")
+    await bot_mod.handle_help(msg, session_factory=session_factory)
+    answer_text = msg.answer.call_args.args[0]
+    # zh help should contain Chinese characters
+    assert "命令" in answer_text
+    assert "/help" in answer_text
+    assert "/lang" in answer_text
+
+
+async def test_start_zh_returns_translated_text(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    # Set user lang to zh first
+    with session_factory() as db:
+        user = db.get(User, 1)
+        user.lang = "zh"
+        db.add(user)
+        db.commit()
+    msg = _msg("/start")
+    await bot_mod.handle_start(
+        msg, session_factory=session_factory, on_user_created=lambda u: None
+    )
+    answer_text = msg.answer.call_args.args[0]
+    # zh start should contain Chinese characters and the timezone placeholder filled
+    assert "已就绪" in answer_text
+    assert "/help" in answer_text

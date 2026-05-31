@@ -293,11 +293,7 @@ async def handle_start(
         if decision.created:
             on_user_created(user)
         await msg.answer(
-            "Pantry bot ready.\n"
-            f"Timezone: {user.tz} (change with /tz <IANA>)\n"
-            f"Daily digest hour: {user.digest_hour}:00 "
-            "(change with /digest_at <0..23>)\n"
-            "Type /help to see all commands."
+            t("start.ready", user.lang, tz=user.tz, digest_hour=user.digest_hour)
         )
 
 
@@ -900,34 +896,10 @@ async def handle_prefs(
             )
             await msg.answer("couldn't update your profile - try simpler wording")
             return
-        await msg.answer("Updated.\n\n" + render_profile(profile, lang=user.lang))
+        await msg.answer(t("prefs.updated", user.lang) + "\n\n" + render_profile(profile, lang=user.lang))
 
 
-HELP_TEXT = (
-    "Commands:\n"
-    "  /start - setup status\n"
-    "  /tz <IANA> - set timezone\n"
-    "  /digest_at <0..23> - set digest hour\n"
-    "  /list [category|week|expired] - show pantry\n"
-    "  /add <free text> - propose new items in natural language.\n"
-    "      Replies with a diff per item; tap Apply or Cancel.\n"
-    "      Proposals expire after 10 min.\n"
-    "  /ate <id> - mark eaten\n"
-    "  /toss <id> - mark tossed\n"
-    "  /snooze <id> [days=2] - suppress reminders 1..30d\n"
-    "  /correct <id> <free text> - propose a correction in natural\n"
-    "      language (name, category, expires, days). Replies with a\n"
-    "      diff; tap Apply or Cancel. Proposal expires after 10 min.\n"
-    "  /delete <id> - remove a wrong/duplicate import\n"
-    "  /stats - last 30 days\n"
-    "  /llm [anthropic|openai] - show or switch LLM provider\n"
-    "  /prefs [sentence] - show or update your food profile\n"
-    "  /cook - get a recipe from your pantry\n"
-    "  /shopping - view your to-buy list; tap an item when bought\n"
-    "  /favorites - view saved recipes; tap to re-cook against your pantry\n"
-    "  /help - this message\n"
-    "Send a receipt photo to log it."
-)
+HELP_TEXT = t("help.body", "en")
 
 
 async def handle_help(
@@ -940,7 +912,7 @@ async def handle_help(
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
-    await msg.answer(HELP_TEXT)
+    await msg.answer(t("help.body", user.lang))
 
 
 async def handle_photo(
@@ -1820,7 +1792,7 @@ async def _refresh_digest_message(
             )
         return
     try:
-        await cb.message.edit_text("Pantry is clear for the next 7 days.")
+        await cb.message.edit_text(t("digest.pantry_clear", lang))
     except Exception as exc:
         log.warning(
             "digest_edit_failed",

@@ -481,6 +481,159 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "{minutes} min",
         "es": "{minutes} min",
     },
+    # -----------------------------------------------------------------------
+    # /help and /start (Task 19)
+    # -----------------------------------------------------------------------
+    "help.body": {
+        "en": (
+            "Commands:\n"
+            "  /start - setup status\n"
+            "  /tz <IANA> - set timezone\n"
+            "  /lang [en|zh|fr|es] - set your language\n"
+            "  /digest_at <0..23> - set digest hour\n"
+            "  /list [category|week|expired] - show pantry\n"
+            "  /add <free text> - propose new items in natural language.\n"
+            "      Replies with a diff per item; tap Apply or Cancel.\n"
+            "      Proposals expire after 10 min.\n"
+            "  /ate <id> - mark eaten\n"
+            "  /toss <id> - mark tossed\n"
+            "  /snooze <id> [days=2] - suppress reminders 1..30d\n"
+            "  /correct <id> <free text> - propose a correction in natural\n"
+            "      language (name, category, expires, days). Replies with a\n"
+            "      diff; tap Apply or Cancel. Proposal expires after 10 min.\n"
+            "  /delete <id> - remove a wrong/duplicate import\n"
+            "  /stats - last 30 days\n"
+            "  /llm [anthropic|openai] - show or switch LLM provider\n"
+            "  /prefs [sentence] - show or update your food profile\n"
+            "  /cook - get a recipe from your pantry\n"
+            "  /shopping - view your to-buy list; tap an item when bought\n"
+            "  /favorites - view saved recipes; tap to re-cook against your pantry\n"
+            "  /help - this message\n"
+            "Send a receipt photo to log it."
+        ),
+        "zh": (
+            "命令列表：\n"
+            "  /start - 查看设置状态\n"
+            "  /tz <IANA> - 设置时区\n"
+            "  /lang [en|zh|fr|es] - 设置语言\n"
+            "  /digest_at <0..23> - 设置每日摘要时间\n"
+            "  /list [category|week|expired] - 显示食品储藏\n"
+            "  /add <自然语言> - 以自然语言提议添加食品。\n"
+            "      每项显示差异；点击应用或取消。\n"
+            "      提议10分钟后过期。\n"
+            "  /ate <id> - 标记为已食用\n"
+            "  /toss <id> - 标记为已丢弃\n"
+            "  /snooze <id> [days=2] - 暂停提醒 1..30天\n"
+            "  /correct <id> <自然语言> - 以自然语言提议更正\n"
+            "      （名称、类别、到期日、天数）。显示差异；\n"
+            "      点击应用或取消。提议10分钟后过期。\n"
+            "  /delete <id> - 删除错误/重复导入\n"
+            "  /stats - 最近30天统计\n"
+            "  /llm [anthropic|openai] - 显示或切换LLM提供商\n"
+            "  /prefs [语句] - 显示或更新您的饮食档案\n"
+            "  /cook - 从您的储藏获取食谱\n"
+            "  /shopping - 查看待购清单；点击已购买的物品\n"
+            "  /favorites - 查看已保存食谱；点击重新烹饪\n"
+            "  /help - 本消息\n"
+            "发送收据照片以记录。"
+        ),
+        "fr": (
+            "Commandes :\n"
+            "  /start - état de la configuration\n"
+            "  /tz <IANA> - définir le fuseau horaire\n"
+            "  /lang [en|zh|fr|es] - définir votre langue\n"
+            "  /digest_at <0..23> - heure du résumé quotidien\n"
+            "  /list [category|week|expired] - afficher le garde-manger\n"
+            "  /add <texte libre> - proposer de nouveaux articles en langage naturel.\n"
+            "      Répond avec un diff par article ; appuyez sur Appliquer ou Annuler.\n"
+            "      Les propositions expirent après 10 min.\n"
+            "  /ate <id> - marquer comme mangé\n"
+            "  /toss <id> - marquer comme jeté\n"
+            "  /snooze <id> [days=2] - suspendre les rappels 1..30j\n"
+            "  /correct <id> <texte libre> - proposer une correction en langage\n"
+            "      naturel (nom, catégorie, expiration, jours). Répond avec un diff ;\n"
+            "      appuyez sur Appliquer ou Annuler. Expire après 10 min.\n"
+            "  /delete <id> - supprimer une importation erronée/dupliquée\n"
+            "  /stats - 30 derniers jours\n"
+            "  /llm [anthropic|openai] - afficher ou changer de fournisseur LLM\n"
+            "  /prefs [phrase] - afficher ou mettre à jour votre profil alimentaire\n"
+            "  /cook - obtenir une recette depuis votre garde-manger\n"
+            "  /shopping - voir votre liste de courses ; appuyez sur un article acheté\n"
+            "  /favorites - voir les recettes sauvegardées ; appuyez pour recuire\n"
+            "  /help - ce message\n"
+            "Envoyez une photo de reçu pour l'enregistrer."
+        ),
+        "es": (
+            "Comandos:\n"
+            "  /start - estado de configuración\n"
+            "  /tz <IANA> - establecer zona horaria\n"
+            "  /lang [en|zh|fr|es] - establecer tu idioma\n"
+            "  /digest_at <0..23> - hora del resumen diario\n"
+            "  /list [category|week|expired] - mostrar despensa\n"
+            "  /add <texto libre> - proponer nuevos artículos en lenguaje natural.\n"
+            "      Responde con un diff por artículo; toca Aplicar o Cancelar.\n"
+            "      Las propuestas expiran después de 10 min.\n"
+            "  /ate <id> - marcar como comido\n"
+            "  /toss <id> - marcar como tirado\n"
+            "  /snooze <id> [days=2] - suspender recordatorios 1..30d\n"
+            "  /correct <id> <texto libre> - proponer una corrección en lenguaje\n"
+            "      natural (nombre, categoría, vencimiento, días). Responde con un\n"
+            "      diff; toca Aplicar o Cancelar. Expira después de 10 min.\n"
+            "  /delete <id> - eliminar una importación errónea/duplicada\n"
+            "  /stats - últimos 30 días\n"
+            "  /llm [anthropic|openai] - mostrar o cambiar proveedor LLM\n"
+            "  /prefs [frase] - mostrar o actualizar tu perfil alimentario\n"
+            "  /cook - obtener una receta de tu despensa\n"
+            "  /shopping - ver tu lista de compras; toca un artículo comprado\n"
+            "  /favorites - ver recetas guardadas; toca para volver a cocinar\n"
+            "  /help - este mensaje\n"
+            "Envía una foto de un recibo para registrarlo."
+        ),
+    },
+    "start.ready": {
+        "en": (
+            "Pantry bot ready.\n"
+            "Timezone: {tz} (change with /tz <IANA>)\n"
+            "Daily digest hour: {digest_hour}:00 "
+            "(change with /digest_at <0..23>)\n"
+            "Type /help to see all commands."
+        ),
+        "zh": (
+            "食品储藏机器人已就绪。\n"
+            "时区：{tz}（使用 /tz <IANA> 更改）\n"
+            "每日摘要时间：{digest_hour}:00（使用 /digest_at <0..23> 更改）\n"
+            "输入 /help 查看所有命令。"
+        ),
+        "fr": (
+            "Bot garde-manger prêt.\n"
+            "Fuseau horaire : {tz} (changez avec /tz <IANA>)\n"
+            "Heure du résumé quotidien : {digest_hour}:00 "
+            "(changez avec /digest_at <0..23>)\n"
+            "Tapez /help pour voir toutes les commandes."
+        ),
+        "es": (
+            "Bot de despensa listo.\n"
+            "Zona horaria: {tz} (cambia con /tz <IANA>)\n"
+            "Hora del resumen diario: {digest_hour}:00 "
+            "(cambia con /digest_at <0..23>)\n"
+            "Escribe /help para ver todos los comandos."
+        ),
+    },
+    # -----------------------------------------------------------------------
+    # Localized confirmations (Task 19 Part C)
+    # -----------------------------------------------------------------------
+    "prefs.updated": {
+        "en": "Updated.",
+        "zh": "已更新。",
+        "fr": "Mis à jour.",
+        "es": "Actualizado.",
+    },
+    "digest.pantry_clear": {
+        "en": "Pantry is clear for the next 7 days.",
+        "zh": "未来7天食品储藏无到期提醒。",
+        "fr": "Le garde-manger est vide pour les 7 prochains jours.",
+        "es": "La despensa está despejada para los próximos 7 días.",
+    },
 }
 
 

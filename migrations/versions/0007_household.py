@@ -65,6 +65,21 @@ def upgrade() -> None:
         "(SELECT household_id FROM user WHERE user.telegram_id = shelflifecache.user_id)"
     ))
 
+    # Every shared row must map to a household. A leftover NULL means an orphaned
+    # row (user_id with no surviving user); fail loudly now rather than with a
+    # cryptic NOT NULL error mid-rebuild. (shelflifecache orphans are intentionally
+    # dropped below — it's a regenerable cache, not user data.)
+    for tbl in _SIMPLE:
+        orphans = bind.execute(sa.text(
+            f"SELECT COUNT(*) FROM {tbl} WHERE household_id IS NULL"
+        )).scalar()
+        if orphans:
+            raise RuntimeError(
+                f"0007 aborted: {orphans} row(s) in '{tbl}' have a user_id with no "
+                f"matching user and cannot be assigned a household_id. "
+                f"Remove or re-own them, then re-run."
+            )
+
     with op.batch_alter_table("user") as b:
         b.alter_column("household_id", existing_type=sa.Integer(), nullable=False)
         b.create_foreign_key("fk_user_household", "household", ["household_id"], ["id"])

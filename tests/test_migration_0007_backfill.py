@@ -53,3 +53,60 @@ def test_existing_user_and_rows_migrate_into_solo_household(tmp_path, monkeypatc
     pcols = {r[1] for r in cur.execute("PRAGMA table_info('pantryitem')").fetchall()}
     assert "user_id" not in pcols and "household_id" in pcols
     con.close()
+
+
+def test_two_users_get_distinct_households(tmp_path, monkeypatch):
+    db = tmp_path / "m2.db"
+    _run_to(db, monkeypatch, "0006_cook_v35")
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "INSERT INTO user (telegram_id, chat_id, tz, digest_hour, llm_provider, "
+        "diet, exclusions_json, preferred_cuisines_json, max_cook_minutes, "
+        "household_size, profile_note, created_at) VALUES "
+        "(1, 1, 'America/New_York', 8, 'anthropic', 'vegan', '[]', '[]', "
+        "NULL, 1, '', '2026-05-01T00:00:00')"
+    )
+    con.execute(
+        "INSERT INTO user (telegram_id, chat_id, tz, digest_hour, llm_provider, "
+        "diet, exclusions_json, preferred_cuisines_json, max_cook_minutes, "
+        "household_size, profile_note, created_at) VALUES "
+        "(2, 2, 'America/Chicago', 8, 'anthropic', 'keto', '[]', '[]', "
+        "NULL, 1, '', '2026-05-01T00:00:00')"
+    )
+    con.execute(
+        "INSERT INTO pantryitem (user_id, raw_name, normalized_name, category, qty, "
+        "purchased_on, shelf_life_days, shelf_life_source, ingest_shelf_life_source, "
+        "expires_on, status, created_via, created_at) VALUES "
+        "(1, 'Tofu', 'tofu', 'protein', 1.0, '2026-05-01', 7, 'llm', 'llm', "
+        "'2026-05-08', 'active', 'receipt', '2026-05-01T00:00:00')"
+    )
+    con.execute(
+        "INSERT INTO pantryitem (user_id, raw_name, normalized_name, category, qty, "
+        "purchased_on, shelf_life_days, shelf_life_source, ingest_shelf_life_source, "
+        "expires_on, status, created_via, created_at) VALUES "
+        "(2, 'Bacon', 'bacon', 'meat', 1.0, '2026-05-01', 7, 'llm', 'llm', "
+        "'2026-05-08', 'active', 'receipt', '2026-05-01T00:00:00')"
+    )
+    con.commit()
+    con.close()
+
+    _run_to(db, monkeypatch, "head")
+
+    con = sqlite3.connect(str(db))
+    cur = con.cursor()
+    hh = cur.execute("SELECT id, diet FROM household ORDER BY id").fetchall()
+    assert len(hh) == 2
+    diets = {diet for _, diet in hh}
+    assert diets == {"vegan", "keto"}
+
+    hid_by_diet = {diet: hid for hid, diet in hh}
+    tofu_hid = cur.execute(
+        "SELECT household_id FROM pantryitem WHERE raw_name='Tofu'"
+    ).fetchone()[0]
+    bacon_hid = cur.execute(
+        "SELECT household_id FROM pantryitem WHERE raw_name='Bacon'"
+    ).fetchone()[0]
+    assert tofu_hid == hid_by_diet["vegan"]
+    assert bacon_hid == hid_by_diet["keto"]
+    assert tofu_hid != bacon_hid
+    con.close()

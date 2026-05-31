@@ -13,11 +13,11 @@ COOK_TTL_MINUTES = 10
 ALLOWED_COOK_STATUSES = {"collecting", "ready", "done", "cancelled", "expired"}
 
 
-def supersede_active(session: Session, *, user_id: int) -> int:
+def supersede_active(session: Session, *, household_id: int) -> int:
     rows = list(
         session.exec(
             select(CookSession).where(
-                CookSession.user_id == user_id,
+                CookSession.household_id == household_id,
                 CookSession.status.in_(("collecting", "ready")),  # type: ignore[attr-defined]
             )
         ).all()
@@ -31,12 +31,12 @@ def supersede_active(session: Session, *, user_id: int) -> int:
 
 
 def create_cook_session(
-    session: Session, *, user_id: int, chat_id: int, now: datetime
+    session: Session, *, household_id: int, chat_id: int, now: datetime
 ) -> CookSession:
-    supersede_active(session, user_id=user_id)
+    supersede_active(session, household_id=household_id)
     created = utc_naive(now)
     row = CookSession(
-        user_id=user_id,
+        household_id=household_id,
         status="collecting",
         chat_id=chat_id,
         selected_item_ids="[]",
@@ -50,10 +50,10 @@ def create_cook_session(
 
 
 def load_cook_session(
-    session: Session, *, user_id: int, cook_id: int
+    session: Session, *, household_id: int, cook_id: int
 ) -> Optional[CookSession]:
     row = session.get(CookSession, cook_id)
-    if row is None or row.user_id != user_id:
+    if row is None or row.household_id != household_id:
         return None
     return row
 

@@ -16,14 +16,18 @@ from app.cook_session_service import (
     mark_status,
     sweep_expired_cooks,
 )
-from app.models import CookSession, User
+from app.models import CookSession, Household, User
 
 
 def _session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     db = Session(engine)
-    db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+    household = Household(created_at=datetime.now(timezone.utc))
+    db.add(household)
+    db.commit()
+    db.refresh(household)
+    db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
     db.commit()
     return db
 
@@ -32,7 +36,7 @@ def test_cook_session_row_persists():
     with _session() as db:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         row = CookSession(
-            user_id=1, status="collecting", chat_id=1,
+            household_id=1, status="collecting", chat_id=1,
             selected_item_ids="[]", created_at=now,
             expires_at=now + timedelta(minutes=10),
         )
@@ -47,20 +51,20 @@ def test_cook_session_row_persists():
 def test_create_supersedes_previous_active():
     with _session() as db:
         now = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
-        first = create_cook_session(db, user_id=1, chat_id=1, now=now)
-        second = create_cook_session(db, user_id=1, chat_id=1, now=now)
+        first = create_cook_session(db, household_id=1, chat_id=1, now=now)
+        second = create_cook_session(db, household_id=1, chat_id=1, now=now)
         db.refresh(first)
         assert first.status == "cancelled"
         assert second.status == "collecting"
         assert second.id is not None
-        loaded = load_cook_session(db, user_id=1, cook_id=second.id)
+        loaded = load_cook_session(db, household_id=1, cook_id=second.id)
         assert loaded is not None and loaded.id == second.id
 
 
 def test_accrue_cost_sums():
     with _session() as db:
         now = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
-        row = create_cook_session(db, user_id=1, chat_id=1, now=now)
+        row = create_cook_session(db, household_id=1, chat_id=1, now=now)
         accrue_cost(db, cook=row, add_micros=100)
         accrue_cost(db, cook=row, add_micros=50)
         assert row.llm_cost_micros_usd == 150
@@ -69,7 +73,7 @@ def test_accrue_cost_sums():
 def test_sweep_expires_old_collecting():
     with _session() as db:
         old = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
-        row = create_cook_session(db, user_id=1, chat_id=1, now=old)
+        row = create_cook_session(db, household_id=1, chat_id=1, now=old)
         swept = sweep_expired_cooks(db, now=old + timedelta(minutes=COOK_TTL_MINUTES + 1))
         db.refresh(row)
         assert swept == 1
@@ -79,7 +83,7 @@ def test_sweep_expires_old_collecting():
 def test_mark_status_rejects_invalid_status_without_mutating():
     with _session() as db:
         now = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
-        row = create_cook_session(db, user_id=1, chat_id=1, now=now)
+        row = create_cook_session(db, household_id=1, chat_id=1, now=now)
 
         with pytest.raises(ValueError):
             mark_status(db, cook=row, status="bogus")
@@ -106,10 +110,10 @@ def test_stats_counts_cook_cost():
 
     with _session() as db:
         now = datetime(2026, 5, 30, 12, 0)
-        db.add(CookSession(user_id=1, status="done", chat_id=1, selected_item_ids="[]",
+        db.add(CookSession(household_id=1, status="done", chat_id=1, selected_item_ids="[]",
                            llm_cost_micros_usd=500, created_at=now,
                            expires_at=now))
         db.commit()
-        stats = compute_stats(db, user_id=1, now=datetime(2026, 5, 30, 13, 0, tzinfo=timezone.utc))
+        stats = compute_stats(db, household_id=1, now=datetime(2026, 5, 30, 13, 0, tzinfo=timezone.utc))
         assert stats.cook_cost_micros_usd == 500
         assert stats.cook_count == 1

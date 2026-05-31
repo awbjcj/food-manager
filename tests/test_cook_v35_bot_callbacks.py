@@ -17,7 +17,7 @@ from app.cook_models import (
     SelectedItems,
 )
 from app.favorites_service import list_saved
-from app.models import CookSession, PantryItem, SavedRecipe, ShoppingList, User
+from app.models import CookSession, Household, PantryItem, SavedRecipe, ShoppingList, User
 from app.shopping_service import list_pending
 from tests.fakes import FakeNutritionLLM, FakeRecipeLLM, FakeSelectionLLM
 
@@ -42,7 +42,12 @@ def _engine_with_user():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
+                    created_at=datetime.now(timezone.utc)))
         db.commit()
     return engine
 
@@ -65,7 +70,7 @@ def _add_done_cook(engine, candidates):
     now = datetime(2026, 5, 30, 12, 0)
     with Session(engine) as db:
         db.add(CookSession(
-            user_id=1, status="done", chat_id=1, selected_item_ids="[]",
+            household_id=1, status="done", chat_id=1, selected_item_ids="[]",
             candidates_json=json.dumps([c.model_dump() for c in candidates]),
             chosen_index=0, created_at=now, expires_at=now))
         db.commit()
@@ -90,7 +95,7 @@ def test_feedback_callback_on_expired_session_is_rejected(monkeypatch):
     engine = _engine_with_user()
     now = datetime(2026, 5, 30, 12, 0)
     with Session(engine) as db:
-        db.add(CookSession(user_id=1, status="expired", chat_id=1,
+        db.add(CookSession(household_id=1, status="expired", chat_id=1,
                            selected_item_ids="[]", created_at=now, expires_at=now))
         db.commit()
         cook_id = db.exec(select(CookSession)).all()[0].id
@@ -185,7 +190,7 @@ def test_result_keyboard_attached_on_render(monkeypatch):
                 expires_on=today + timedelta(days=2), status="active",
                 created_via="receipt", created_at=datetime.now(timezone.utc)))
         now = today_dt.replace(tzinfo=None)
-        db.add(CookSession(user_id=1, status="ready", chat_id=1, meal_type="Dinner",
+        db.add(CookSession(household_id=1, status="ready", chat_id=1, meal_type="Dinner",
                            cuisine="Italian", selected_item_ids="[]", message_id=99,
                            created_at=now, expires_at=now + timedelta(minutes=10)))
         db.commit()
@@ -226,7 +231,7 @@ def test_no_result_keyboard_when_no_recipe_found(monkeypatch):
                 expires_on=today + timedelta(days=2), status="active",
                 created_via="receipt", created_at=datetime.now(timezone.utc)))
         now = today_dt.replace(tzinfo=None)
-        db.add(CookSession(user_id=1, status="ready", chat_id=1, meal_type="Dinner",
+        db.add(CookSession(household_id=1, status="ready", chat_id=1, meal_type="Dinner",
                            cuisine="Italian", selected_item_ids="[]", message_id=99,
                            created_at=now, expires_at=now + timedelta(minutes=10)))
         db.commit()

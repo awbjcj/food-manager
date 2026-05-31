@@ -1,5 +1,5 @@
 from datetime import date
-from app.renderer import render_item_line, _fmt_date
+from app.renderer import render_item_line, _fmt_date, render_digest, render_list
 from tests.test_renderer_commands import _pantry_item
 
 
@@ -25,3 +25,29 @@ def test_item_line_zh_translates_name_and_tail():
 
 def test_fmt_date_still_importable_en():
     assert _fmt_date(date(2026, 6, 2), today=date(2026, 5, 28)) == "Jun 2"
+
+
+def test_digest_and_list_en_unchanged():
+    today = date(2026, 5, 28)
+    item = _pantry_item("Milk", date(2026, 5, 29), 1)
+    item.category = "dairy"
+    assert "Dairy (1)" in render_list([item], today=today)
+    assert "Pantry digest -" in render_digest([item], today=today).text
+
+
+def test_digest_zh_headers_and_names():
+    today = date(2026, 5, 28)
+    item = _pantry_item("Milk", date(2026, 5, 28), 1)  # due today
+    item.category = "dairy"
+    out = render_digest([item], today=today, lang="zh", names={"Milk": "牛奶"})
+    assert "今天" in out.text       # section "Today" -> zh
+    assert "牛奶" in out.text       # translated name
+
+
+def test_list_zh_category_header_and_name():
+    today = date(2026, 5, 28)
+    item = _pantry_item("Milk", date(2026, 5, 29), 1)
+    item.category = "dairy"
+    out = render_list([item], today=today, lang="zh", names={"Milk": "牛奶"})
+    assert "乳制品" in out           # category "Dairy" -> zh
+    assert "牛奶" in out

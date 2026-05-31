@@ -8,7 +8,7 @@ from app.correction_service import AddPayload, CorrectPayload
 from app.cook_models import RecipeCandidate, ScoredCandidate
 from app.models import SavedRecipe, ShoppingList
 from app.ingest_service import IngestSummary
-from app.i18n import t, format_date
+from app.i18n import t, format_date, weekday_abbr
 from app.pantry_service import Stats
 from app.profile_service import FoodProfile
 
@@ -137,13 +137,13 @@ class DigestRender:
 DIGEST_CAP = 20
 
 
-def render_digest(items: list, *, today: date) -> DigestRender:
+def render_digest(items: list, *, today: date, lang: str = "en", names=None) -> DigestRender:
     total = len(items)
     if total == 0:
         return DigestRender(text="", rendered_count=0, total_count=0, has_more=False)
 
     capped = items[:DIGEST_CAP]
-    buckets = {"expired": [], "today": [], "tomorrow": [], "this_week": []}
+    buckets: dict[str, list] = {"expired": [], "today": [], "tomorrow": [], "this_week": []}
     for item in capped:
         if item.expires_on < today:
             buckets["expired"].append(item)
@@ -154,26 +154,20 @@ def render_digest(items: list, *, today: date) -> DigestRender:
         else:
             buckets["this_week"].append(item)
 
-    weekday_short = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
     def line_for(item) -> str:
-        return "  " + render_item_line(item, today=today)
+        return "  " + render_item_line(item, today=today, lang=lang, names=names)
 
-    lines = [f"Pantry digest - {weekday_short[today.weekday()]} {_fmt_date(today, today=today)}", ""]
-    for key, header in (
-        ("expired", "Expired"),
-        ("today", "Today"),
-        ("tomorrow", "Tomorrow"),
-        ("this_week", "This week"),
-    ):
+    title = t("digest.title", lang, weekday=weekday_abbr(today, lang=lang), date=_fmt_date(today, today=today, lang=lang))
+    lines = [title, ""]
+    for key in ("expired", "today", "tomorrow", "this_week"):
         if buckets[key]:
-            lines.append(f"{header} ({len(buckets[key])})")
+            lines.append(f"{t(f'digest.section.{key}', lang)} ({len(buckets[key])})")
             lines.extend(line_for(item) for item in buckets[key])
             lines.append("")
 
     has_more = total > DIGEST_CAP
     if has_more:
-        lines.append(f"... and {total - DIGEST_CAP} more - tap [show all]")
+        lines.append(t("digest.more", lang, n=total - DIGEST_CAP))
 
     return DigestRender(
         text="\n".join(lines).rstrip(),
@@ -415,9 +409,9 @@ CATEGORY_ORDER = (
 )
 
 
-def render_list(items: list, *, today: date) -> str:
+def render_list(items: list, *, today: date, lang: str = "en", names=None) -> str:
     if not items:
-        return "no items match this filter"
+        return t("list.empty", lang)
     by_cat: dict[str, list] = {}
     for item in items:
         key = item.category or "other"
@@ -429,8 +423,8 @@ def render_list(items: list, *, today: date) -> str:
     blocks: list[str] = []
     for cat in ordered:
         group = sorted(by_cat[cat], key=lambda i: i.expires_on)
-        block = [f"{cat.capitalize()} ({len(group)})"]
-        block.extend(f"  {render_item_line(i, today=today)}" for i in group)
+        block = [f"{t('category.' + cat, lang)} ({len(group)})"]
+        block.extend(f"  {render_item_line(i, today=today, lang=lang, names=names)}" for i in group)
         blocks.append("\n".join(block))
     return "\n\n".join(blocks)
 

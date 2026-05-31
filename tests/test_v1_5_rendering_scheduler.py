@@ -6,7 +6,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.commands import CommandError, parse_callback
 from app.correction_service import AddPayload, CorrectPayload
-from app.models import PendingCorrection, User
+from app.models import Household, PantryItem, PendingCorrection, User
 from app.pantry_service import Stats, TextLLMCost
 from app.pending_service import create_pending
 from app.renderer import (
@@ -18,7 +18,7 @@ from app.renderer import (
     render_stats,
     render_terminal_state,
 )
-from app.scheduler import _sweep_job, register_sweep_expired_pendings
+from app.scheduler import _sweep_job, build_digest_payload, register_sweep_expired_pendings
 
 
 def test_parse_callback_apply_cancel_and_bad_id():
@@ -115,9 +115,39 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
+                    created_at=datetime.now(timezone.utc)))
         db.commit()
     return make
+
+
+def test_build_digest_payload_resolves_user_household(session_factory):
+    today = date(2026, 5, 30)
+    with session_factory() as db:
+        db.add(PantryItem(
+            household_id=1,
+            raw_name="Milk",
+            normalized_name="milk",
+            category="dairy",
+            qty=1.0,
+            purchased_on=today,
+            shelf_life_days=3,
+            shelf_life_source="llm",
+            ingest_shelf_life_source="llm",
+            expires_on=today,
+            status="active",
+            created_via="receipt",
+            created_at=datetime.now(timezone.utc),
+        ))
+        db.commit()
+        payload = build_digest_payload(db, user_id=1, today=today)
+    assert payload is not None
+    assert payload.user.telegram_id == 1
+    assert [item.raw_name for item in payload.items] == ["Milk"]
 
 
 def test_register_sweep_expired_pendings_and_job_marks_rows(session_factory):
@@ -130,7 +160,7 @@ def test_register_sweep_expired_pendings_and_job_marks_rows(session_factory):
     with session_factory() as db:
         create_pending(
             db,
-            user_id=1,
+            household_id=1,
             action_type="correct",
             item_id=1,
             proposed_json="{}",

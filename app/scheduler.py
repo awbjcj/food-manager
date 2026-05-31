@@ -34,7 +34,7 @@ def build_digest_payload(
     user = session.get(User, user_id)
     if user is None:
         return None
-    rows = list_digest_due(session, user_id=user_id, today=today)
+    rows = list_digest_due(session, household_id=user.household_id, today=today)
     if not rows:
         return None
     return DigestPayload(user=user, items=rows)

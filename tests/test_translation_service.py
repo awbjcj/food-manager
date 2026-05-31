@@ -53,7 +53,9 @@ async def test_translates_misses_and_caches():
         assert out == {"Milk": "牛奶", "Eggs": "鸡蛋"}
         # deduped: only the two unique texts, in one batched call
         assert fake.calls == [(("Milk", "Eggs"), "zh")]
-        assert s.get(NameTranslation, ("zh", "Milk")).translated_text == "牛奶"
+        cached = s.get(NameTranslation, ("zh", "Milk"))
+        assert cached is not None
+        assert cached.translated_text == "牛奶"
 
 
 async def test_cache_hit_skips_llm():

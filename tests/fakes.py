@@ -156,9 +156,10 @@ class FakeTranslationLLM:
     _raises: int = 0
     calls: list[tuple[tuple[str, ...], str]] = field(default_factory=list)
 
-    async def translate(self, *, texts, lang):
+    async def translate(self, *, texts: list[str], lang: str) -> tuple[list[str], int | None]:
         self.calls.append((tuple(texts), lang))
         if self._raises < self.raise_n_times:
             self._raises += 1
             raise RuntimeError("simulated translation failure")
-        return [self.table.get(text, text) for text in texts], 0
+        result: list[str] = [self.table.get(t, t) for t in texts]
+        return result, 0

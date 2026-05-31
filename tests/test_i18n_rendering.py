@@ -168,7 +168,7 @@ def test_ingest_reply_en_refined_mark_unchanged():
         inserted_item_shelf_life_days=[7],
         cost_micros_usd=None,
     )
-    text = render_ingest_reply(summary, today=date(2026, 5, 26), refined_ids={42})
+    text = render_ingest_reply(summary, today=date(2026, 5, 26), refined_ids=frozenset({42}))
     assert "  - #42 Whole Milk - exp Jun 2 (7d) ✓refined" in text
 
 
@@ -535,7 +535,7 @@ def _make_stats(**kwargs):
         waste_rate_percent=18.2,
     )
     defaults.update(kwargs)
-    return Stats(**defaults)
+    return Stats(**defaults)  # type: ignore[arg-type]
 
 
 def test_render_stats_en_unchanged():
@@ -568,7 +568,7 @@ def _make_profile(**kwargs):
         note="spicy ok",
     )
     defaults.update(kwargs)
-    return FoodProfile(**defaults)
+    return FoodProfile(**defaults)  # type: ignore[arg-type]
 
 
 def test_render_profile_en_unchanged():

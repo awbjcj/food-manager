@@ -31,6 +31,7 @@ def _seed_zh_user(eng):
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         user = User(
             telegram_id=42,
             chat_id=999,
@@ -71,6 +72,7 @@ def _seed_en_user(eng):
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         user = User(
             telegram_id=7,
             chat_id=888,

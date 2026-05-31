@@ -18,11 +18,13 @@ from app.commands import (
     parse_callback,
     parse_digest_at,
     parse_item_id_arg,
+    parse_lang,
     parse_llm_provider,
     parse_list_filter,
     parse_snooze_args,
     parse_tz,
 )
+from app.i18n import LANGS, t
 from app.correction_service import (
     NullDiff,
     ProposeCorrectError,
@@ -116,6 +118,7 @@ from app.renderer import (
     render_undo_result,
 )
 from app.profile_service import profile_from_household, update_profile_from_sentence
+from app.translation_service import translate_texts
 
 DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8
@@ -212,6 +215,24 @@ def _select_profile_llm(
     return cast("ProfileUpdateLLMClient", selector(provider)) if callable(selector) else profile_llm
 
 
+async def _translate_for_render(session, *, lang, texts, translation_llm):
+    if lang == "en" or translation_llm is None:
+        return {}
+    return await translate_texts(session, [x for x in texts if x], lang=lang, llm=translation_llm)
+
+
+def _cook_card_texts(cards) -> list[str]:
+    texts: list[str] = []
+    for card in cards:
+        recipe = card.recipe
+        texts.append(recipe.title)
+        texts.append(recipe.cuisine)
+        texts.append(recipe.method_gist)
+        texts.extend(ing.name for ing in recipe.ingredients)
+        texts.extend(getattr(card, "shopping_list", None) or [])
+    return texts
+
+
 def _render_llm_status(user: User, llm: LLMClient, text_llm: TextLLMClient) -> str:
     available = _available_llm_providers(llm, text_llm)
     return (
@@ -272,11 +293,7 @@ async def handle_start(
         if decision.created:
             on_user_created(user)
         await msg.answer(
-            "Pantry bot ready.\n"
-            f"Timezone: {user.tz} (change with /tz <IANA>)\n"
-            f"Daily digest hour: {user.digest_hour}:00 "
-            "(change with /digest_at <0..23>)\n"
-            "Type /help to see all commands."
+            t("start.ready", user.lang, tz=user.tz, digest_hour=user.digest_hour)
         )
 
 
@@ -301,6 +318,32 @@ async def handle_tz(
         session.commit()
         reschedule(user)
         await msg.answer(f"timezone set to {tz}")
+
+
+async def handle_lang(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        try:
+            lang = parse_lang(list((msg.text or "").split()[1:]))
+        except CommandError as exc:
+            await msg.answer(str(exc))
+            return
+        if lang is None:
+            await msg.answer(
+                t("lang.current", user.lang, lang=user.lang, choices="|".join(LANGS))
+            )
+            return
+        user.lang = lang
+        session.add(user)
+        session.commit()
+        await msg.answer(t("lang.set", lang, lang=lang))
 
 
 async def handle_digest_at(
@@ -332,6 +375,7 @@ async def handle_list(
     session_factory: _SessionFactory,
     now_provider: NowProvider,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    translation_llm=None,
 ) -> None:
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
@@ -346,7 +390,13 @@ async def handle_list(
         items = list_active(
             session, household_id=user.household_id, f=list_filter, today=today
         )
-        await msg.answer(render_list(items, today=today))
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=[i.raw_name for i in items],
+            translation_llm=translation_llm,
+        )
+        await msg.answer(render_list(items, today=today, lang=user.lang, names=names))
 
 
 async def handle_add(
@@ -410,9 +460,11 @@ async def handle_add(
                 now=datetime.now(timezone.utc),
             )
             assert pending.id is not None
-            text = render_add_diff(pending_id=pending.id, payload=proposal.payload)
+            text = render_add_diff(
+                pending_id=pending.id, payload=proposal.payload, lang=user.lang
+            )
             keyboard = to_aiogram_keyboard(
-                build_apply_cancel_keyboard(pending_id=pending.id)
+                build_apply_cancel_keyboard(pending_id=pending.id, lang=user.lang)
             )
             try:
                 sent = await msg.answer(text, reply_markup=keyboard)
@@ -649,9 +701,10 @@ async def handle_correct(
             payload=payload,
             item_id=item_id,
             item_raw_name=item.raw_name,
+            lang=user.lang,
         )
         keyboard = to_aiogram_keyboard(
-            build_apply_cancel_keyboard(pending_id=pending.id)
+            build_apply_cancel_keyboard(pending_id=pending.id, lang=user.lang)
         )
         try:
             sent = await msg.answer(text, reply_markup=keyboard)
@@ -683,7 +736,7 @@ async def handle_stats(
             household_id=user.household_id,
             now=now.astimezone(timezone.utc),
         )
-        await msg.answer(render_stats(stats))
+        await msg.answer(render_stats(stats, lang=user.lang))
 
 
 async def handle_shopping(
@@ -692,18 +745,27 @@ async def handle_shopping(
     session_factory: _SessionFactory,
     now_provider: NowProvider,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    translation_llm=None,
 ) -> None:
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
         items = list_pending(session, household_id=user.household_id)
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=[i.name_raw for i in items],
+            translation_llm=translation_llm,
+        )
         keyboard = (
-            to_aiogram_keyboard(build_shopping_keyboard([i.id for i in items if i.id]))
+            to_aiogram_keyboard(
+                build_shopping_keyboard([i.id for i in items if i.id], lang=user.lang)
+            )
             if items
             else None
         )
-        await msg.answer(render_shopping_list(items), reply_markup=keyboard)
+        await msg.answer(render_shopping_list(items, lang=user.lang, names=names), reply_markup=keyboard)
 
 
 async def handle_favorites(
@@ -711,18 +773,29 @@ async def handle_favorites(
     *,
     session_factory: _SessionFactory,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    translation_llm=None,
 ) -> None:
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
         recipes = list_saved(session, household_id=user.household_id)
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=[r.title for r in recipes] + [r.cuisine for r in recipes],
+            translation_llm=translation_llm,
+        )
         keyboard = (
-            to_aiogram_keyboard(build_favorites_keyboard([r.id for r in recipes if r.id]))
+            to_aiogram_keyboard(
+                build_favorites_keyboard(
+                    [r.id for r in recipes if r.id], lang=user.lang
+                )
+            )
             if recipes
             else None
         )
-        await msg.answer(render_favorites(recipes), reply_markup=keyboard)
+        await msg.answer(render_favorites(recipes, lang=user.lang, names=names), reply_markup=keyboard)
 
 
 async def handle_cook(
@@ -801,7 +874,7 @@ async def handle_prefs(
             return
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2 or not parts[1].strip():
-            await msg.answer(render_profile(profile_from_household(household)))
+            await msg.answer(render_profile(profile_from_household(household), lang=user.lang))
             return
         try:
             selected = _select_profile_llm(profile_llm, user.llm_provider)
@@ -823,34 +896,10 @@ async def handle_prefs(
             )
             await msg.answer("couldn't update your profile - try simpler wording")
             return
-        await msg.answer("Updated.\n\n" + render_profile(profile))
+        await msg.answer(t("prefs.updated", user.lang) + "\n\n" + render_profile(profile, lang=user.lang))
 
 
-HELP_TEXT = (
-    "Commands:\n"
-    "  /start - setup status\n"
-    "  /tz <IANA> - set timezone\n"
-    "  /digest_at <0..23> - set digest hour\n"
-    "  /list [category|week|expired] - show pantry\n"
-    "  /add <free text> - propose new items in natural language.\n"
-    "      Replies with a diff per item; tap Apply or Cancel.\n"
-    "      Proposals expire after 10 min.\n"
-    "  /ate <id> - mark eaten\n"
-    "  /toss <id> - mark tossed\n"
-    "  /snooze <id> [days=2] - suppress reminders 1..30d\n"
-    "  /correct <id> <free text> - propose a correction in natural\n"
-    "      language (name, category, expires, days). Replies with a\n"
-    "      diff; tap Apply or Cancel. Proposal expires after 10 min.\n"
-    "  /delete <id> - remove a wrong/duplicate import\n"
-    "  /stats - last 30 days\n"
-    "  /llm [anthropic|openai] - show or switch LLM provider\n"
-    "  /prefs [sentence] - show or update your food profile\n"
-    "  /cook - get a recipe from your pantry\n"
-    "  /shopping - view your to-buy list; tap an item when bought\n"
-    "  /favorites - view saved recipes; tap to re-cook against your pantry\n"
-    "  /help - this message\n"
-    "Send a receipt photo to log it."
-)
+HELP_TEXT = t("help.body", "en")
 
 
 async def handle_help(
@@ -863,7 +912,7 @@ async def handle_help(
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
-    await msg.answer(HELP_TEXT)
+    await msg.answer(t("help.body", user.lang))
 
 
 async def handle_photo(
@@ -877,6 +926,7 @@ async def handle_photo(
     search=None,
     spawn=None,
     bot=None,
+    translation_llm=None,
 ) -> None:
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
@@ -930,14 +980,24 @@ async def handle_photo(
                 "inserted_food_count": summary.inserted_food_count,
             },
         )
+        user_lang = user.lang
+        names = await _translate_for_render(
+            session,
+            lang=user_lang,
+            texts=list(summary.inserted_item_names),
+            translation_llm=translation_llm,
+        )
         keyboard = (
-            to_aiogram_keyboard(build_undo_keyboard(receipt_id=summary.receipt_id))
+            to_aiogram_keyboard(
+                build_undo_keyboard(receipt_id=summary.receipt_id, lang=user_lang)
+            )
             if summary.receipt_id is not None and summary.inserted_food_count
             else None
         )
         refine_household_id = user.household_id
         sent = await msg.answer(
-            render_ingest_reply(summary, today=today), reply_markup=keyboard
+            render_ingest_reply(summary, today=today, lang=user_lang, names=names),
+            reply_markup=keyboard,
         )
 
     if (
@@ -964,14 +1024,20 @@ async def handle_photo(
             )
             if not refined:
                 return
-            text = render_ingest_reply(summary, today=today, refined_ids=refined)
+            text = render_ingest_reply(
+                summary,
+                today=today,
+                refined_ids=refined,
+                lang=user_lang,
+                names=names,
+            )
             try:
                 await bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=message_id,
                     text=text,
                     reply_markup=to_aiogram_keyboard(
-                        build_undo_keyboard(receipt_id=receipt_id)
+                        build_undo_keyboard(receipt_id=receipt_id, lang=user_lang)
                     ),
                 )
             except Exception as exc:
@@ -1035,6 +1101,7 @@ async def handle_cook_callback(
     nutrition_llm,
     spawn,
     bot,
+    translation_llm=None,
 ) -> None:
     if cb.from_user.id != ALLOWED_TELEGRAM_USER_ID:
         log.info(
@@ -1081,11 +1148,21 @@ async def handle_cook_callback(
             except (TypeError, ValueError):
                 cards = []
             assert cook.id is not None
+            names = await _translate_for_render(
+                session,
+                lang=user.lang,
+                texts=_cook_card_texts(cards),
+                translation_llm=translation_llm,
+            )
             await _safe_edit_cb(
                 cb,
-                render_cook_result(cards, show_alternatives=True),
+                render_cook_result(
+                    cards, show_alternatives=True, lang=user.lang, names=names
+                ),
                 to_aiogram_keyboard(
-                    build_cook_result_keyboard(cook.id, has_alternatives=False)
+                    build_cook_result_keyboard(
+                        cook.id, has_alternatives=False, lang=user.lang
+                    )
                 ),
             )
             await cb.answer("showing alternatives")
@@ -1187,6 +1264,7 @@ async def handle_cook_callback(
             nutrition_llm=nutrition_llm,
             now_provider=now_provider,
             bot=bot,
+            translation_llm=translation_llm,
         )
     )
 
@@ -1203,6 +1281,7 @@ async def run_cook_and_render(
     nutrition_llm,
     now_provider: NowProvider,
     bot,
+    translation_llm=None,
 ) -> None:
     with session_factory() as session:
         user = session.get(User, user_id)
@@ -1263,10 +1342,20 @@ async def run_cook_and_render(
             return
 
         mark_status(session, cook=cook, status="done")
-        text = render_cook_result(cards, show_alternatives=False)
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=_cook_card_texts(cards),
+            translation_llm=translation_llm,
+        )
+        text = render_cook_result(
+            cards, show_alternatives=False, lang=user.lang, names=names
+        )
         keyboard = (
             to_aiogram_keyboard(
-                build_cook_result_keyboard(cook_id, has_alternatives=len(cards) > 1)
+                build_cook_result_keyboard(
+                    cook_id, has_alternatives=len(cards) > 1, lang=user.lang
+                )
             )
             if cards
             else None
@@ -1276,7 +1365,9 @@ async def run_cook_and_render(
         )
 
 
-async def handle_callback(cb, *, session_factory, now_provider) -> None:
+async def handle_callback(
+    cb, *, session_factory, now_provider, translation_llm=None
+) -> None:
     if cb.from_user.id != ALLOWED_TELEGRAM_USER_ID:
         log.info(
             "unauthorized_update_rejected",
@@ -1365,16 +1456,25 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
                 now=now_provider(user.tz),
             )
             remaining = list_pending(session, household_id=user.household_id)
+            shop_names = await _translate_for_render(
+                session,
+                lang=user.lang,
+                texts=[i.name_raw for i in remaining],
+                translation_llm=translation_llm,
+            )
             keyboard = (
                 to_aiogram_keyboard(
-                    build_shopping_keyboard([i.id for i in remaining if i.id])
+                    build_shopping_keyboard(
+                        [i.id for i in remaining if i.id], lang=user.lang
+                    )
                 )
                 if remaining
                 else None
             )
             try:
                 await cb.message.edit_text(
-                    render_shopping_list(remaining), reply_markup=keyboard
+                    render_shopping_list(remaining, lang=user.lang, names=shop_names),
+                    reply_markup=keyboard,
                 )
             except Exception as exc:
                 log.warning("shopping_edit_failed", extra={"error_class": type(exc).__name__})
@@ -1393,8 +1493,24 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             shopping = recook_shopping_list(
                 session, household_id=user.household_id, saved=saved, today=today
             )
+            recipe = recipe_from_saved(saved)
+            recook_texts = [
+                recipe.title,
+                recipe.cuisine,
+                recipe.method_gist,
+                *(i.name for i in recipe.ingredients),
+                *shopping,
+            ]
+            recook_names = await _translate_for_render(
+                session,
+                lang=user.lang,
+                texts=recook_texts,
+                translation_llm=translation_llm,
+            )
             await cb.message.answer(
-                render_recook(recipe_from_saved(saved), shopping=shopping)
+                render_recook(
+                    recipe, shopping=shopping, lang=user.lang, names=recook_names
+                )
             )
             await cb.answer("here's the plan")
             return
@@ -1404,7 +1520,15 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             if not rows:
                 await cb.answer("nothing due")
                 return
-            await cb.message.answer(render_list(rows, today=today))
+            row_names = await _translate_for_render(
+                session,
+                lang=user.lang,
+                texts=[i.raw_name for i in rows],
+                translation_llm=translation_llm,
+            )
+            await cb.message.answer(
+                render_list(rows, today=today, lang=user.lang, names=row_names)
+            )
             await cb.answer("sent full digest list")
             return
 
@@ -1418,6 +1542,7 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
                 household_id=user.household_id,
                 pending_id=pending_id,
                 verb=action.verb,
+                lang=user.lang,
             )
             return
 
@@ -1440,7 +1565,9 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
                     now=now,
                 )
             try:
-                await cb.message.edit_text(render_undo_result(result))
+                await cb.message.edit_text(
+                    render_undo_result(result, lang=user.lang)
+                )
             except Exception as exc:
                 log.warning(
                     "undo_edit_failed", extra={"error_class": type(exc).__name__}
@@ -1488,7 +1615,14 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
                     "action": action.verb,
                 },
             )
-            await _refresh_digest_message(cb, session, user.household_id, today)
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
         await cb.answer(
             f"#{item_id} -> {action.verb}"
             if result.applied
@@ -1497,7 +1631,14 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
 
 
 async def _handle_pending_callback(
-    cb, *, session: Session, today, household_id: int, pending_id: int, verb: str
+    cb,
+    *,
+    session: Session,
+    today,
+    household_id: int,
+    pending_id: int,
+    verb: str,
+    lang: str = "en",
 ) -> None:
     pending = load_pending(session, household_id=household_id, pending_id=pending_id)
     if pending is None:
@@ -1512,7 +1653,7 @@ async def _handle_pending_callback(
             session.add(pending)
             session.commit()
         try:
-            await cb.message.edit_text(render_terminal_state(terminal))
+            await cb.message.edit_text(render_terminal_state(terminal, lang=lang))
         except Exception as exc:
             log.warning(
                 "pending_message_edit_failed",
@@ -1525,7 +1666,7 @@ async def _handle_pending_callback(
         mark_cancelled(session, pending=pending)
         session.commit()
         try:
-            await cb.message.edit_text(render_terminal_state("cancelled"))
+            await cb.message.edit_text(render_terminal_state("cancelled", lang=lang))
         except Exception as exc:
             log.warning(
                 "pending_message_edit_failed",
@@ -1576,7 +1717,9 @@ async def _handle_pending_callback(
         session.commit()
         try:
             await cb.message.edit_text(
-                render_applied_correction(item_id=item.id, payload=payload)
+                render_applied_correction(
+                    item_id=item.id, payload=payload, lang=lang
+                )
             )
         except Exception as exc:
             log.warning(
@@ -1606,8 +1749,10 @@ async def _handle_pending_callback(
     session.commit()
     try:
         await cb.message.edit_text(
-            render_applied_add(item_id=new_id, payload=payload),
-            reply_markup=to_aiogram_keyboard(build_undo_add_keyboard(item_id=new_id)),
+            render_applied_add(item_id=new_id, payload=payload, lang=lang),
+            reply_markup=to_aiogram_keyboard(
+                build_undo_add_keyboard(item_id=new_id, lang=lang)
+            ),
         )
     except Exception as exc:
         log.warning(
@@ -1621,13 +1766,21 @@ async def _handle_pending_callback(
     await cb.answer("added")
 
 
-async def _refresh_digest_message(cb, session, household_id: int, today) -> None:
+async def _refresh_digest_message(
+    cb, session, household_id: int, today, *, lang: str = "en", translation_llm=None
+) -> None:
     remaining = list_digest_due(session, household_id=household_id, today=today)
     if remaining:
-        rendered = render_digest(remaining, today=today)
+        names = await _translate_for_render(
+            session,
+            lang=lang,
+            texts=[i.raw_name for i in remaining],
+            translation_llm=translation_llm,
+        )
+        rendered = render_digest(remaining, today=today, lang=lang, names=names)
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
-                rendered.rendered_item_ids, has_more=rendered.has_more
+                rendered.rendered_item_ids, has_more=rendered.has_more, lang=lang
             )
         )
         try:
@@ -1639,7 +1792,7 @@ async def _refresh_digest_message(cb, session, household_id: int, today) -> None
             )
         return
     try:
-        await cb.message.edit_text("Pantry is clear for the next 7 days.")
+        await cb.message.edit_text(t("digest.pantry_clear", lang))
     except Exception as exc:
         log.warning(
             "digest_edit_failed",
@@ -1675,6 +1828,7 @@ def build_dispatcher(
     selection_llm=None,
     recipe_llm=None,
     nutrition_llm=None,
+    translation_llm=None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -1697,6 +1851,11 @@ def build_dispatcher(
     async def on_tz(message):
         await handle_tz(message, session_factory=session_factory, reschedule=reschedule)
 
+    async def on_lang(message):
+        await handle_lang(
+            message, session_factory=session_factory, on_user_created=on_user_created
+        )
+
     async def on_digest_at(message):
         await handle_digest_at(
             message, session_factory=session_factory, reschedule=reschedule
@@ -1708,6 +1867,7 @@ def build_dispatcher(
             session_factory=session_factory,
             now_provider=now_provider,
             on_user_created=on_user_created,
+            translation_llm=translation_llm,
         )
 
     async def on_add(message):
@@ -1783,6 +1943,7 @@ def build_dispatcher(
             session_factory=session_factory,
             now_provider=now_provider,
             on_user_created=on_user_created,
+            translation_llm=translation_llm,
         )
 
     async def on_favorites(message):
@@ -1790,6 +1951,7 @@ def build_dispatcher(
             message,
             session_factory=session_factory,
             on_user_created=on_user_created,
+            translation_llm=translation_llm,
         )
 
     async def on_llm(message):
@@ -1827,6 +1989,7 @@ def build_dispatcher(
             search=search,
             spawn=asyncio.create_task,
             bot=bot,
+            translation_llm=translation_llm,
         )
 
     async def on_callback(callback):
@@ -1845,14 +2008,19 @@ def build_dispatcher(
                 nutrition_llm=nutrition_llm,
                 spawn=asyncio.create_task,
                 bot=bot,
+                translation_llm=translation_llm,
             )
             return
         await handle_callback(
-            callback, session_factory=session_factory, now_provider=now_provider
+            callback,
+            session_factory=session_factory,
+            now_provider=now_provider,
+            translation_llm=translation_llm,
         )
 
     dispatcher.message.register(on_start, Command("start"))
     dispatcher.message.register(on_tz, Command("tz"))
+    dispatcher.message.register(on_lang, Command("lang"))
     dispatcher.message.register(on_digest_at, Command("digest_at"))
     dispatcher.message.register(on_list, Command("list"))
     dispatcher.message.register(on_add, Command("add"))

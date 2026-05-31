@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal, Optional, Sequence, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.i18n import LANGS
 from app.pantry_service import (
     ALLOWED_CATEGORIES,
     ListFilter,
@@ -92,6 +93,17 @@ def parse_llm_provider(args: Sequence[str]) -> Optional[LLMProviderName]:
     if token not in ALLOWED_LLM_PROVIDERS:
         raise CommandError("usage: /llm [anthropic|openai]")
     return cast(LLMProviderName, token)
+
+
+def parse_lang(args: Sequence[str]) -> Optional[str]:
+    if len(args) > 1:
+        raise CommandError(f"usage: /lang [{'|'.join(LANGS)}]")
+    if not args:
+        return None
+    token = args[0].lower()
+    if token not in LANGS:
+        raise CommandError(f"usage: /lang [{'|'.join(LANGS)}]")
+    return token
 
 
 Verb = Literal[

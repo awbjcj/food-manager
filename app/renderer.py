@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -7,15 +8,17 @@ from app.correction_service import AddPayload, CorrectPayload
 from app.cook_models import RecipeCandidate, ScoredCandidate
 from app.models import SavedRecipe, ShoppingList
 from app.ingest_service import IngestSummary
+from app.i18n import t, format_date, weekday_abbr
 from app.pantry_service import Stats
 from app.profile_service import FoodProfile
 
 
-def _fmt_date(value: date, *, today: date) -> str:
-    base = f"{value:%b} {value.day}"
-    if value.year != today.year:
-        return f"{base} {value.year}"
-    return base
+def _name(names: Mapping[str, str] | None, text: str) -> str:
+    return (names or {}).get(text, text)
+
+
+def _fmt_date(value: date, *, today: date, lang: str = "en") -> str:
+    return format_date(value, today=today, lang=lang)
 
 
 URGENCY_SOON_DAYS = 3
@@ -39,79 +42,87 @@ def _qty_prefix(qty: float, unit: str | None) -> str:
     return ""
 
 
-def render_item_line(item, *, today: date) -> str:
+def render_item_line(item, *, today: date, lang: str = "en", names=None) -> str:
     icon = _urgency_icon(item.expires_on, today=today)
     qty = _qty_prefix(item.qty, item.unit)
+    name = _name(names, item.raw_name)
     delta = (item.expires_on - today).days
     if delta < 0:
-        tail = f"expired {-delta}d"
+        tail = t("item.tail.expired", lang, n=-delta)
     elif delta == 0:
-        tail = "today"
+        tail = t("item.tail.today", lang)
     else:
-        tail = f"{_fmt_date(item.expires_on, today=today)} ({delta}d)"
-    return f"{icon} #{item.id} {qty}{item.raw_name} - {tail}"
+        tail = f"{_fmt_date(item.expires_on, today=today, lang=lang)} {t('item.tail.days', lang, n=delta)}"
+    return f"{icon} #{item.id} {qty}{name} - {tail}"
 
 
-def _fmt_cost(micros: int | None) -> str:
+def _fmt_cost(micros: int | None, *, lang: str = "en") -> str:
     if micros is None:
-        return "Cost: unavailable"
-    return f"Cost: ${micros / 1_000_000:.3f}"
+        return t("cost.unavailable", lang)
+    return t("cost.value", lang, amount=f"{micros / 1_000_000:.3f}")
 
 
-def render_ingest_reply(summary: IngestSummary, *, today: date, refined_ids=frozenset()) -> str:
+def render_ingest_reply(
+    summary: IngestSummary,
+    *,
+    today: date,
+    refined_ids=frozenset(),
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
     lines: list[str] = []
     if summary.inserted_food_count == 0:
         if summary.skipped_low_confidence_count:
-            lines.append(
-                "No clear food items found "
-                f"(skipped {summary.skipped_low_confidence_count} unclear items)."
-            )
+            lines.append(t("ingest.none_clear", lang, n=summary.skipped_low_confidence_count))
         else:
-            lines.append("No food items found in this receipt.")
+            lines.append(t("ingest.none_found", lang))
         if summary.skipped_excluded_count:
-            names = ", ".join(summary.skipped_excluded_names[:5])
+            exc_names = ", ".join(summary.skipped_excluded_names[:5])
             more = "" if len(summary.skipped_excluded_names) <= 5 else ", ..."
-            lines.append(f"Skipped (not tracked): {names}{more}")
-            lines.append("Want one tracked? /add <name>")
-        lines.append(_fmt_cost(summary.cost_micros_usd))
+            lines.append(t("ingest.skipped_excluded", lang, names=exc_names, more=more))
+            lines.append(t("ingest.want_tracked", lang))
+        lines.append(_fmt_cost(summary.cost_micros_usd, lang=lang))
         return "\n".join(lines)
 
-    lines.append(f"Logged {summary.inserted_food_count} items from this receipt:")
+    lines.append(t("ingest.logged", lang, n=summary.inserted_food_count))
     for item_id, name, expires_on, shelf_life_days in zip(
         summary.inserted_item_ids,
         summary.inserted_item_names,
         summary.inserted_item_expires_on,
         summary.inserted_item_shelf_life_days,
     ):
-        mark = " ✓refined" if item_id in refined_ids else ""
-        lines.append(
-            f"  - #{item_id} {name} - exp {_fmt_date(expires_on, today=today)} ({shelf_life_days}d){mark}"
-        )
+        mark = t("ingest.refined_mark", lang) if item_id in refined_ids else ""
+        lines.append(t(
+            "ingest.item", lang,
+            id=item_id,
+            name=_name(names, name),
+            date=_fmt_date(expires_on, today=today, lang=lang),
+            days=shelf_life_days,
+            mark=mark,
+        ))
 
     if summary.purchase_date is not None and summary.purchase_date != today:
-        lines.append(f"Purchase date: {_fmt_date(summary.purchase_date, today=today)}")
+        lines.append(t("ingest.purchase_date", lang, date=_fmt_date(summary.purchase_date, today=today, lang=lang)))
     if summary.purchase_date_assumed and summary.purchase_date is not None:
-        lines.append(f"Purchase date assumed: {_fmt_date(summary.purchase_date, today=today)}")
+        lines.append(t("ingest.purchase_date_assumed", lang, date=_fmt_date(summary.purchase_date, today=today, lang=lang)))
 
     if summary.low_confidence_inserted_ids:
         ids = ", ".join(f"#{item_id}" for item_id in summary.low_confidence_inserted_ids[:5])
         more = "" if len(summary.low_confidence_inserted_ids) <= 5 else " ..."
-        lines.append(f"Low confidence: {ids}{more} - review with /correct or /delete")
+        lines.append(t("ingest.low_confidence", lang, ids=ids, more=more))
 
     if summary.skipped_low_confidence_count:
-        names = ", ".join(summary.skipped_low_confidence_names[:3])
+        skipped_names = ", ".join(summary.skipped_low_confidence_names[:3])
         more = "" if len(summary.skipped_low_confidence_names) <= 3 else ", ..."
-        lines.append(
-            f"(skipped {summary.skipped_low_confidence_count} unclear items: {names}{more})"
-        )
+        lines.append(t("ingest.skipped_unclear", lang, n=summary.skipped_low_confidence_count, names=skipped_names, more=more))
 
     if summary.skipped_excluded_count:
-        names = ", ".join(summary.skipped_excluded_names[:5])
+        exc_names = ", ".join(summary.skipped_excluded_names[:5])
         more = "" if len(summary.skipped_excluded_names) <= 5 else ", ..."
-        lines.append(f"Skipped (not tracked): {names}{more}")
-        lines.append("Want one tracked? /add <name>")
+        lines.append(t("ingest.skipped_excluded", lang, names=exc_names, more=more))
+        lines.append(t("ingest.want_tracked", lang))
 
-    lines.append(_fmt_cost(summary.cost_micros_usd))
+    lines.append(_fmt_cost(summary.cost_micros_usd, lang=lang))
     return "\n".join(lines)
 
 
@@ -133,13 +144,13 @@ class DigestRender:
 DIGEST_CAP = 20
 
 
-def render_digest(items: list, *, today: date) -> DigestRender:
+def render_digest(items: list, *, today: date, lang: str = "en", names=None) -> DigestRender:
     total = len(items)
     if total == 0:
         return DigestRender(text="", rendered_count=0, total_count=0, has_more=False)
 
     capped = items[:DIGEST_CAP]
-    buckets = {"expired": [], "today": [], "tomorrow": [], "this_week": []}
+    buckets: dict[str, list] = {"expired": [], "today": [], "tomorrow": [], "this_week": []}
     for item in capped:
         if item.expires_on < today:
             buckets["expired"].append(item)
@@ -150,26 +161,20 @@ def render_digest(items: list, *, today: date) -> DigestRender:
         else:
             buckets["this_week"].append(item)
 
-    weekday_short = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
     def line_for(item) -> str:
-        return "  " + render_item_line(item, today=today)
+        return "  " + render_item_line(item, today=today, lang=lang, names=names)
 
-    lines = [f"Pantry digest - {weekday_short[today.weekday()]} {_fmt_date(today, today=today)}", ""]
-    for key, header in (
-        ("expired", "Expired"),
-        ("today", "Today"),
-        ("tomorrow", "Tomorrow"),
-        ("this_week", "This week"),
-    ):
+    title = t("digest.title", lang, weekday=weekday_abbr(today, lang=lang), date=_fmt_date(today, today=today, lang=lang))
+    lines = [title, ""]
+    for key in ("expired", "today", "tomorrow", "this_week"):
         if buckets[key]:
-            lines.append(f"{header} ({len(buckets[key])})")
+            lines.append(f"{t(f'digest.section.{key}', lang)} ({len(buckets[key])})")
             lines.extend(line_for(item) for item in buckets[key])
             lines.append("")
 
     has_more = total > DIGEST_CAP
     if has_more:
-        lines.append(f"... and {total - DIGEST_CAP} more - tap [show all]")
+        lines.append(t("digest.more", lang, n=total - DIGEST_CAP))
 
     return DigestRender(
         text="\n".join(lines).rstrip(),
@@ -181,17 +186,17 @@ def render_digest(items: list, *, today: date) -> DigestRender:
 
 
 def build_digest_keyboard(
-    item_ids: list[int], *, has_more: bool
+    item_ids: list[int], *, has_more: bool, lang: str = "en"
 ) -> list[list[CallbackButton]]:
     rows: list[list[CallbackButton]] = []
     for item_id in item_ids:
         rows.append([
-            CallbackButton(text="Ate", callback_data=f"act:ate:{item_id}"),
-            CallbackButton(text="Tossed", callback_data=f"act:toss:{item_id}"),
-            CallbackButton(text="Remind +2d", callback_data=f"act:snooze2:{item_id}"),
+            CallbackButton(text=t("btn.ate", lang), callback_data=f"act:ate:{item_id}"),
+            CallbackButton(text=t("btn.tossed", lang), callback_data=f"act:toss:{item_id}"),
+            CallbackButton(text=t("btn.snooze2", lang), callback_data=f"act:snooze2:{item_id}"),
         ])
     if has_more:
-        rows.append([CallbackButton(text="show all", callback_data="show:all")])
+        rows.append([CallbackButton(text=t("btn.show_all", lang), callback_data="show:all")])
     return rows
 
 
@@ -203,165 +208,199 @@ def render_correction_diff(
     payload: CorrectPayload,
     item_id: int,
     item_raw_name: str,
+    lang: str = "en",
 ) -> str:
-    lines = [f"Proposed correction for #{item_id} {item_raw_name}:"]
+    lines = [t("correction.header", lang, item_id=item_id, item_raw_name=item_raw_name)]
     for field_name in ("name", "category", "expires_on", "shelf_life_days"):
         change = payload.diff.get(field_name)
         if change is None:
             continue
         suffix = ""
         if field_name == "shelf_life_days" and payload.back_computed_days:
-            suffix = "  (back-computed from expires_on)"
-        lines.append(f"  - {field_name}: {change['old']} -> {change['new']}{suffix}")
-    lines.append(f"  - cache: {payload.cache_action}")
+            suffix = t("correction.back_computed", lang)
+        lines.append(t("correction.field", lang,
+                       field_name=field_name, old=change["old"], new=change["new"], suffix=suffix))
+    lines.append(t("correction.cache", lang, cache_action=payload.cache_action))
     lines.append("")
-    lines.append(f"Reason: {payload.rationale}")
-    lines.append("Expires in 10 min.")
+    lines.append(t("correction.rationale", lang, rationale=payload.rationale))
+    lines.append(t("correction.expires", lang))
     return "\n".join(lines)
 
 
-def render_add_diff(*, pending_id: int, payload: AddPayload) -> str:
+def render_add_diff(*, pending_id: int, payload: AddPayload, lang: str = "en") -> str:
     category = payload.category if payload.category is not None else "(unknown)"
     unit = f" {payload.unit}" if payload.unit else ""
     return "\n".join([
-        f"Proposed add - {payload.name}:",
-        f"  - category: {category}",
-        f"  - qty / unit: {payload.qty}{unit}",
-        f"  - expires_on: {payload.expires_on.isoformat()}",
-        f"  - shelf_life_days: {payload.shelf_life_days} (source: {payload.shelf_life_source})",
+        t("add.header", lang, name=payload.name),
+        t("add.category", lang, category=category),
+        t("add.qty_unit", lang, qty=payload.qty, unit=unit),
+        t("add.expires_on", lang, expires_on=payload.expires_on.isoformat()),
+        t("add.shelf_life", lang,
+          shelf_life_days=payload.shelf_life_days,
+          shelf_life_source=payload.shelf_life_source),
         "",
-        f"Confidence: {payload.confidence:.2f}",
-        "Expires in 10 min.",
+        t("add.confidence", lang, confidence=f"{payload.confidence:.2f}"),
+        t("correction.expires", lang),
     ])
 
 
-def build_undo_keyboard(*, receipt_id: int) -> list[list[CallbackButton]]:
-    return [[CallbackButton(text="Undo", callback_data=f"undo:receipt:{receipt_id}")]]
+def build_undo_keyboard(*, receipt_id: int, lang: str = "en") -> list[list[CallbackButton]]:
+    return [[CallbackButton(text=t("btn.undo", lang), callback_data=f"undo:receipt:{receipt_id}")]]
 
 
-def build_undo_add_keyboard(*, item_id: int) -> list[list[CallbackButton]]:
-    return [[CallbackButton(text="Undo", callback_data=f"undo:add:{item_id}")]]
+def build_undo_add_keyboard(*, item_id: int, lang: str = "en") -> list[list[CallbackButton]]:
+    return [[CallbackButton(text=t("btn.undo", lang), callback_data=f"undo:add:{item_id}")]]
 
 
-def render_undo_result(result) -> str:
+def render_undo_result(result, lang: str = "en") -> str:
     if result.expired:
-        return "Undo window expired (10 min) - use /delete <id> instead."
+        return t("undo.expired", lang)
     if not result.removed_ids and not result.skipped:
-        return "Nothing to undo."
-    parts = [f"Undone: removed {len(result.removed_ids)} item(s)."]
+        return t("undo.nothing", lang)
+    parts = [t("undo.removed", lang, n=len(result.removed_ids))]
     if result.skipped:
         skipped = ", ".join(f"#{i} ({why})" for i, why in result.skipped)
-        parts.append(f"skipped {skipped}.")
+        parts.append(t("undo.skipped", lang, skipped=skipped))
     return " ".join(parts)
 
 
-def build_apply_cancel_keyboard(*, pending_id: int) -> list[list[CallbackButton]]:
+def build_apply_cancel_keyboard(*, pending_id: int, lang: str = "en") -> list[list[CallbackButton]]:
     return [[
-        CallbackButton(text="Apply", callback_data=f"apply:{pending_id}"),
-        CallbackButton(text="Cancel", callback_data=f"cancel:{pending_id}"),
+        CallbackButton(text=t("btn.apply", lang), callback_data=f"apply:{pending_id}"),
+        CallbackButton(text=t("btn.cancel", lang), callback_data=f"cancel:{pending_id}"),
     ]]
 
 
-def _render_card(card: ScoredCandidate, *, rank: int) -> str:
+def _render_card(
+    card: ScoredCandidate,
+    *,
+    rank: int,
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
     r = card.recipe
     n = card.nutrition
-    header = f"{'* ' if rank == 0 else ''}{r.title} ({r.cuisine})"
+    header = f"{'* ' if rank == 0 else ''}{_name(names, r.title)} ({_name(names, r.cuisine)})"
     lines = [
         header,
-        f"  Health {n.health_score}/100 - {n.effort} - {n.est_minutes} min",
+        t("cook.health", lang, score=n.health_score, effort=n.effort, minutes=n.est_minutes),
     ]
-    ingredients = ", ".join(i.name for i in r.ingredients)
+    ingredients = ", ".join(_name(names, i.name) for i in r.ingredients)
     if ingredients:
-        lines.append(f"  Ingredients: {ingredients}")
-    lines.append(f"  {r.method_gist}")
+        lines.append(t("cook.ingredients", lang, items=ingredients))
+    lines.append(f"  {_name(names, r.method_gist)}")
     if r.source_url:
-        lines.append(f"  Recipe: {r.source_url}")
+        lines.append(t("cook.recipe_link", lang, url=r.source_url))
     if rank == 0 and card.shopping_list:
-        lines.append("  Need to buy: " + ", ".join(card.shopping_list))
+        items = ", ".join(_name(names, s) for s in card.shopping_list)
+        lines.append(t("cook.need_buy", lang, items=items))
     elif rank == 0:
-        lines.append("  Need to buy: nothing - you have it all!")
+        lines.append(t("cook.need_buy_none", lang))
     return "\n".join(lines)
 
 
-def render_cook_result(cards: list[ScoredCandidate], *, show_alternatives: bool) -> str:
+def render_cook_result(
+    cards: list[ScoredCandidate],
+    *,
+    show_alternatives: bool,
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
     if not cards:
-        return "Couldn't find a recipe that fits your pantry and restrictions."
-    blocks = [_render_card(cards[0], rank=0)]
+        return t("cook.none", lang)
+    blocks = [_render_card(cards[0], rank=0, lang=lang, names=names)]
     if show_alternatives:
         for idx, card in enumerate(cards[1:], start=1):
-            blocks.append(_render_card(card, rank=idx))
+            blocks.append(_render_card(card, rank=idx, lang=lang, names=names))
     return "\n\n".join(blocks)
 
 
-def build_cook_alternatives_keyboard(cook_id: int) -> list[list[CallbackButton]]:
-    return [[CallbackButton(text="Show alternatives", callback_data=f"cookalt:{cook_id}")]]
+def build_cook_alternatives_keyboard(cook_id: int, lang: str = "en") -> list[list[CallbackButton]]:
+    return [[CallbackButton(text=t("btn.show_alternatives", lang), callback_data=f"cookalt:{cook_id}")]]
 
 
 def build_cook_result_keyboard(
-    cook_id: int, *, has_alternatives: bool
+    cook_id: int, *, has_alternatives: bool, lang: str = "en"
 ) -> list[list[CallbackButton]]:
     rows = [
         [
-            CallbackButton(text="👍 Liked", callback_data=f"cookfb:{cook_id}:liked"),
-            CallbackButton(text="👎 Not for me", callback_data=f"cookfb:{cook_id}:disliked"),
+            CallbackButton(text=t("btn.liked", lang), callback_data=f"cookfb:{cook_id}:liked"),
+            CallbackButton(text=t("btn.disliked", lang), callback_data=f"cookfb:{cook_id}:disliked"),
         ],
         [
-            CallbackButton(text="★ Save", callback_data=f"cooksave:{cook_id}"),
-            CallbackButton(text="➕ Shopping list", callback_data=f"cookshop:{cook_id}"),
+            CallbackButton(text=t("btn.save", lang), callback_data=f"cooksave:{cook_id}"),
+            CallbackButton(text=t("btn.shopping", lang), callback_data=f"cookshop:{cook_id}"),
         ],
     ]
     if has_alternatives:
         rows.append(
-            [CallbackButton(text="Show alternatives", callback_data=f"cookalt:{cook_id}")]
+            [CallbackButton(text=t("btn.show_alternatives", lang), callback_data=f"cookalt:{cook_id}")]
         )
     return rows
 
 
-def render_shopping_list(items: list[ShoppingList]) -> str:
+def render_shopping_list(
+    items: list[ShoppingList],
+    *,
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
     if not items:
-        return "Your shopping list is empty. Tap ➕ Shopping list on a /cook result."
-    lines = ["Shopping list:"]
+        return t("shopping.empty", lang)
+    lines = [t("shopping.title", lang)]
     for item in items:
         qty = _qty_prefix(item.qty, item.unit) if item.qty is not None else ""
-        lines.append(f"  - {qty}{item.name_raw}")
+        lines.append(f"  - {qty}{_name(names, item.name_raw)}")
     return "\n".join(lines)
 
 
-def build_shopping_keyboard(item_ids: list[int]) -> list[list[CallbackButton]]:
+def build_shopping_keyboard(item_ids: list[int], lang: str = "en") -> list[list[CallbackButton]]:
     return [
-        [CallbackButton(text="Bought ✓", callback_data=f"shopdone:{item_id}")]
+        [CallbackButton(text=t("btn.bought", lang), callback_data=f"shopdone:{item_id}")]
         for item_id in item_ids
     ]
 
 
-def render_favorites(recipes: list[SavedRecipe]) -> str:
+def render_favorites(
+    recipes: list[SavedRecipe],
+    *,
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
     if not recipes:
-        return "No saved recipes yet. Tap ★ Save on a /cook result."
-    lines = ["Saved recipes:"]
+        return t("favorites.empty", lang)
+    lines = [t("favorites.title", lang)]
     for recipe in recipes:
-        lines.append(f"  #{recipe.id} {recipe.title} ({recipe.cuisine})")
+        lines.append(f"  #{recipe.id} {_name(names, recipe.title)} ({_name(names, recipe.cuisine)})")
     return "\n".join(lines)
 
 
-def build_favorites_keyboard(recipe_ids: list[int]) -> list[list[CallbackButton]]:
+def build_favorites_keyboard(recipe_ids: list[int], lang: str = "en") -> list[list[CallbackButton]]:
     return [
-        [CallbackButton(text="Cook this again", callback_data=f"favcook:{recipe_id}")]
+        [CallbackButton(text=t("btn.cook_again", lang), callback_data=f"favcook:{recipe_id}")]
         for recipe_id in recipe_ids
     ]
 
 
-def render_recook(recipe: RecipeCandidate, *, shopping: list[str]) -> str:
-    lines = [f"{recipe.title} ({recipe.cuisine})"]
-    ingredients = ", ".join(i.name for i in recipe.ingredients)
+def render_recook(
+    recipe: RecipeCandidate,
+    *,
+    shopping: list[str],
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
+    lines = [f"{_name(names, recipe.title)} ({_name(names, recipe.cuisine)})"]
+    ingredients = ", ".join(_name(names, i.name) for i in recipe.ingredients)
     if ingredients:
-        lines.append(f"  Ingredients: {ingredients}")
-    lines.append(f"  {recipe.method_gist}")
+        lines.append(t("cook.ingredients", lang, items=ingredients))
+    lines.append(f"  {_name(names, recipe.method_gist)}")
     if recipe.source_url:
-        lines.append(f"  Recipe: {recipe.source_url}")
+        lines.append(t("cook.recipe_link", lang, url=recipe.source_url))
     if shopping:
-        lines.append("  Need to buy: " + ", ".join(shopping))
+        items = ", ".join(_name(names, s) for s in shopping)
+        lines.append(t("cook.need_buy", lang, items=items))
     else:
-        lines.append("  Need to buy: nothing - you have it all!")
+        lines.append(t("cook.need_buy_none", lang))
     return "\n".join(lines)
 
 
@@ -379,30 +418,29 @@ def build_cook_round_keyboard(
     ]
 
 
-def render_applied_correction(*, item_id: int, payload: CorrectPayload) -> str:
+def render_applied_correction(*, item_id: int, payload: CorrectPayload, lang: str = "en") -> str:
     changes = []
     for field_name in ("name", "category", "expires_on", "shelf_life_days"):
         change = payload.diff.get(field_name)
         if change is not None:
             changes.append(f"{field_name}={change['new']}")
-    suffix = ", ".join(changes) if changes else "no changes"
-    return f"Applied to #{item_id}: {suffix}"
+    suffix = ", ".join(changes) if changes else t("applied.correction.no_changes", lang)
+    return t("applied.correction", lang, item_id=item_id, suffix=suffix)
 
 
-def render_applied_add(*, item_id: int, payload: AddPayload) -> str:
-    return f"Added #{item_id} {payload.name} (expires {payload.expires_on.isoformat()})"
+def render_applied_add(*, item_id: int, payload: AddPayload, lang: str = "en") -> str:
+    return t("applied.add", lang,
+             item_id=item_id, name=payload.name,
+             expires_on=payload.expires_on.isoformat())
 
 
-_TERMINAL_LABELS = {
-    "cancelled": "Cancelled.",
-    "expired": "This proposal has expired - re-run the command.",
-    "stale": "This proposal is stale (the item changed) - re-run the command.",
-    "applied": "This proposal was already applied.",
-}
+_KNOWN_TERMINAL_STATUSES = frozenset(("cancelled", "expired", "stale", "applied"))
 
 
-def render_terminal_state(status: str) -> str:
-    return _TERMINAL_LABELS.get(status, f"This proposal is no longer pending ({status}).")
+def render_terminal_state(status: str, lang: str = "en") -> str:
+    if status in _KNOWN_TERMINAL_STATUSES:
+        return t(f"terminal.{status}", lang)
+    return t("terminal.unknown", lang, status=status)
 
 
 CATEGORY_ORDER = (
@@ -411,9 +449,9 @@ CATEGORY_ORDER = (
 )
 
 
-def render_list(items: list, *, today: date) -> str:
+def render_list(items: list, *, today: date, lang: str = "en", names=None) -> str:
     if not items:
-        return "no items match this filter"
+        return t("list.empty", lang)
     by_cat: dict[str, list] = {}
     for item in items:
         key = item.category or "other"
@@ -425,8 +463,9 @@ def render_list(items: list, *, today: date) -> str:
     blocks: list[str] = []
     for cat in ordered:
         group = sorted(by_cat[cat], key=lambda i: i.expires_on)
-        block = [f"{cat.capitalize()} ({len(group)})"]
-        block.extend(f"  {render_item_line(i, today=today)}" for i in group)
+        cat_label = t(f"category.{cat}", lang) if cat in CATEGORY_ORDER else cat.capitalize()
+        block = [f"{cat_label} ({len(group)})"]
+        block.extend(f"  {render_item_line(i, today=today, lang=lang, names=names)}" for i in group)
         blocks.append("\n".join(block))
     return "\n\n".join(blocks)
 
@@ -437,61 +476,67 @@ def _fmt_cost_short(micros: int | None) -> str:
     return f"${micros / 1_000_000:.3f}"
 
 
-def render_stats(stats: Stats) -> str:
+def render_stats(stats: Stats, lang: str = "en") -> str:
     cache_hit = "-" if stats.cache_hit_percent is None else f"{stats.cache_hit_percent:.1f}%"
     waste_rate = "-" if stats.waste_rate_percent is None else f"{stats.waste_rate_percent:.1f}%"
     avg_cost = _fmt_cost_short(stats.avg_cost_micros_usd)
     total_cost = "$0.000" if stats.total_cost_micros_usd == 0 else _fmt_cost_short(stats.total_cost_micros_usd)
     lines = [
-        "Last 30 days",
-        f"Receipts: {stats.receipt_count} (unknown-cost: {stats.unknown_cost_receipt_count})",
-        f"Tracked items: {stats.tracked_item_count}",
-        f"Removed (wrong import): {stats.removed_item_count}",
-        f"Cache hit rate: {cache_hit}",
-        f"LLM spend: total {total_cost}  avg {avg_cost} / receipt",
+        t("stats.header", lang),
+        t("stats.receipts", lang,
+          receipt_count=stats.receipt_count,
+          unknown_cost_receipt_count=stats.unknown_cost_receipt_count),
+        t("stats.tracked", lang, tracked_item_count=stats.tracked_item_count),
+        t("stats.removed", lang, removed_item_count=stats.removed_item_count),
+        t("stats.cache_hit", lang, cache_hit=cache_hit),
+        t("stats.llm_spend", lang, total_cost=total_cost, avg_cost=avg_cost),
     ]
     tl = stats.text_llm
     corr_unknown = (
-        f", {tl.correction_unknown_cost_count} unknown"
+        t("stats.unknown_suffix", lang, n=tl.correction_unknown_cost_count)
         if tl.correction_unknown_cost_count
         else ""
     )
     add_unknown = (
-        f", {tl.add_unknown_cost_count} unknown"
+        t("stats.unknown_suffix", lang, n=tl.add_unknown_cost_count)
         if tl.add_unknown_cost_count
         else ""
     )
-    lines.append(
-        f"  Corrections: {tl.correction_proposal_count}  "
-        f"(${tl.correction_cost_micros / 1_000_000:.4f} total{corr_unknown})"
-    )
-    lines.append(
-        f"  Adds:        {tl.add_proposal_count}  "
-        f"(${tl.add_cost_micros / 1_000_000:.4f} total{add_unknown})"
-    )
-    lines.append(
-        f"Cook sessions: {stats.cook_count} "
-        f"(${stats.cook_cost_micros_usd / 1_000_000:.3f})"
-    )
-    lines.append(
-        f"  Cooked: {stats.cook_feedback_count} (liked {stats.cook_liked_count})"
-    )
-    lines.append(f"Waste rate: {waste_rate}")
+    lines.append(t("stats.corrections", lang,
+                   count=tl.correction_proposal_count,
+                   cost_total=f"{tl.correction_cost_micros / 1_000_000:.4f}",
+                   unknown=corr_unknown))
+    lines.append(t("stats.adds", lang,
+                   count=tl.add_proposal_count,
+                   cost_total=f"{tl.add_cost_micros / 1_000_000:.4f}",
+                   unknown=add_unknown))
+    lines.append(t("stats.cook_sessions", lang,
+                   count=stats.cook_count,
+                   cost=f"{stats.cook_cost_micros_usd / 1_000_000:.3f}"))
+    lines.append(t("stats.cooked", lang,
+                   feedback_count=stats.cook_feedback_count,
+                   liked_count=stats.cook_liked_count))
+    lines.append(t("stats.waste_rate", lang, waste_rate=waste_rate))
     return "\n".join(lines)
 
 
-def render_profile(profile: FoodProfile) -> str:
-    exclusions = ", ".join(profile.exclusions) or "none"
-    cuisines = ", ".join(profile.preferred_cuisines) or "any"
-    cook = f"{profile.max_cook_minutes} min" if profile.max_cook_minutes else "no limit"
-    note = profile.note or "(none)"
-    return (
-        "Your food profile:\n"
-        f"  Diet: {profile.diet}\n"
-        f"  Avoid: {exclusions}\n"
-        f"  Cuisines: {cuisines}\n"
-        f"  Max cook time: {cook}\n"
-        f"  Household size: {profile.household_size}\n"
-        f"  Notes: {note}\n"
-        "Update by typing: /prefs <sentence>  (e.g. /prefs I'm vegan, no peanuts)"
+def render_profile(profile: FoodProfile, lang: str = "en") -> str:
+    exclusions = ", ".join(profile.exclusions) or t("profile.none_value", lang)
+    cuisines = ", ".join(profile.preferred_cuisines) or t("profile.any_value", lang)
+    cook = (
+        t("profile.cook_minutes", lang, minutes=profile.max_cook_minutes)
+        if profile.max_cook_minutes
+        else t("profile.no_limit", lang)
     )
+    note = profile.note or t("profile.note_none", lang)
+    lines = [
+        t("profile.header", lang),
+        t("profile.diet", lang, diet=profile.diet),
+        t("profile.avoid", lang, exclusions=exclusions),
+        t("profile.cuisines", lang, cuisines=cuisines),
+        t("profile.max_cook", lang, cook=cook),
+        t("profile.household_size", lang, household_size=profile.household_size),
+        t("profile.notes", lang, note=note),
+        t("profile.update_hint", lang),
+    ]
+    return "\n".join(lines)

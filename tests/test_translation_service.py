@@ -1,0 +1,145 @@
+import json
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from sqlmodel import Session, SQLModel, create_engine
+
+from app.models import NameTranslation
+from app.translation_llm import (
+    AnthropicTranslationLLMClient,
+    OpenAITranslationLLMClient,
+    TranslationList,
+    TranslationLLMProviderSelector,
+)
+from app.translation_service import translate_texts
+from tests.fakes import FakeTranslationLLM
+from tests.test_v1_5_llm import _OpenAIParsedResponse, _TextResponse
+
+
+def _session() -> Session:
+    engine = create_engine("sqlite://")
+    SQLModel.metadata.create_all(engine)
+    return Session(engine)
+
+
+def test_name_translation_roundtrip():
+    with _session() as s:
+        s.add(NameTranslation(lang="zh", source_text="Whole Milk", translated_text="全脂牛奶"))
+        s.commit()
+        row = s.get(NameTranslation, ("zh", "Whole Milk"))
+        assert row is not None
+        assert row.translated_text == "全脂牛奶"
+
+
+async def test_fake_translation_llm_returns_mapping_in_order():
+    fake = FakeTranslationLLM(table={"Milk": "牛奶", "Eggs": "鸡蛋"})
+    out, cost = await fake.translate(texts=["Milk", "Eggs"], lang="zh")
+    assert out == ["牛奶", "鸡蛋"]
+    assert fake.calls == [(("Milk", "Eggs"), "zh")]
+
+
+async def test_en_is_identity_no_llm_no_db():
+    fake = FakeTranslationLLM(table={"Milk": "X"})
+    with _session() as s:
+        out = await translate_texts(s, ["Milk", "Eggs"], lang="en", llm=fake)
+    assert out == {"Milk": "Milk", "Eggs": "Eggs"}
+    assert fake.calls == []
+
+
+async def test_translates_misses_and_caches():
+    fake = FakeTranslationLLM(table={"Milk": "牛奶", "Eggs": "鸡蛋"})
+    with _session() as s:
+        out = await translate_texts(s, ["Milk", "Eggs", "Milk"], lang="zh", llm=fake)
+        assert out == {"Milk": "牛奶", "Eggs": "鸡蛋"}
+        # deduped: only the two unique texts, in one batched call
+        assert fake.calls == [(("Milk", "Eggs"), "zh")]
+        cached = s.get(NameTranslation, ("zh", "Milk"))
+        assert cached is not None
+        assert cached.translated_text == "牛奶"
+
+
+async def test_cache_hit_skips_llm():
+    with _session() as s:
+        s.add(NameTranslation(lang="zh", source_text="Milk", translated_text="牛奶"))
+        s.commit()
+        fake = FakeTranslationLLM(table={})
+        out = await translate_texts(s, ["Milk"], lang="zh", llm=fake)
+        assert out == {"Milk": "牛奶"}
+        assert fake.calls == []
+
+
+async def test_partial_cache_only_sends_misses():
+    with _session() as s:
+        s.add(NameTranslation(lang="zh", source_text="Milk", translated_text="牛奶"))
+        s.commit()
+        fake = FakeTranslationLLM(table={"Eggs": "鸡蛋"})
+        out = await translate_texts(s, ["Milk", "Eggs"], lang="zh", llm=fake)
+        assert out == {"Milk": "牛奶", "Eggs": "鸡蛋"}
+        assert fake.calls == [(("Eggs",), "zh")]  # only the miss
+
+
+async def test_failure_falls_back_to_english_without_caching():
+    fake = FakeTranslationLLM(table={"Milk": "牛奶"}, raise_n_times=1)
+    with _session() as s:
+        out = await translate_texts(s, ["Milk"], lang="zh", llm=fake)
+        assert out == {"Milk": "Milk"}                       # English fallback
+        assert s.get(NameTranslation, ("zh", "Milk")) is None  # nothing cached
+
+
+async def test_empty_input_returns_empty():
+    fake = FakeTranslationLLM(table={})
+    with _session() as s:
+        out = await translate_texts(s, [], lang="zh", llm=fake)
+    assert out == {}
+    assert fake.calls == []
+
+
+async def test_count_mismatch_falls_back_to_english():
+    class _ShortLLM:
+        async def translate(self, *, texts, lang):
+            return ["only-one"], 0  # returns 1 translation for 2 inputs -> mismatch
+
+    with _session() as s:
+        out = await translate_texts(s, ["Milk", "Eggs"], lang="zh", llm=_ShortLLM())
+        assert out == {"Milk": "Milk", "Eggs": "Eggs"}      # both fall back to English
+        assert s.get(NameTranslation, ("zh", "Milk")) is None  # nothing cached
+
+
+async def test_anthropic_translation_parses_json_array():
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(return_value=_TextResponse(json.dumps(["牛奶", "鸡蛋"])))
+    client = AnthropicTranslationLLMClient(sdk=sdk, model="claude-haiku-4-5-20251001")
+    out, cost = await client.translate(texts=["Milk", "Eggs"], lang="zh")
+    assert out == ["牛奶", "鸡蛋"]
+    assert cost == 500
+
+
+async def test_anthropic_translation_rejects_non_array():
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(return_value=_TextResponse(json.dumps({"not": "an array"})))
+    client = AnthropicTranslationLLMClient(sdk=sdk, model="claude-haiku-4-5-20251001")
+    with pytest.raises(ValueError):
+        await client.translate(texts=["Milk"], lang="zh")
+
+
+async def test_openai_translation_parses_items():
+    parsed = TranslationList(items=["牛奶", "鸡蛋"])
+    sdk = MagicMock()
+    sdk.responses.parse = AsyncMock(return_value=_OpenAIParsedResponse(parsed))
+    client = OpenAITranslationLLMClient(sdk=sdk, model="gpt-5.4-mini")
+    out, cost = await client.translate(texts=["Milk", "Eggs"], lang="zh")
+    assert out == ["牛奶", "鸡蛋"]
+    assert cost == 420
+
+
+async def test_selector_delegates_to_default_provider():
+    fake = FakeTranslationLLM(table={"Milk": "牛奶"})
+    sel = TranslationLLMProviderSelector({"anthropic": fake}, "anthropic")
+    out, _ = await sel.translate(texts=["Milk"], lang="zh")
+    assert out == ["牛奶"]
+
+
+def test_selector_rejects_unconfigured_default():
+    from app.llm import LLMProviderNotConfigured
+    with pytest.raises(LLMProviderNotConfigured):
+        TranslationLLMProviderSelector({}, "anthropic")

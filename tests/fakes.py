@@ -147,3 +147,19 @@ class FakeSearchClient(ShelfLifeSearchClient):
             return self.by_name[name]
         assert self.default is not None, f"no canned result for {name!r}"
         return self.default
+
+
+@dataclass
+class FakeTranslationLLM:
+    table: dict[str, str] = field(default_factory=dict)
+    raise_n_times: int = 0
+    _raises: int = 0
+    calls: list[tuple[tuple[str, ...], str]] = field(default_factory=list)
+
+    async def translate(self, *, texts: list[str], lang: str) -> tuple[list[str], int | None]:
+        self.calls.append((tuple(texts), lang))
+        if self._raises < self.raise_n_times:
+            self._raises += 1
+            raise RuntimeError("simulated translation failure")
+        result: list[str] = [self.table.get(t, t) for t in texts]
+        return result, 0

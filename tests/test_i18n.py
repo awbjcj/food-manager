@@ -1,6 +1,8 @@
 import string
 from datetime import date
 
+import pytest
+
 from app.i18n import DEFAULT_LANG, LANGS, MESSAGES, format_date, t, weekday_abbr
 
 
@@ -25,8 +27,15 @@ def test_t_unknown_lang_falls_back_to_english():
     assert t("digest.section.today", "de") == "Today"
 
 
-def test_t_bad_placeholder_falls_back_to_english_text_not_crash():
-    assert t("digest.more", "en", n=5) == "... and 5 more - tap [show all]"
+def test_t_missing_kwarg_raises_to_surface_caller_bug():
+    with pytest.raises(KeyError):
+        t("digest.more", "en")  # caller forgot n= -> must surface, not swallow
+
+
+def test_t_malformed_translation_falls_back_to_english(monkeypatch):
+    monkeypatch.setitem(MESSAGES, "_test.key", {"en": "{n} items", "zh": "{m} items"})
+    # broken zh placeholder must not crash; falls back to the English render
+    assert t("_test.key", "zh", n=3) == "3 items"
 
 
 def test_format_date_en_same_year_matches_legacy():

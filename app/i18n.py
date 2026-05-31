@@ -27,15 +27,14 @@ MESSAGES: dict[str, dict[str, str]] = {
 
 def t(key: str, lang: str, /, **kwargs: object) -> str:
     variants = MESSAGES[key]
-    template = variants.get(lang) or variants["en"]
+    en_result = variants["en"].format(**kwargs)
+    if lang == DEFAULT_LANG or lang not in variants:
+        return en_result
     try:
-        return template.format(**kwargs)
+        return variants[lang].format(**kwargs)
     except (KeyError, IndexError):
-        try:
-            return variants["en"].format(**kwargs)
-        except (KeyError, IndexError):
-            log.warning("i18n_format_failed", extra={"key": key, "lang": lang})
-            return variants["en"]
+        log.warning("i18n_format_failed", extra={"key": key, "lang": lang})
+        return en_result
 
 
 _MONTH_ABBR: dict[str, tuple[str, ...]] = {

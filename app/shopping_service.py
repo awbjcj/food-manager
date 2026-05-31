@@ -16,10 +16,10 @@ class AddShoppingResult:
     already: list[str] = field(default_factory=list)
 
 
-def _pending_normalized(session: Session, *, user_id: int) -> set[str]:
+def _pending_normalized(session: Session, *, household_id: int) -> set[str]:
     rows = session.exec(
         select(ShoppingList).where(
-            ShoppingList.user_id == user_id,
+            ShoppingList.household_id == household_id,
             ShoppingList.bought_at.is_(None),  # type: ignore[union-attr]
         )
     ).all()
@@ -27,9 +27,9 @@ def _pending_normalized(session: Session, *, user_id: int) -> set[str]:
 
 
 def add_missing(
-    session: Session, *, user_id: int, ingredients, now: datetime
+    session: Session, *, household_id: int, ingredients, now: datetime
 ) -> AddShoppingResult:
-    existing = _pending_normalized(session, user_id=user_id)
+    existing = _pending_normalized(session, household_id=household_id)
     added_now = utc_naive(now)
     result = AddShoppingResult()
     for ingredient in ingredients:
@@ -40,7 +40,7 @@ def add_missing(
         existing.add(normalized)
         session.add(
             ShoppingList(
-                user_id=user_id,
+                household_id=household_id,
                 name_raw=ingredient.name,
                 name_normalized=normalized,
                 qty=getattr(ingredient, "qty", None),
@@ -53,12 +53,12 @@ def add_missing(
     return result
 
 
-def list_pending(session: Session, *, user_id: int) -> list[ShoppingList]:
+def list_pending(session: Session, *, household_id: int) -> list[ShoppingList]:
     return list(
         session.exec(
             select(ShoppingList)
             .where(
-                ShoppingList.user_id == user_id,
+                ShoppingList.household_id == household_id,
                 ShoppingList.bought_at.is_(None),  # type: ignore[union-attr]
             )
             .order_by(ShoppingList.added_at)  # type: ignore[arg-type]
@@ -67,10 +67,10 @@ def list_pending(session: Session, *, user_id: int) -> list[ShoppingList]:
 
 
 def check_off(
-    session: Session, *, user_id: int, shopping_id: int, now: datetime
+    session: Session, *, household_id: int, shopping_id: int, now: datetime
 ) -> bool:
     row = session.get(ShoppingList, shopping_id)
-    if row is None or row.user_id != user_id or row.bought_at is not None:
+    if row is None or row.household_id != household_id or row.bought_at is not None:
         return False
     row.bought_at = utc_naive(now)
     session.add(row)

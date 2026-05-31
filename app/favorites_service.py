@@ -22,11 +22,11 @@ class SaveResult:
 
 
 def save_candidate(
-    session: Session, *, user_id: int, candidate: RecipeCandidate, now: datetime
+    session: Session, *, household_id: int, candidate: RecipeCandidate, now: datetime
 ) -> SaveResult:
     existing = session.exec(
         select(SavedRecipe).where(
-            SavedRecipe.user_id == user_id,
+            SavedRecipe.household_id == household_id,
             SavedRecipe.title == candidate.title,
             SavedRecipe.source_url == candidate.source_url,
         )
@@ -34,7 +34,7 @@ def save_candidate(
     if existing is not None:
         return SaveResult(saved=False, recipe_id=existing.id, duplicate=True)
     row = SavedRecipe(
-        user_id=user_id,
+        household_id=household_id,
         title=candidate.title,
         cuisine=candidate.cuisine,
         source_url=candidate.source_url,
@@ -48,21 +48,21 @@ def save_candidate(
     return SaveResult(saved=True, recipe_id=row.id, duplicate=False)
 
 
-def list_saved(session: Session, *, user_id: int) -> list[SavedRecipe]:
+def list_saved(session: Session, *, household_id: int) -> list[SavedRecipe]:
     return list(
         session.exec(
             select(SavedRecipe)
-            .where(SavedRecipe.user_id == user_id)
+            .where(SavedRecipe.household_id == household_id)
             .order_by(SavedRecipe.saved_at)  # type: ignore[arg-type]
         ).all()
     )
 
 
 def load_saved(
-    session: Session, *, user_id: int, recipe_id: int
+    session: Session, *, household_id: int, recipe_id: int
 ) -> Optional[SavedRecipe]:
     row = session.get(SavedRecipe, recipe_id)
-    if row is None or row.user_id != user_id:
+    if row is None or row.household_id != household_id:
         return None
     return row
 
@@ -81,10 +81,10 @@ def recipe_from_saved(saved: SavedRecipe) -> RecipeCandidate:
 
 
 def recook_shopping_list(
-    session: Session, *, user_id: int, saved: SavedRecipe, today: date
+    session: Session, *, household_id: int, saved: SavedRecipe, today: date
 ) -> list[str]:
     recipe = recipe_from_saved(saved)
-    pantry = active_pantry_names(session, user_id=user_id, today=today)
+    pantry = active_pantry_names(session, household_id=household_id, today=today)
     return shopping_list(
         recipe_names=[i.name for i in recipe.ingredients],
         pantry_normalized=pantry,

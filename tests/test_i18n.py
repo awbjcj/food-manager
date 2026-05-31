@@ -45,3 +45,29 @@ def test_format_date_zh_uses_localized_month():
 
 def test_weekday_abbr_en_matches_legacy():
     assert weekday_abbr(date(2026, 5, 28), lang="en") == "Thu"  # 2026-05-28 is a Thursday
+
+
+import string
+from app.i18n import MESSAGES, LANGS
+
+
+def _placeholders(template: str) -> set[str]:
+    return {f for _, f, _, _ in string.Formatter().parse(template) if f}
+
+
+def test_every_key_has_english():
+    for key, variants in MESSAGES.items():
+        assert "en" in variants, f"missing en for {key}"
+
+
+def test_translations_use_only_known_langs():
+    for key, variants in MESSAGES.items():
+        for lang in variants:
+            assert lang in LANGS, f"{key} has unknown lang {lang!r}"
+
+
+def test_translation_placeholders_match_english():
+    for key, variants in MESSAGES.items():
+        en_ph = _placeholders(variants["en"])
+        for lang, template in variants.items():
+            assert _placeholders(template) == en_ph, f"{key}/{lang} placeholder mismatch"

@@ -15,6 +15,7 @@ from app.models import PantryItem, User
 from app.pantry_service import list_digest_due
 from app.pending_service import sweep_expired
 from app.renderer import build_digest_keyboard, render_digest
+from app.translation_service import translate_texts
 
 
 log = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ async def send_digest_once(
     bot,
     session_factory: SessionFactory,
     today_provider: TodayProvider,
+    translation_llm=None,
 ) -> bool:
     with session_factory() as session:
         user = session.get(User, user_id)
@@ -57,9 +59,15 @@ async def send_digest_once(
         if payload is None:
             log.info("digest_silent_day", extra={"user_id": user_id, "today": str(today)})
             return False
-        rendered = render_digest(payload.items, today=today)
+        names: dict[str, str] = {}
+        if user.lang != "en" and translation_llm is not None:
+            names = await translate_texts(
+                session, [i.raw_name for i in payload.items],
+                lang=user.lang, llm=translation_llm,
+            )
+        rendered = render_digest(payload.items, today=today, lang=user.lang, names=names)
         keyboard = build_digest_keyboard(
-            rendered.rendered_item_ids, has_more=rendered.has_more
+            rendered.rendered_item_ids, has_more=rendered.has_more, lang=user.lang
         )
         await bot.send_message(
             chat_id=payload.user.chat_id,
@@ -80,6 +88,7 @@ async def send_digest_with_retry(
     session_factory: SessionFactory,
     today_provider: TodayProvider,
     retry_sleep_seconds: int = 60,
+    translation_llm=None,
 ) -> None:
     try:
         await send_digest_once(
@@ -87,6 +96,7 @@ async def send_digest_with_retry(
             bot=bot,
             session_factory=session_factory,
             today_provider=today_provider,
+            translation_llm=translation_llm,
         )
         return
     except Exception as exc:
@@ -106,6 +116,7 @@ async def send_digest_with_retry(
             bot=bot,
             session_factory=session_factory,
             today_provider=today_provider,
+            translation_llm=translation_llm,
         )
     except Exception as exc:
         log.warning(

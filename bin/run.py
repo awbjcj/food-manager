@@ -215,12 +215,16 @@ async def _amain(settings: Settings) -> None:
 
     scheduler = AsyncIOScheduler()
 
+    # TODO(task19): pass the translation selector here once built
+    _translation_llm = None
+
     async def send(user_id: int) -> None:
         await send_digest_with_retry(
             user_id=user_id,
             bot=bot,
             session_factory=session_factory,
             today_provider=lambda tz: datetime.now(ZoneInfo(tz)).date(),
+            translation_llm=_translation_llm,
         )
 
     register_all_user_digests(scheduler, session_factory=session_factory, send=send)

@@ -1,6 +1,8 @@
+import pytest
 from datetime import datetime, timezone
 from sqlmodel import Session, SQLModel, create_engine
 from app.models import User, Household
+from app.commands import parse_lang, CommandError
 
 
 def _session() -> Session:
@@ -22,3 +24,22 @@ def test_user_lang_defaults_to_en():
         s.commit()
         s.refresh(u)
         assert u.lang == "en"
+
+
+def test_parse_lang_none_when_no_args():
+    assert parse_lang([]) is None
+
+
+def test_parse_lang_lowercases_and_validates():
+    assert parse_lang(["ZH"]) == "zh"
+    assert parse_lang(["fr"]) == "fr"
+
+
+def test_parse_lang_rejects_unknown():
+    with pytest.raises(CommandError):
+        parse_lang(["klingon"])
+
+
+def test_parse_lang_rejects_too_many_args():
+    with pytest.raises(CommandError):
+        parse_lang(["en", "zh"])

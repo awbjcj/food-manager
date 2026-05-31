@@ -28,6 +28,9 @@ def test_household_owns_user_and_holds_profile():
 
 
 def test_user_no_longer_has_profile_fields():
-    # profile fields moved to Household
-    assert not hasattr(User(telegram_id=1, chat_id=1, household_id=1,
-                            created_at=datetime.now(timezone.utc)), "diet")
+    _MOVED = {"diet", "exclusions_json", "preferred_cuisines_json",
+              "max_cook_minutes", "household_size", "profile_note"}
+    user_fields = set(User.model_fields)
+    assert _MOVED.isdisjoint(user_fields), f"still on User: {_MOVED & user_fields}"
+    hh_fields = set(Household.model_fields)
+    assert _MOVED.issubset(hh_fields), f"missing from Household: {_MOVED - hh_fields}"

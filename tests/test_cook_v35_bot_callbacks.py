@@ -80,7 +80,9 @@ def test_feedback_callback_records_liked(monkeypatch):
         _Cb(f"cookfb:{cook_id}:liked"),
         session_factory=lambda: Session(engine), now_provider=_NOW))
     with Session(engine) as db:
-        assert db.get(CookSession, cook_id).feedback == "liked"
+        cs = db.get(CookSession, cook_id)
+        assert cs is not None
+        assert cs.feedback == "liked"
 
 
 def test_feedback_callback_on_expired_session_is_rejected(monkeypatch):
@@ -97,7 +99,9 @@ def test_feedback_callback_on_expired_session_is_rejected(monkeypatch):
         cb, session_factory=lambda: Session(engine), now_provider=_NOW))
     cb.answer.assert_awaited_with("this cook session expired - start a new /cook")
     with Session(engine) as db:
-        assert db.get(CookSession, cook_id).feedback == "none"
+        cs = db.get(CookSession, cook_id)
+        assert cs is not None
+        assert cs.feedback == "none"
 
 
 def test_save_callback_creates_favorite(monkeypatch):
@@ -163,6 +167,7 @@ def test_favcook_callback_replies_with_recipe(monkeypatch):
     asyncio.run(handle_callback(
         cb, session_factory=lambda: Session(engine), now_provider=_NOW))
     cb.message.answer.assert_awaited()
+    assert cb.message.answer.await_args is not None
     assert "Pasta" in cb.message.answer.await_args.args[0]
 
 
@@ -192,13 +197,16 @@ def test_result_keyboard_attached_on_render(monkeypatch):
                         method_gist="x", deliciousness=0.6)]), 9))
     nutrition = FakeNutritionLLM(canned=(NutritionScores(scores=[
         NutritionScore(health_score=80, effort="easy", est_minutes=20, rationale="ok")]), 3))
-    bot = type("B", (), {"edit_message_text": AsyncMock()})()
+    edit_mock = AsyncMock()
+    bot = type("B", (), {"edit_message_text": edit_mock})()
+    assert cook_id is not None
     asyncio.run(run_cook_and_render(
         lambda: Session(engine), user_id=1, user_tz="America/Detroit", cook_id=cook_id,
         selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
         recipe_llm=recipe, nutrition_llm=nutrition,
         now_provider=lambda tz: today_dt, bot=bot))
-    kwargs = bot.edit_message_text.await_args.kwargs
+    assert edit_mock.await_args is not None
+    kwargs = edit_mock.await_args.kwargs
     data = [b.callback_data for row in kwargs["reply_markup"].inline_keyboard for b in row]
     assert f"cooksave:{cook_id}" in data
     assert f"cookfb:{cook_id}:liked" in data
@@ -227,12 +235,15 @@ def test_no_result_keyboard_when_no_recipe_found(monkeypatch):
     # Recipe stage returns zero candidates -> run_cook returns [] (no recipe found).
     recipe = FakeRecipeLLM(canned=(RecipeCandidates(candidates=[]), 9))
     nutrition = FakeNutritionLLM(canned=(NutritionScores(scores=[]), 3))
-    bot = type("B", (), {"edit_message_text": AsyncMock()})()
+    edit_mock = AsyncMock()
+    bot = type("B", (), {"edit_message_text": edit_mock})()
+    assert cook_id is not None
     asyncio.run(run_cook_and_render(
         lambda: Session(engine), user_id=1, user_tz="America/Detroit", cook_id=cook_id,
         selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
         recipe_llm=recipe, nutrition_llm=nutrition,
         now_provider=lambda tz: today_dt, bot=bot))
-    kwargs = bot.edit_message_text.await_args.kwargs
+    assert edit_mock.await_args is not None
+    kwargs = edit_mock.await_args.kwargs
     # No action buttons on a "couldn't find a recipe" message.
     assert kwargs["reply_markup"] is None

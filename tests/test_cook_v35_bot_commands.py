@@ -51,6 +51,7 @@ def test_shopping_handler_renders_items(monkeypatch):
     asyncio.run(handle_shopping(
         msg, session_factory=lambda: Session(engine), now_provider=_NOW))
     msg.answer.assert_awaited()
+    assert msg.answer.await_args is not None
     text = msg.answer.await_args.args[0]
     assert "Eggs" in text
     keyboard = msg.answer.await_args.kwargs["reply_markup"]
@@ -69,6 +70,7 @@ def test_favorites_handler_renders_saved(monkeypatch):
     asyncio.run(handle_favorites(
         msg, session_factory=lambda: Session(engine)))
     msg.answer.assert_awaited()
+    assert msg.answer.await_args is not None
     text = msg.answer.await_args.args[0]
     assert "Pasta" in text
     keyboard = msg.answer.await_args.kwargs["reply_markup"]
@@ -80,5 +82,6 @@ def test_favorites_empty_state(monkeypatch):
     engine = _engine_with_user()
     msg = _Msg(text="/favorites")
     asyncio.run(handle_favorites(msg, session_factory=lambda: Session(engine)))
+    assert msg.answer.await_args is not None
     text = msg.answer.await_args.args[0]
     assert "no saved" in text.lower()

@@ -763,7 +763,9 @@ async def handle_shopping(
             translation_llm=translation_llm,
         )
         keyboard = (
-            to_aiogram_keyboard(build_shopping_keyboard([i.id for i in items if i.id]))
+            to_aiogram_keyboard(
+                build_shopping_keyboard([i.id for i in items if i.id], lang=user.lang)
+            )
             if items
             else None
         )
@@ -789,7 +791,11 @@ async def handle_favorites(
             translation_llm=translation_llm,
         )
         keyboard = (
-            to_aiogram_keyboard(build_favorites_keyboard([r.id for r in recipes if r.id]))
+            to_aiogram_keyboard(
+                build_favorites_keyboard(
+                    [r.id for r in recipes if r.id], lang=user.lang
+                )
+            )
             if recipes
             else None
         )

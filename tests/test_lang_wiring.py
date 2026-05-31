@@ -224,6 +224,39 @@ async def test_favorites_english_user_unaffected(session_factory, monkeypatch):
     assert "Pasta" in text
 
 
+@pytest.mark.asyncio
+async def test_favorites_keyboard_button_translated_for_zh_user(
+    session_factory, monkeypatch
+):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    household_id = _set_user_lang(session_factory, "zh")
+
+    with session_factory() as db:
+        save_candidate(
+            db,
+            household_id=household_id,
+            candidate=RecipeCandidate(
+                title="Pasta",
+                cuisine="italian",
+                source_url="u",
+                ingredients=[RecipeIngredient(name="pasta")],
+                method_gist="boil",
+            ),
+            now=_now("x"),
+        )
+
+    fake = FakeTranslationLLM(table={"Pasta": "意面", "italian": "意大利菜"})
+    msg = _msg("/favorites")
+    await handle_favorites(
+        msg,
+        session_factory=session_factory,
+        translation_llm=fake,
+    )
+    markup = msg.answer.call_args.kwargs["reply_markup"]
+    button_text = markup.inline_keyboard[0][0].text
+    assert button_text == "再做一次"
+
+
 # ---------------------------------------------------------------------------
 # handle_shopping
 # ---------------------------------------------------------------------------

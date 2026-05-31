@@ -117,12 +117,12 @@ async def propose_correct(
     session: Session,
     *,
     llm: TextLLMClient,
-    user_id: int,
+    household_id: int,
     item: PantryItem,
     user_text: str,
     today: date,
 ) -> tuple[CorrectPayload, Optional[int]]:
-    cache_row = get_cached(session, user_id, item.normalized_name)
+    cache_row = get_cached(session, household_id, item.normalized_name)
     diff, cost = await llm.parse_correct(
         item_snapshot=_snapshot(item),
         cache_snapshot=_cache_snapshot(cache_row),
@@ -194,7 +194,7 @@ async def propose_correct(
 def apply_correct(
     session: Session,
     *,
-    user_id: int,
+    household_id: int,
     item: PantryItem,
     payload: CorrectPayload,
 ) -> None:
@@ -225,13 +225,13 @@ def apply_correct(
     new_category = item.category
 
     if payload.cache_action == "move":
-        old_row = session.get(ShelfLifeCache, (user_id, old_normalized))
+        old_row = session.get(ShelfLifeCache, (household_id, old_normalized))
         if old_row is not None and old_normalized != new_normalized:
             session.delete(old_row)
             session.flush()
         write_user_correction(
             session,
-            user_id,
+            household_id,
             new_normalized,
             days=new_days,
             category=new_category,
@@ -240,7 +240,7 @@ def apply_correct(
     elif payload.cache_action == "add_new":
         write_user_correction(
             session,
-            user_id,
+            household_id,
             new_normalized,
             days=new_days,
             category=new_category,
@@ -250,7 +250,7 @@ def apply_correct(
         if days_change is not None or (category_change is not None and name_change is None):
             write_user_correction(
                 session,
-                user_id,
+                household_id,
                 new_normalized,
                 days=new_days,
                 category=new_category,
@@ -263,7 +263,7 @@ async def propose_add(
     session: Session,
     *,
     llm: TextLLMClient,
-    user_id: int,
+    household_id: int,
     user_text: str,
     today: date,
     tz: str,
@@ -299,7 +299,7 @@ async def propose_add(
             shelf_life_source = "user_correction"
             ingest_source = "manual_user_hint"
         else:
-            cached = get_cached(session, user_id, normalized)
+            cached = get_cached(session, household_id, normalized)
             if cached is not None:
                 days = cached.days
                 shelf_life_source = "cache"
@@ -316,7 +316,7 @@ async def propose_add(
                     shelf_life_source = "websearch"
                     ingest_source = "llm"
                     put_cached(
-                        session, user_id, normalized, days=days,
+                        session, household_id, normalized, days=days,
                         category=category, confidence=0.9, source="llm", commit=False,
                     )
                 else:
@@ -363,13 +363,13 @@ async def propose_add(
 def apply_add(
     session: Session,
     *,
-    user_id: int,
+    household_id: int,
     payload: AddPayload,
     today: date,
 ) -> int:
     normalized = normalize(payload.name)
     item = PantryItem(
-        user_id=user_id,
+        household_id=household_id,
         raw_name=payload.name,
         normalized_name=normalized,
         category=payload.category,
@@ -392,7 +392,7 @@ def apply_add(
     if payload.shelf_life_source == "user_correction":
         write_user_correction(
             session,
-            user_id,
+            household_id,
             normalized,
             days=payload.shelf_life_days,
             category=payload.category,

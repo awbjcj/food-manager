@@ -9,7 +9,7 @@ from app.refine_service import _accrue_receipt_cost
 from app.cache import get_cached
 from app.correction_service import propose_add
 from app.llm import LLMResult, ParseResult, ParsedItem, ProposedAddItem
-from app.models import PantryItem, Receipt, User
+from app.models import Household, PantryItem, Receipt, User
 from app.pantry_service import compute_stats
 from app.refine_service import (
     ShelfLifeSearchResult,
@@ -59,14 +59,18 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         db.commit()
         yield db
 
 
 def _item(session, name, *, days=5, status="active", source="llm", rid=None):
     item = PantryItem(
-        user_id=1,
+        household_id=1,
         raw_name=name,
         normalized_name=name.lower(),
         category="dairy",
@@ -267,7 +271,7 @@ async def test_propose_add_uses_search_on_cache_miss(session):
     proposals, _ = await propose_add(
         session,
         llm=text_llm,
-        user_id=1,
+        household_id=1,
         user_text="kefir",
         today=date(2026, 5, 28),
         tz="America/Detroit",
@@ -298,7 +302,7 @@ async def test_propose_add_skips_search_when_user_gave_expiry(session):
     proposals, _ = await propose_add(
         session,
         llm=text_llm,
-        user_id=1,
+        household_id=1,
         user_text="kefir keeps 3 days",
         today=date(2026, 5, 28),
         tz="America/Detroit",
@@ -326,7 +330,7 @@ async def test_propose_add_no_search_client_uses_estimate(session):
     proposals, _ = await propose_add(
         session,
         llm=text_llm,
-        user_id=1,
+        household_id=1,
         user_text="kumquat",
         today=date(2026, 5, 28),
         tz="America/Detroit",
@@ -364,7 +368,7 @@ async def test_anthropic_search_client_handles_transport_error():
 
 def test_accrued_search_cost_shows_in_stats(session):
     r = Receipt(
-        user_id=1,
+        household_id=1,
         photo_file_id="r1",
         purchase_date=date(2026, 5, 28),
         purchase_date_source="receipt",
@@ -374,7 +378,7 @@ def test_accrued_search_cost_shows_in_stats(session):
     session.add(r)
     session.commit()
     _accrue_receipt_cost(session, r.id, 300)  # simulate refine search cost
-    stats = compute_stats(session, user_id=1, now=datetime.now(timezone.utc))
+    stats = compute_stats(session, household_id=1, now=datetime.now(timezone.utc))
     assert stats.total_cost_micros_usd == 1300
 
 
@@ -404,7 +408,7 @@ async def test_propose_add_search_cost_added_to_cost_share(session):
     proposals, _ = await propose_add(
         session,
         llm=text_llm,
-        user_id=1,
+        household_id=1,
         user_text="kefir",
         today=date(2026, 5, 28),
         tz="America/Detroit",
@@ -435,7 +439,7 @@ async def test_propose_add_search_cost_when_parse_cost_unknown(session):
     proposals, _ = await propose_add(
         session,
         llm=text_llm,
-        user_id=1,
+        household_id=1,
         user_text="kefir",
         today=date(2026, 5, 28),
         tz="America/Detroit",
@@ -494,9 +498,13 @@ async def test_run_receipt_refine_refreshes_summary_and_accrues_cost():
     SQLModel.metadata.create_all(engine)
     factory = lambda: Session(engine)
     with factory() as s:
-        s.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        s.add(household)
+        s.commit()
+        s.refresh(household)
+        s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         r = Receipt(
-            user_id=1,
+            household_id=household.id,
             photo_file_id="r1",
             purchase_date=date(2026, 5, 28),
             purchase_date_source="receipt",
@@ -507,7 +515,7 @@ async def test_run_receipt_refine_refreshes_summary_and_accrues_cost():
         s.commit()
         s.refresh(r)
         item = PantryItem(
-            user_id=1,
+            household_id=household.id,
             raw_name="Kefir",
             normalized_name="kefir",
             category="dairy",
@@ -578,9 +586,13 @@ async def test_run_receipt_refine_suppresses_edit_when_receipt_undone():
     SQLModel.metadata.create_all(engine)
     factory = lambda: Session(engine)
     with factory() as s:
-        s.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        s.add(household)
+        s.commit()
+        s.refresh(household)
+        s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         r = Receipt(
-            user_id=1,
+            household_id=household.id,
             photo_file_id="r1",
             purchase_date=date(2026, 5, 28),
             purchase_date_source="receipt",
@@ -591,7 +603,7 @@ async def test_run_receipt_refine_suppresses_edit_when_receipt_undone():
         s.commit()
         s.refresh(r)
         item = PantryItem(
-            user_id=1,
+            household_id=household.id,
             raw_name="Kefir",
             normalized_name="kefir",
             category="dairy",
@@ -657,9 +669,13 @@ async def test_run_receipt_refine_accrues_cost_even_when_nothing_refined():
     SQLModel.metadata.create_all(engine)
     factory = lambda: Session(engine)
     with factory() as s:
-        s.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        s.add(household)
+        s.commit()
+        s.refresh(household)
+        s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         r = Receipt(
-            user_id=1,
+            household_id=household.id,
             photo_file_id="r1",
             purchase_date=date(2026, 5, 28),
             purchase_date_source="receipt",
@@ -670,7 +686,7 @@ async def test_run_receipt_refine_accrues_cost_even_when_nothing_refined():
         s.commit()
         s.refresh(r)
         item = PantryItem(
-            user_id=1,
+            household_id=household.id,
             raw_name="Kefir",
             normalized_name="kefir",
             category="dairy",

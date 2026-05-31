@@ -93,8 +93,7 @@ def _set_terminal(session: Session, pantry_item: PantryItem, status: str) -> Mut
     pantry_item.status = status
     pantry_item.snoozed_until = None
     assert pantry_item.id is not None
-    # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
-    expire_for_item(session, user_id=pantry_item.household_id, item_id=pantry_item.id)
+    expire_for_item(session, household_id=pantry_item.household_id, item_id=pantry_item.id)
     session.add(pantry_item)
     session.commit()
     return MutationResult(applied=True, was_already=False)
@@ -115,8 +114,7 @@ def mark_removed(session: Session, *, household_id: int, item_id: int, today: da
     pantry_item.status = "removed"
     pantry_item.snoozed_until = None
     assert pantry_item.id is not None
-    # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
-    expire_for_item(session, user_id=pantry_item.household_id, item_id=pantry_item.id)
+    expire_for_item(session, household_id=pantry_item.household_id, item_id=pantry_item.id)
     session.add(pantry_item)
     session.commit()
     return MutationResult(applied=True, was_already=False)
@@ -142,8 +140,7 @@ def snooze_item(
         return MutationResult(applied=False, was_already=True)
     pantry_item.snoozed_until = today + timedelta(days=days)
     assert pantry_item.id is not None
-    # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
-    expire_for_item(session, user_id=pantry_item.household_id, item_id=pantry_item.id)
+    expire_for_item(session, household_id=pantry_item.household_id, item_id=pantry_item.id)
     session.add(pantry_item)
     session.commit()
     return MutationResult(applied=True, was_already=False)
@@ -165,8 +162,7 @@ def correct_item(
     pantry_item.shelf_life_source = "user_correction"
     pantry_item.expires_on = pantry_item.purchased_on + timedelta(days=days)
     assert pantry_item.id is not None
-    # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
-    expire_for_item(session, user_id=pantry_item.household_id, item_id=pantry_item.id)
+    expire_for_item(session, household_id=pantry_item.household_id, item_id=pantry_item.id)
     session.add(pantry_item)
     write_user_correction(
         session,
@@ -384,8 +380,7 @@ def undo_receipt(
         if is_untouched(item):
             item.status = "removed"
             item.snoozed_until = None
-            # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
-            expire_for_item(session, user_id=household_id, item_id=item.id)
+            expire_for_item(session, household_id=household_id, item_id=item.id)
             removed_ids.append(item.id)
         else:
             skipped.append((item.id, _skip_reason(item)))
@@ -415,8 +410,7 @@ def undo_add(
         return UndoResult([], [(item.id, _skip_reason(item))], False, expired=False)
     item.status = "removed"
     item.snoozed_until = None
-    # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
-    expire_for_item(session, user_id=household_id, item_id=item.id)
+    expire_for_item(session, household_id=household_id, item_id=item.id)
     session.add(item)
     session.commit()
     return UndoResult([item.id], [], receipt_deleted=False, expired=False)

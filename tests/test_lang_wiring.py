@@ -1,17 +1,37 @@
 """Tests that user.lang is threaded into the display handlers."""
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
-from app.bot import handle_favorites, handle_list, handle_shopping
-from app.cook_models import RecipeCandidate, RecipeIngredient
+from app.bot import (
+    handle_favorites,
+    handle_list,
+    handle_photo,
+    handle_shopping,
+    run_cook_and_render,
+)
+from app.cook_models import (
+    NutritionScore,
+    NutritionScores,
+    RecipeCandidate,
+    RecipeCandidates,
+    RecipeIngredient,
+    SelectedItems,
+)
 from app.favorites_service import save_candidate
-from app.models import Household, PantryItem, User
+from app.llm import LLMResult, ParsedItem, ParseResult
+from app.models import CookSession, Household, PantryItem, User
 from app.shopping_service import add_missing
-from tests.fakes import FakeTranslationLLM
+from tests.fakes import (
+    FakeLLMClient,
+    FakeNutritionLLM,
+    FakeRecipeLLM,
+    FakeSelectionLLM,
+    FakeTranslationLLM,
+)
 
 
 @pytest.fixture
@@ -231,3 +251,231 @@ async def test_shopping_renders_zh_names_for_zh_user(session_factory, monkeypatc
     )
     text = msg.answer.call_args.args[0]
     assert "鸡蛋" in text
+
+
+# ---------------------------------------------------------------------------
+# handle_photo (ingest reply)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ingest_reply_renders_zh_name_for_zh_user(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    _set_user_lang(session_factory, "zh")
+
+    llm = FakeLLMClient(
+        canned=LLMResult(
+            parse=ParseResult(
+                items=[
+                    ParsedItem(
+                        is_food=True,
+                        name="Kefir",
+                        category="dairy",
+                        est_shelf_life_days=7,
+                        confidence=0.9,
+                        track_worthy=True,
+                    )
+                ]
+            ),
+            cost_micros_usd=100,
+        )
+    )
+
+    sent_msg = MagicMock()
+    sent_msg.message_id = 99
+    msg = _msg("")
+    photo_obj = MagicMock()
+    photo_obj.file_id = "fake_file_id"
+    msg.photo = [photo_obj]
+    msg.answer = AsyncMock(return_value=sent_msg)
+
+    fake = FakeTranslationLLM(table={"Kefir": "开菲尔"})
+    await handle_photo(
+        msg,
+        session_factory=session_factory,
+        now_provider=_now,
+        llm=llm,
+        photo_downloader=AsyncMock(return_value=b"jpg"),
+        translation_llm=fake,
+    )
+    text = msg.answer.call_args.args[0]
+    assert "开菲尔" in text
+
+
+@pytest.mark.asyncio
+async def test_ingest_reply_english_user_unaffected(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    _set_user_lang(session_factory, "en")
+
+    llm = FakeLLMClient(
+        canned=LLMResult(
+            parse=ParseResult(
+                items=[
+                    ParsedItem(
+                        is_food=True,
+                        name="Kefir",
+                        category="dairy",
+                        est_shelf_life_days=7,
+                        confidence=0.9,
+                        track_worthy=True,
+                    )
+                ]
+            ),
+            cost_micros_usd=100,
+        )
+    )
+
+    sent_msg = MagicMock()
+    sent_msg.message_id = 99
+    msg = _msg("")
+    photo_obj = MagicMock()
+    photo_obj.file_id = "fake_file_id"
+    msg.photo = [photo_obj]
+    msg.answer = AsyncMock(return_value=sent_msg)
+
+    await handle_photo(
+        msg,
+        session_factory=session_factory,
+        now_provider=_now,
+        llm=llm,
+        photo_downloader=AsyncMock(return_value=b"jpg"),
+    )
+    text = msg.answer.call_args.args[0]
+    assert "Kefir" in text
+
+
+# ---------------------------------------------------------------------------
+# run_cook_and_render (cook result)
+# ---------------------------------------------------------------------------
+
+def _seed_ready_cook(session_factory, household_id: int) -> int:
+    today = date(2026, 6, 1)
+    with session_factory() as db:
+        for i in range(4):
+            db.add(
+                PantryItem(
+                    household_id=household_id,
+                    raw_name=f"item{i}",
+                    normalized_name=f"item{i}",
+                    category="produce",
+                    qty=1.0,
+                    purchased_on=today,
+                    shelf_life_days=2,
+                    shelf_life_source="llm",
+                    ingest_shelf_life_source="llm",
+                    expires_on=today + timedelta(days=2),
+                    status="active",
+                    created_via="receipt",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+        now = datetime(2026, 6, 1, 12, 0)
+        cook = CookSession(
+            household_id=household_id,
+            status="ready",
+            chat_id=99,
+            meal_type="Dinner",
+            cuisine="Italian",
+            selected_item_ids="[]",
+            message_id=99,
+            created_at=now,
+            expires_at=now + timedelta(minutes=10),
+        )
+        db.add(cook)
+        db.commit()
+        db.refresh(cook)
+        assert cook.id is not None
+        return cook.id
+
+
+def _cook_llms():
+    selection = FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5))
+    recipe = FakeRecipeLLM(
+        canned=(
+            RecipeCandidates(
+                candidates=[
+                    RecipeCandidate(
+                        title="Pasta",
+                        cuisine="italian",
+                        source_url="u",
+                        ingredients=[RecipeIngredient(name="item0")],
+                        method_gist="boil",
+                        deliciousness=0.6,
+                    )
+                ]
+            ),
+            9,
+        )
+    )
+    nutrition = FakeNutritionLLM(
+        canned=(
+            NutritionScores(
+                scores=[
+                    NutritionScore(
+                        health_score=80, effort="easy", est_minutes=20, rationale="ok"
+                    )
+                ]
+            ),
+            3,
+        )
+    )
+    return selection, recipe, nutrition
+
+
+@pytest.mark.asyncio
+async def test_cook_result_renders_zh_title_for_zh_user(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    household_id = _set_user_lang(session_factory, "zh")
+    cook_id = _seed_ready_cook(session_factory, household_id)
+
+    selection, recipe, nutrition = _cook_llms()
+    edits: list = []
+    bot = MagicMock()
+    bot.edit_message_text = AsyncMock(
+        side_effect=lambda **kw: edits.append(kw["text"])
+    )
+    fake = FakeTranslationLLM(table={"Pasta": "意面"})
+
+    await run_cook_and_render(
+        session_factory,
+        user_id=1,
+        household_id=household_id,
+        user_tz="America/Detroit",
+        cook_id=cook_id,
+        selection_llm=selection,
+        recipe_llm=recipe,
+        nutrition_llm=nutrition,
+        now_provider=_now,
+        bot=bot,
+        translation_llm=fake,
+    )
+    assert edits
+    assert "意面" in edits[-1]
+
+
+@pytest.mark.asyncio
+async def test_cook_result_english_user_unaffected(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    household_id = _set_user_lang(session_factory, "en")
+    cook_id = _seed_ready_cook(session_factory, household_id)
+
+    selection, recipe, nutrition = _cook_llms()
+    edits: list = []
+    bot = MagicMock()
+    bot.edit_message_text = AsyncMock(
+        side_effect=lambda **kw: edits.append(kw["text"])
+    )
+
+    await run_cook_and_render(
+        session_factory,
+        user_id=1,
+        household_id=household_id,
+        user_tz="America/Detroit",
+        cook_id=cook_id,
+        selection_llm=selection,
+        recipe_llm=recipe,
+        nutrition_llm=nutrition,
+        now_provider=_now,
+        bot=bot,
+    )
+    assert edits
+    assert "Pasta" in edits[-1]

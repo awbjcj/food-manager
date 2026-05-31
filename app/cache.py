@@ -7,14 +7,14 @@ from app.models import CacheSource, ShelfLifeCache
 
 
 def get_cached(
-    session: Session, user_id: int, normalized_name: str
+    session: Session, household_id: int, normalized_name: str
 ) -> Optional[ShelfLifeCache]:
-    return session.get(ShelfLifeCache, (user_id, normalized_name))
+    return session.get(ShelfLifeCache, (household_id, normalized_name))
 
 
 def put_cached(
     session: Session,
-    user_id: int,
+    household_id: int,
     normalized_name: str,
     *,
     days: int,
@@ -23,11 +23,11 @@ def put_cached(
     source: CacheSource = "llm",
     commit: bool = True,
 ) -> ShelfLifeCache:
-    existing = get_cached(session, user_id, normalized_name)
+    existing = get_cached(session, household_id, normalized_name)
     if existing is not None:
         return existing
     row = ShelfLifeCache(
-        user_id=user_id,
+        household_id=household_id,
         normalized_name=normalized_name,
         days=days,
         category=category,
@@ -46,18 +46,18 @@ def put_cached(
 
 def write_user_correction(
     session: Session,
-    user_id: int,
+    household_id: int,
     normalized_name: str,
     *,
     days: int,
     category: Optional[str] = None,
     commit: bool = True,
 ) -> ShelfLifeCache:
-    existing = get_cached(session, user_id, normalized_name)
+    existing = get_cached(session, household_id, normalized_name)
     now = datetime.now(timezone.utc)
     if existing is None:
         row = ShelfLifeCache(
-            user_id=user_id,
+            household_id=household_id,
             normalized_name=normalized_name,
             days=days,
             category=category,

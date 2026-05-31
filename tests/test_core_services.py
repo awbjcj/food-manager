@@ -15,7 +15,7 @@ from app.ingest_service import (
     ingest_photo,
 )
 from app.llm import AnthropicLLMClient, LLMResult, ParseResult, ParsedItem
-from app.models import PantryItem, Receipt, ShelfLifeCache, User
+from app.models import Household, PantryItem, Receipt, ShelfLifeCache, User
 from app.normalization import ALIASES, normalize
 from app.pantry_service import (
     ALLOWED_CATEGORIES,
@@ -39,7 +39,11 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         db.commit()
         yield db
 
@@ -81,7 +85,7 @@ def test_make_engine_and_session_factory(tmp_path):
 
 def test_models_insert_and_cache_composite_pk(session):
     receipt = Receipt(
-        user_id=1,
+        household_id=1,
         photo_file_id="abc",
         purchase_date=date(2026, 5, 26),
         purchase_date_source="receipt",
@@ -90,7 +94,7 @@ def test_models_insert_and_cache_composite_pk(session):
     session.add(receipt)
     session.commit()
     row = ShelfLifeCache(
-        user_id=1,
+        household_id=1,
         normalized_name="whole milk",
         days=7,
         category="dairy",
@@ -126,7 +130,7 @@ def test_cache_user_correction_priority_and_scope(session):
     write_user_correction(session, 1, "whole milk", days=5)
     cached = get_cached(session, 1, "whole milk")
     assert cached is not None and cached.source == "user_correction"
-    session.add(User(telegram_id=2, chat_id=2, created_at=datetime.now(timezone.utc)))
+    session.add(User(telegram_id=2, chat_id=2, household_id=1, created_at=datetime.now(timezone.utc)))
     session.commit()
     assert get_cached(session, 2, "whole milk") is None
 

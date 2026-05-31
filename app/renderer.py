@@ -463,7 +463,8 @@ def render_list(items: list, *, today: date, lang: str = "en", names=None) -> st
     blocks: list[str] = []
     for cat in ordered:
         group = sorted(by_cat[cat], key=lambda i: i.expires_on)
-        block = [f"{t('category.' + cat, lang)} ({len(group)})"]
+        cat_label = t(f"category.{cat}", lang) if cat in CATEGORY_ORDER else cat.capitalize()
+        block = [f"{cat_label} ({len(group)})"]
         block.extend(f"  {render_item_line(i, today=today, lang=lang, names=names)}" for i in group)
         blocks.append("\n".join(block))
     return "\n\n".join(blocks)

@@ -47,12 +47,15 @@ async def translate_texts(
             translations, _cost = await llm.translate(texts=misses, lang=lang)
             if len(translations) != len(misses):
                 raise ValueError("translation count mismatch")
-            for src, dst in zip(misses, translations):
-                session.add(
-                    NameTranslation(lang=lang, source_text=src, translated_text=dst)
-                )
-                result[src] = dst
+            session.add_all(
+                NameTranslation(lang=lang, source_text=src, translated_text=dst)
+                for src, dst in zip(misses, translations)
+            )
             session.commit()
+            # Populate the result only after a successful commit so a failure
+            # leaves every miss to fall back to English consistently.
+            for src, dst in zip(misses, translations):
+                result[src] = dst
         except Exception as exc:
             session.rollback()
             log.warning(

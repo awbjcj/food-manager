@@ -82,6 +82,16 @@ def test_list_zh_category_header_and_name():
     assert "牛奶" in out
 
 
+def test_list_unknown_category_falls_back_without_crash():
+    # A category outside CATEGORY_ORDER has no catalog key; render_list must not
+    # raise KeyError (the old cat.capitalize() path was total).
+    today = date(2026, 5, 28)
+    item = _pantry_item("Mystery", date(2026, 5, 29), 1)
+    item.category = "condiment"
+    out = render_list([item], today=today, lang="zh")
+    assert "Condiment (1)" in out
+
+
 # ---------------------------------------------------------------------------
 # render_ingest_reply i18n tests
 # ---------------------------------------------------------------------------

@@ -33,6 +33,7 @@ def _engine_with_done_cook(candidates):
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
                     created_at=datetime.now(timezone.utc)))
         db.add(CookSession(

@@ -49,6 +49,7 @@ def _db_with_items(n, expiry_days):
     db.add(household)
     db.commit()
     db.refresh(household)
+    assert household.id is not None
     db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
                 created_at=datetime.now(timezone.utc)))
     today = date(2026, 5, 30)

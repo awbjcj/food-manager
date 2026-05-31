@@ -25,6 +25,7 @@ def session_factory():
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(User(telegram_id=1, chat_id=99, household_id=household.id,
                     created_at=datetime.now(timezone.utc)))
         db.commit()

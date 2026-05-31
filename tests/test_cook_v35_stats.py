@@ -16,6 +16,7 @@ def test_compute_stats_counts_feedback():
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         for fb in ("liked", "liked", "disliked", "none"):
             db.add(CookSession(household_id=household.id, status="done", chat_id=1, selected_item_ids="[]",

@@ -63,6 +63,7 @@ def session():
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         db.commit()
         yield db
@@ -174,6 +175,7 @@ async def test_handle_photo_spawns_refine_and_edits_message(monkeypatch):
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
                     created_at=datetime.now(timezone.utc)))
         db.commit()
@@ -510,6 +512,7 @@ async def test_run_receipt_refine_refreshes_summary_and_accrues_cost():
         s.add(household)
         s.commit()
         s.refresh(household)
+        assert household.id is not None
         s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         r = Receipt(
             household_id=household.id,
@@ -599,6 +602,7 @@ async def test_run_receipt_refine_suppresses_edit_when_receipt_undone():
         s.add(household)
         s.commit()
         s.refresh(household)
+        assert household.id is not None
         s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         r = Receipt(
             household_id=household.id,
@@ -683,6 +687,7 @@ async def test_run_receipt_refine_accrues_cost_even_when_nothing_refined():
         s.add(household)
         s.commit()
         s.refresh(household)
+        assert household.id is not None
         s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         r = Receipt(
             household_id=household.id,

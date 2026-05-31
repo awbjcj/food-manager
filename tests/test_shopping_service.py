@@ -16,6 +16,7 @@ def _engine():
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
                     created_at=datetime.now(timezone.utc)))
         db.commit()
@@ -74,6 +75,7 @@ def test_check_off_rejects_other_users_row():
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(User(telegram_id=2, chat_id=2, household_id=household.id,
                     created_at=datetime.now(timezone.utc)))
         db.commit()

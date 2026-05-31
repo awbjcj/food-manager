@@ -46,6 +46,7 @@ def _engine_with_user():
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
                     created_at=datetime.now(timezone.utc)))
         db.commit()
@@ -206,7 +207,8 @@ def test_result_keyboard_attached_on_render(monkeypatch):
     bot = type("B", (), {"edit_message_text": edit_mock})()
     assert cook_id is not None
     asyncio.run(run_cook_and_render(
-        lambda: Session(engine), user_id=1, user_tz="America/Detroit", cook_id=cook_id,
+        lambda: Session(engine), user_id=1, household_id=1, user_tz="America/Detroit",
+        cook_id=cook_id,
         selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
         recipe_llm=recipe, nutrition_llm=nutrition,
         now_provider=lambda tz: today_dt, bot=bot))
@@ -244,7 +246,8 @@ def test_no_result_keyboard_when_no_recipe_found(monkeypatch):
     bot = type("B", (), {"edit_message_text": edit_mock})()
     assert cook_id is not None
     asyncio.run(run_cook_and_render(
-        lambda: Session(engine), user_id=1, user_tz="America/Detroit", cook_id=cook_id,
+        lambda: Session(engine), user_id=1, household_id=1, user_tz="America/Detroit",
+        cook_id=cook_id,
         selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
         recipe_llm=recipe, nutrition_llm=nutrition,
         now_provider=lambda tz: today_dt, bot=bot))

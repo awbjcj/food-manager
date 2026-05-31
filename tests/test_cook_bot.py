@@ -26,6 +26,7 @@ def _engine_with_user():
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
                     created_at=datetime.now(timezone.utc)))
         db.commit()
@@ -280,7 +281,8 @@ def test_run_cook_and_render_completes_and_edits(monkeypatch):
     bot = type("B", (), {"edit_message_text": AsyncMock()})()
 
     asyncio.run(run_cook_and_render(
-        lambda: Session(engine), user_id=1, user_tz="America/Detroit", cook_id=cook_id,
+        lambda: Session(engine), user_id=1, household_id=1, user_tz="America/Detroit",
+        cook_id=cook_id,
         selection_llm=selection, recipe_llm=recipe, nutrition_llm=nutrition,
         now_provider=lambda tz: today_dt, bot=bot,
     ))

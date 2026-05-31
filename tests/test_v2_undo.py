@@ -39,6 +39,7 @@ def session():
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         db.commit()
         yield db
@@ -213,6 +214,7 @@ def handler_engine():
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(User(telegram_id=1, chat_id=99, household_id=household.id, created_at=datetime.now(timezone.utc)))
         db.commit()
     return engine

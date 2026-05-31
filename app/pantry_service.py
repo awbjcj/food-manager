@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal, Optional
 
@@ -201,14 +201,14 @@ class Stats:
     cook_count: int = 0
     cook_feedback_count: int = 0
     cook_liked_count: int = 0
-    text_llm: TextLLMCost = TextLLMCost(
+    text_llm: TextLLMCost = field(default_factory=lambda: TextLLMCost(
         correction_proposal_count=0,
         correction_cost_micros=0,
         correction_unknown_cost_count=0,
         add_proposal_count=0,
         add_cost_micros=0,
         add_unknown_cost_count=0,
-    )
+    ))
 
 
 def compute_stats(session: Session, *, household_id: int, now: datetime) -> Stats:

@@ -61,7 +61,10 @@ from app.llm import (
     ProfileUpdateLLMClient,
     TextLLMClient,
 )
-from app.household_service import provision_solo_household
+from app.household_service import (
+    provision_solo_household,
+    restore_household_for_user,
+)
 from app.models import CookSession, Household, PantryItem, User
 from app.refine_service import run_receipt_refine
 from app.pantry_service import (
@@ -152,7 +155,7 @@ def authorize_and_get_user(
     if existing is not None:
         household = session.get(Household, existing.household_id)
         if household is None:
-            household = provision_solo_household(
+            household = restore_household_for_user(
                 session, existing, created_at=datetime.now(timezone.utc)
             )
         return AuthDecision(True, existing, False, "ok", household=household)
@@ -979,11 +982,9 @@ async def handle_photo(
         spawn(_run_refine())
 
 
-def _cuisine_options(household: Household | None) -> list[str]:
+def _cuisine_options(household: Household) -> list[str]:
     try:
-        prefs = _json.loads(
-            household.preferred_cuisines_json if household is not None else "[]"
-        )
+        prefs = _json.loads(household.preferred_cuisines_json or "[]")
     except (TypeError, ValueError):
         prefs = []
     options = [str(c).title() for c in prefs if str(c).strip()]
@@ -1056,7 +1057,6 @@ async def handle_cook_callback(
         if user is None:
             await cb.answer("not configured")
             return
-        household = session.get(Household, user.household_id)
         cook = load_cook_session(
             session, household_id=user.household_id, cook_id=action.item_id
         )
@@ -1094,6 +1094,11 @@ async def handle_cook_callback(
         option_index = action.option_index
         if option_index is None:
             await cb.answer("unrecognized action")
+            return
+
+        household = session.get(Household, user.household_id)
+        if household is None:
+            await cb.answer("couldn't load your household profile")
             return
 
         if cook.meal_type is None:
@@ -1190,7 +1195,7 @@ async def run_cook_and_render(
     session_factory: _SessionFactory,
     *,
     user_id: int,
-    household_id: int | None = None,
+    household_id: int,
     user_tz: str,
     cook_id: int,
     selection_llm,
@@ -1203,14 +1208,20 @@ async def run_cook_and_render(
         user = session.get(User, user_id)
         if user is None:
             return
-        resolved_household_id = household_id if household_id is not None else user.household_id
         cook = load_cook_session(
-            session, household_id=resolved_household_id, cook_id=cook_id
+            session, household_id=household_id, cook_id=cook_id
         )
         if cook is None or cook.status != "ready":
             return
-        household = session.get(Household, resolved_household_id)
+        household = session.get(Household, household_id)
         if household is None:
+            mark_status(session, cook=cook, status="cancelled")
+            await _safe_edit_bot(
+                bot,
+                chat_id=cook.chat_id,
+                message_id=cook.message_id,
+                text="Couldn't load your household profile - try /cook again.",
+            )
             return
         profile = profile_from_household(household)
         chat_id = cook.chat_id

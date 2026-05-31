@@ -44,6 +44,8 @@ def session():
         db.commit()
         for household in households:
             db.refresh(household)
+        assert households[0].id is not None
+        assert households[1].id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=households[0].id,
                     created_at=datetime.now(timezone.utc)))
         db.add(User(telegram_id=2, chat_id=2, household_id=households[1].id,

@@ -118,6 +118,7 @@ from app.renderer import (
     render_undo_result,
 )
 from app.profile_service import profile_from_household, update_profile_from_sentence
+from app.translation_service import translate_texts
 
 DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8
@@ -212,6 +213,12 @@ def _select_profile_llm(
 ) -> "ProfileUpdateLLMClient":
     selector = getattr(profile_llm, "for_provider", None)
     return cast("ProfileUpdateLLMClient", selector(provider)) if callable(selector) else profile_llm
+
+
+async def _translate_for_render(session, *, lang, texts, translation_llm):
+    if lang == "en" or translation_llm is None:
+        return {}
+    return await translate_texts(session, [x for x in texts if x], lang=lang, llm=translation_llm)
 
 
 def _render_llm_status(user: User, llm: LLMClient, text_llm: TextLLMClient) -> str:
@@ -360,6 +367,7 @@ async def handle_list(
     session_factory: _SessionFactory,
     now_provider: NowProvider,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    translation_llm=None,
 ) -> None:
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
@@ -374,7 +382,13 @@ async def handle_list(
         items = list_active(
             session, household_id=user.household_id, f=list_filter, today=today
         )
-        await msg.answer(render_list(items, today=today))
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=[i.raw_name for i in items],
+            translation_llm=translation_llm,
+        )
+        await msg.answer(render_list(items, today=today, lang=user.lang, names=names))
 
 
 async def handle_add(
@@ -711,7 +725,7 @@ async def handle_stats(
             household_id=user.household_id,
             now=now.astimezone(timezone.utc),
         )
-        await msg.answer(render_stats(stats))
+        await msg.answer(render_stats(stats, lang=user.lang))
 
 
 async def handle_shopping(
@@ -720,18 +734,25 @@ async def handle_shopping(
     session_factory: _SessionFactory,
     now_provider: NowProvider,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    translation_llm=None,
 ) -> None:
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
         items = list_pending(session, household_id=user.household_id)
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=[i.name_raw for i in items],
+            translation_llm=translation_llm,
+        )
         keyboard = (
             to_aiogram_keyboard(build_shopping_keyboard([i.id for i in items if i.id]))
             if items
             else None
         )
-        await msg.answer(render_shopping_list(items), reply_markup=keyboard)
+        await msg.answer(render_shopping_list(items, lang=user.lang, names=names), reply_markup=keyboard)
 
 
 async def handle_favorites(
@@ -739,18 +760,25 @@ async def handle_favorites(
     *,
     session_factory: _SessionFactory,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    translation_llm=None,
 ) -> None:
     with session_factory() as session:
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
         recipes = list_saved(session, household_id=user.household_id)
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=[r.title for r in recipes] + [r.cuisine for r in recipes],
+            translation_llm=translation_llm,
+        )
         keyboard = (
             to_aiogram_keyboard(build_favorites_keyboard([r.id for r in recipes if r.id]))
             if recipes
             else None
         )
-        await msg.answer(render_favorites(recipes), reply_markup=keyboard)
+        await msg.answer(render_favorites(recipes, lang=user.lang, names=names), reply_markup=keyboard)
 
 
 async def handle_cook(
@@ -829,7 +857,7 @@ async def handle_prefs(
             return
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2 or not parts[1].strip():
-            await msg.answer(render_profile(profile_from_household(household)))
+            await msg.answer(render_profile(profile_from_household(household), lang=user.lang))
             return
         try:
             selected = _select_profile_llm(profile_llm, user.llm_provider)
@@ -851,7 +879,7 @@ async def handle_prefs(
             )
             await msg.answer("couldn't update your profile - try simpler wording")
             return
-        await msg.answer("Updated.\n\n" + render_profile(profile))
+        await msg.answer("Updated.\n\n" + render_profile(profile, lang=user.lang))
 
 
 HELP_TEXT = (
@@ -1703,6 +1731,7 @@ def build_dispatcher(
     selection_llm=None,
     recipe_llm=None,
     nutrition_llm=None,
+    translation_llm=None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -1741,6 +1770,7 @@ def build_dispatcher(
             session_factory=session_factory,
             now_provider=now_provider,
             on_user_created=on_user_created,
+            translation_llm=translation_llm,
         )
 
     async def on_add(message):
@@ -1816,6 +1846,7 @@ def build_dispatcher(
             session_factory=session_factory,
             now_provider=now_provider,
             on_user_created=on_user_created,
+            translation_llm=translation_llm,
         )
 
     async def on_favorites(message):
@@ -1823,6 +1854,7 @@ def build_dispatcher(
             message,
             session_factory=session_factory,
             on_user_created=on_user_created,
+            translation_llm=translation_llm,
         )
 
     async def on_llm(message):

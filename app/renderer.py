@@ -56,66 +56,73 @@ def render_item_line(item, *, today: date, lang: str = "en", names=None) -> str:
     return f"{icon} #{item.id} {qty}{name} - {tail}"
 
 
-def _fmt_cost(micros: int | None) -> str:
+def _fmt_cost(micros: int | None, *, lang: str = "en") -> str:
     if micros is None:
-        return "Cost: unavailable"
-    return f"Cost: ${micros / 1_000_000:.3f}"
+        return t("cost.unavailable", lang)
+    return t("cost.value", lang, amount=f"{micros / 1_000_000:.3f}")
 
 
-def render_ingest_reply(summary: IngestSummary, *, today: date, refined_ids=frozenset()) -> str:
+def render_ingest_reply(
+    summary: IngestSummary,
+    *,
+    today: date,
+    refined_ids=frozenset(),
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
     lines: list[str] = []
     if summary.inserted_food_count == 0:
         if summary.skipped_low_confidence_count:
-            lines.append(
-                "No clear food items found "
-                f"(skipped {summary.skipped_low_confidence_count} unclear items)."
-            )
+            lines.append(t("ingest.none_clear", lang, n=summary.skipped_low_confidence_count))
         else:
-            lines.append("No food items found in this receipt.")
+            lines.append(t("ingest.none_found", lang))
         if summary.skipped_excluded_count:
-            names = ", ".join(summary.skipped_excluded_names[:5])
+            exc_names = ", ".join(summary.skipped_excluded_names[:5])
             more = "" if len(summary.skipped_excluded_names) <= 5 else ", ..."
-            lines.append(f"Skipped (not tracked): {names}{more}")
-            lines.append("Want one tracked? /add <name>")
-        lines.append(_fmt_cost(summary.cost_micros_usd))
+            lines.append(t("ingest.skipped_excluded", lang, names=exc_names, more=more))
+            lines.append(t("ingest.want_tracked", lang))
+        lines.append(_fmt_cost(summary.cost_micros_usd, lang=lang))
         return "\n".join(lines)
 
-    lines.append(f"Logged {summary.inserted_food_count} items from this receipt:")
+    lines.append(t("ingest.logged", lang, n=summary.inserted_food_count))
     for item_id, name, expires_on, shelf_life_days in zip(
         summary.inserted_item_ids,
         summary.inserted_item_names,
         summary.inserted_item_expires_on,
         summary.inserted_item_shelf_life_days,
     ):
-        mark = " ✓refined" if item_id in refined_ids else ""
-        lines.append(
-            f"  - #{item_id} {name} - exp {_fmt_date(expires_on, today=today)} ({shelf_life_days}d){mark}"
-        )
+        mark = t("ingest.refined_mark", lang) if item_id in refined_ids else ""
+        lines.append(t(
+            "ingest.item", lang,
+            id=item_id,
+            name=_name(names, name),
+            date=_fmt_date(expires_on, today=today, lang=lang),
+            days=shelf_life_days,
+            mark=mark,
+        ))
 
     if summary.purchase_date is not None and summary.purchase_date != today:
-        lines.append(f"Purchase date: {_fmt_date(summary.purchase_date, today=today)}")
+        lines.append(t("ingest.purchase_date", lang, date=_fmt_date(summary.purchase_date, today=today, lang=lang)))
     if summary.purchase_date_assumed and summary.purchase_date is not None:
-        lines.append(f"Purchase date assumed: {_fmt_date(summary.purchase_date, today=today)}")
+        lines.append(t("ingest.purchase_date_assumed", lang, date=_fmt_date(summary.purchase_date, today=today, lang=lang)))
 
     if summary.low_confidence_inserted_ids:
         ids = ", ".join(f"#{item_id}" for item_id in summary.low_confidence_inserted_ids[:5])
         more = "" if len(summary.low_confidence_inserted_ids) <= 5 else " ..."
-        lines.append(f"Low confidence: {ids}{more} - review with /correct or /delete")
+        lines.append(t("ingest.low_confidence", lang, ids=ids, more=more))
 
     if summary.skipped_low_confidence_count:
-        names = ", ".join(summary.skipped_low_confidence_names[:3])
+        skipped_names = ", ".join(summary.skipped_low_confidence_names[:3])
         more = "" if len(summary.skipped_low_confidence_names) <= 3 else ", ..."
-        lines.append(
-            f"(skipped {summary.skipped_low_confidence_count} unclear items: {names}{more})"
-        )
+        lines.append(t("ingest.skipped_unclear", lang, n=summary.skipped_low_confidence_count, names=skipped_names, more=more))
 
     if summary.skipped_excluded_count:
-        names = ", ".join(summary.skipped_excluded_names[:5])
+        exc_names = ", ".join(summary.skipped_excluded_names[:5])
         more = "" if len(summary.skipped_excluded_names) <= 5 else ", ..."
-        lines.append(f"Skipped (not tracked): {names}{more}")
-        lines.append("Want one tracked? /add <name>")
+        lines.append(t("ingest.skipped_excluded", lang, names=exc_names, more=more))
+        lines.append(t("ingest.want_tracked", lang))
 
-    lines.append(_fmt_cost(summary.cost_micros_usd))
+    lines.append(_fmt_cost(summary.cost_micros_usd, lang=lang))
     return "\n".join(lines)
 
 

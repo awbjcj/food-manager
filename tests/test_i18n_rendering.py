@@ -1,5 +1,6 @@
 from datetime import date
-from app.renderer import render_item_line, _fmt_date, render_digest, render_list
+from app.ingest_service import IngestSummary
+from app.renderer import render_ingest_reply, render_item_line, _fmt_date, render_digest, render_list
 from tests.test_renderer_commands import _pantry_item
 
 
@@ -51,3 +52,105 @@ def test_list_zh_category_header_and_name():
     out = render_list([item], today=today, lang="zh", names={"Milk": "牛奶"})
     assert "乳制品" in out           # category "Dairy" -> zh
     assert "牛奶" in out
+
+
+# ---------------------------------------------------------------------------
+# render_ingest_reply i18n tests
+# ---------------------------------------------------------------------------
+
+def _ingest_summary(**kwargs) -> IngestSummary:
+    """Build a minimal IngestSummary; override fields via kwargs."""
+    values: dict = dict(
+        receipt_id=1,
+        inserted_food_count=0,
+        inserted_item_ids=[],
+        inserted_item_names=[],
+        inserted_item_expires_on=[],
+        inserted_item_shelf_life_days=[],
+        skipped_non_food_count=0,
+        skipped_low_confidence_count=0,
+        skipped_low_confidence_names=[],
+        low_confidence_inserted_ids=[],
+        skipped_excluded_count=0,
+        skipped_excluded_names=[],
+        purchase_date=date(2026, 5, 26),
+        purchase_date_assumed=False,
+        cost_micros_usd=None,
+    )
+    values.update(kwargs)
+    return IngestSummary(**values)  # type: ignore[arg-type]
+
+
+def test_ingest_reply_en_empty_receipt_unchanged():
+    """en path: empty receipt produces the exact legacy strings."""
+    summary = _ingest_summary(cost_micros_usd=None)
+    text = render_ingest_reply(summary, today=date(2026, 5, 26))
+    assert "No food items found in this receipt." in text
+    assert "Cost: unavailable" in text
+
+
+def test_ingest_reply_en_empty_receipt_with_cost_unchanged():
+    """en path: cost line is byte-identical to legacy."""
+    summary = _ingest_summary(cost_micros_usd=18000)
+    text = render_ingest_reply(summary, today=date(2026, 5, 26))
+    assert "Cost: $0.018" in text
+
+
+def test_ingest_reply_zh_empty_receipt():
+    """zh path: empty receipt renders Chinese strings."""
+    summary = _ingest_summary(cost_micros_usd=None)
+    text = render_ingest_reply(summary, today=date(2026, 5, 26), lang="zh")
+    assert "此收据中未找到食品。" in text
+    assert "费用：不可用" in text
+
+
+def test_ingest_reply_en_logged_items_unchanged():
+    """en path: logged items block is byte-identical to legacy."""
+    summary = _ingest_summary(
+        inserted_food_count=1,
+        inserted_item_ids=[42],
+        inserted_item_names=["Whole Milk"],
+        inserted_item_expires_on=[date(2026, 6, 2)],
+        inserted_item_shelf_life_days=[7],
+        cost_micros_usd=18000,
+    )
+    text = render_ingest_reply(summary, today=date(2026, 5, 26))
+    assert "Logged 1 items from this receipt:" in text
+    assert "  - #42 Whole Milk - exp Jun 2 (7d)" in text
+    assert "Cost: $0.018" in text
+
+
+def test_ingest_reply_en_refined_mark_unchanged():
+    """en path: refined mark is the exact legacy ' ✓refined' string."""
+    summary = _ingest_summary(
+        inserted_food_count=1,
+        inserted_item_ids=[42],
+        inserted_item_names=["Whole Milk"],
+        inserted_item_expires_on=[date(2026, 6, 2)],
+        inserted_item_shelf_life_days=[7],
+        cost_micros_usd=None,
+    )
+    text = render_ingest_reply(summary, today=date(2026, 5, 26), refined_ids={42})
+    assert "  - #42 Whole Milk - exp Jun 2 (7d) ✓refined" in text
+
+
+def test_ingest_reply_zh_logged_items_with_names():
+    """zh path: translated item name appears, zh date suffix used."""
+    summary = _ingest_summary(
+        inserted_food_count=1,
+        inserted_item_ids=[42],
+        inserted_item_names=["Whole Milk"],
+        inserted_item_expires_on=[date(2026, 6, 2)],
+        inserted_item_shelf_life_days=[7],
+        cost_micros_usd=None,
+    )
+    text = render_ingest_reply(
+        summary,
+        today=date(2026, 5, 26),
+        lang="zh",
+        names={"Whole Milk": "全脂牛奶"},
+    )
+    assert "已从此收据记录 1 项：" in text
+    assert "全脂牛奶" in text
+    assert "到期" in text        # zh date prefix in item line
+    assert "费用：不可用" in text

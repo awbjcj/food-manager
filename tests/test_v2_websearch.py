@@ -177,7 +177,8 @@ async def test_handle_photo_spawns_refine_and_edits_message(monkeypatch):
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
                     created_at=datetime.now(timezone.utc)))
         db.commit()
-    session_factory = lambda: Session(engine)
+    def session_factory():
+        return Session(engine)
 
     # FakeLLMClient: returns one food item (Kefir, 7d, conf=0.9) → cache miss
     llm = FakeLLMClient(
@@ -225,7 +226,8 @@ async def test_handle_photo_spawns_refine_and_edits_message(monkeypatch):
     msg.answer = AsyncMock(return_value=sent_msg)
 
     photo_downloader = AsyncMock(return_value=b"jpg")
-    now_provider = lambda tz: datetime(2026, 5, 28, tzinfo=timezone.utc)
+    def now_provider(tz):
+        return datetime(2026, 5, 28, tzinfo=timezone.utc)
 
     await bot_mod.handle_photo(
         msg,
@@ -501,7 +503,8 @@ async def test_run_receipt_refine_refreshes_summary_and_accrues_cost():
 
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
-    factory = lambda: Session(engine)
+    def factory():
+        return Session(engine)
     with factory() as s:
         household = Household(created_at=datetime.now(timezone.utc))
         s.add(household)
@@ -589,7 +592,8 @@ async def test_run_receipt_refine_suppresses_edit_when_receipt_undone():
 
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
-    factory = lambda: Session(engine)
+    def factory():
+        return Session(engine)
     with factory() as s:
         household = Household(created_at=datetime.now(timezone.utc))
         s.add(household)
@@ -672,7 +676,8 @@ async def test_run_receipt_refine_accrues_cost_even_when_nothing_refined():
 
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
-    factory = lambda: Session(engine)
+    def factory():
+        return Session(engine)
     with factory() as s:
         household = Household(created_at=datetime.now(timezone.utc))
         s.add(household)

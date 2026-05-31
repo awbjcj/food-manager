@@ -3,9 +3,10 @@ import json
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
 from sqlmodel import SQLModel, Session, create_engine
 
-from app.models import CookSession, PantryItem, User
+from app.models import CookSession, Household, PantryItem, User
 from app.cook_models import (
     NutritionScore,
     NutritionScores,
@@ -44,11 +45,16 @@ def _db_with_items(n, expiry_days):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     db = Session(engine)
-    db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+    household = Household(created_at=datetime.now(timezone.utc))
+    db.add(household)
+    db.commit()
+    db.refresh(household)
+    db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
+                created_at=datetime.now(timezone.utc)))
     today = date(2026, 5, 30)
     for i in range(n):
         db.add(PantryItem(
-            user_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
+            household_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
             category="produce", qty=1.0, purchased_on=today,
             shelf_life_days=expiry_days, shelf_life_source="llm",
             ingest_shelf_life_source="llm",
@@ -61,15 +67,16 @@ def _db_with_items(n, expiry_days):
 
 def _cook_row(db):
     now = datetime(2026, 5, 30, 12, 0).replace(tzinfo=None)
-    row = CookSession(user_id=1, status="ready", chat_id=1, meal_type="dinner",
+    row = CookSession(household_id=1, status="ready", chat_id=1, meal_type="dinner",
                       cuisine="italian", selected_item_ids="[]",
                       created_at=now, expires_at=now + timedelta(minutes=10))
-    db.add(row); db.commit(); db.refresh(row)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
     return row
 
 
 def test_run_cook_guards_thin_pantry():
-    import asyncio, pytest
     db, today = _db_with_items(MIN_USABLE_ITEMS - 1, 2)
     cook = _cook_row(db)
     with pytest.raises(NotEnoughItems):
@@ -83,7 +90,6 @@ def test_run_cook_guards_thin_pantry():
 
 
 def test_run_cook_excludes_expired_items():
-    import asyncio, pytest
     # MIN_USABLE_ITEMS active rows that are all past their expiry date
     db, today = _db_with_items(MIN_USABLE_ITEMS, -1)
     cook = _cook_row(db)

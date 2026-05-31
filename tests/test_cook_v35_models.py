@@ -7,14 +7,19 @@ from pathlib import Path
 import sqlalchemy as sa
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.models import CookSession, SavedRecipe, ShoppingList, User
+from app.models import CookSession, Household, SavedRecipe, ShoppingList, User
 
 
 def _engine():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
+                    created_at=datetime.now(timezone.utc)))
         db.commit()
     return engine
 
@@ -23,7 +28,7 @@ def test_cooksession_has_feedback_default_none():
     engine = _engine()
     now = datetime(2026, 5, 30, 12, 0)
     with Session(engine) as db:
-        db.add(CookSession(user_id=1, status="done", chat_id=1,
+        db.add(CookSession(household_id=1, status="done", chat_id=1,
                            selected_item_ids="[]", created_at=now, expires_at=now))
         db.commit()
         row = db.exec(select(CookSession)).one()
@@ -35,9 +40,9 @@ def test_shopping_and_saved_tables_accept_rows():
     engine = _engine()
     now = datetime(2026, 5, 30, 12, 0)
     with Session(engine) as db:
-        db.add(ShoppingList(user_id=1, name_raw="Tomatoes", name_normalized="tomatoes",
+        db.add(ShoppingList(household_id=1, name_raw="Tomatoes", name_normalized="tomatoes",
                             qty=2.0, unit="kg", added_at=now))
-        db.add(SavedRecipe(user_id=1, title="Pasta", cuisine="italian",
+        db.add(SavedRecipe(household_id=1, title="Pasta", cuisine="italian",
                            source_url="https://x", ingredients_json="[]",
                            method_gist="boil", saved_at=now))
         db.commit()

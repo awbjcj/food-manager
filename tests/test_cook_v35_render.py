@@ -32,7 +32,7 @@ def test_result_keyboard_omits_alternatives_when_single():
 def test_render_shopping_list_lists_items_or_empty():
     now = datetime(2026, 5, 30, 12, 0)
     assert "empty" in render_shopping_list([]).lower()
-    items = [ShoppingList(id=3, user_id=1, name_raw="Tomatoes",
+    items = [ShoppingList(id=3, household_id=1, name_raw="Tomatoes",
                           name_normalized="tomatoes", added_at=now)]
     text = render_shopping_list(items)
     assert "Tomatoes" in text
@@ -46,7 +46,7 @@ def test_build_shopping_keyboard_one_button_per_item():
 def test_render_favorites_lists_or_empty():
     now = datetime(2026, 5, 30, 12, 0)
     assert "no saved" in render_favorites([]).lower()
-    saved = [SavedRecipe(id=5, user_id=1, title="Pasta", cuisine="italian",
+    saved = [SavedRecipe(id=5, household_id=1, title="Pasta", cuisine="italian",
                          ingredients_json="[]", method_gist="boil", saved_at=now)]
     text = render_favorites(saved)
     assert "#5" in text and "Pasta" in text

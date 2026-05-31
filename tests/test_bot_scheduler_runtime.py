@@ -8,7 +8,6 @@ from sqlmodel import SQLModel, Session, create_engine
 
 from app.backup import BackupError, pre_migration_backup
 from app.bot import (
-    _SessionFactory,
     authorize_and_get_user,
     build_dispatcher,
     handle_ate,
@@ -25,7 +24,7 @@ from app.llm import (
     ProfileLLMProviderSelector,
     TextLLMProviderSelector,
 )
-from app.models import PantryItem, User
+from app.models import Household, PantryItem, User
 from app.scheduler import (
     build_digest_payload,
     register_all_user_digests,
@@ -40,7 +39,12 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=999, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=999, household_id=household.id,
+                    created_at=datetime.now(timezone.utc)))
         db.commit()
         yield db
 
@@ -64,10 +68,18 @@ def _cb(data: str, *, user_id=1):
     return cb
 
 
-def _add_item(session, *, user_id=1, name="Milk", days=2, status="active", snoozed_until=None):
+def _add_item(
+    session,
+    *,
+    household_id=1,
+    name="Milk",
+    days=2,
+    status="active",
+    snoozed_until=None,
+):
     today = date(2026, 5, 26)
     item = PantryItem(
-        user_id=user_id,
+        household_id=household_id,
         raw_name=name,
         normalized_name=name.lower(),
         category="dairy",
@@ -123,8 +135,12 @@ def test_authorize_and_get_user(session):
 @pytest.mark.asyncio
 async def test_handlers_smoke(session, monkeypatch):
     monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
-    factory: _SessionFactory = lambda: session
-    now = lambda tz: datetime(2026, 5, 26, tzinfo=timezone.utc)
+
+    def factory() -> Session:
+        return session
+
+    def now(tz):
+        return datetime(2026, 5, 26, tzinfo=timezone.utc)
 
     start = _msg("/start")
     await handle_start(start, session_factory=factory, on_user_created=lambda user: None)

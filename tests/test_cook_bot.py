@@ -74,7 +74,8 @@ def _fakes():
     )
 
 
-_NOW = lambda tz: datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+def _NOW(tz):
+    return datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
 
 
 def test_cook_first_round_creates_session_and_asks_meal_type(monkeypatch):

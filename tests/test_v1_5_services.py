@@ -18,7 +18,7 @@ from app.correction_service import (
     propose_correct,
 )
 from app.llm import CorrectionDiff, ProposedAddItem
-from app.models import PantryItem, PendingCorrection, User
+from app.models import Household, PantryItem, User
 from app.pantry_service import compute_stats, mark_eaten
 from app.pending_service import (
     PENDING_TTL_MINUTES,
@@ -36,15 +36,25 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
-        db.add(User(telegram_id=2, chat_id=2, created_at=datetime.now(timezone.utc)))
+        households = [
+            Household(created_at=datetime.now(timezone.utc)),
+            Household(created_at=datetime.now(timezone.utc)),
+        ]
+        db.add_all(households)
+        db.commit()
+        for household in households:
+            db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=households[0].id,
+                    created_at=datetime.now(timezone.utc)))
+        db.add(User(telegram_id=2, chat_id=2, household_id=households[1].id,
+                    created_at=datetime.now(timezone.utc)))
         db.commit()
         yield db
 
 
 def _item(session: Session, name: str = "Milk", norm: str = "milk") -> PantryItem:
     item = PantryItem(
-        user_id=1,
+        household_id=1,
         raw_name=name,
         normalized_name=norm,
         category="dairy",
@@ -69,7 +79,7 @@ def test_pending_create_load_terminal_expire_and_sweep(session):
     now = datetime(2026, 5, 27, 12, tzinfo=timezone.utc)
     pending = create_pending(
         session,
-        user_id=1,
+        household_id=1,
         action_type="correct",
         item_id=42,
         proposed_json="{}",
@@ -82,8 +92,8 @@ def test_pending_create_load_terminal_expire_and_sweep(session):
     stored_now = now.replace(tzinfo=None)
     assert pending.expires_at == stored_now + timedelta(minutes=PENDING_TTL_MINUTES)
     assert pending.id is not None
-    assert load_pending(session, user_id=2, pending_id=pending.id) is None
-    found = load_pending(session, user_id=1, pending_id=pending.id)
+    assert load_pending(session, household_id=2, pending_id=pending.id) is None
+    found = load_pending(session, household_id=1, pending_id=pending.id)
     assert found is not None
     assert found.id == pending.id
 
@@ -94,7 +104,7 @@ def test_pending_create_load_terminal_expire_and_sweep(session):
 
     old = create_pending(
         session,
-        user_id=1,
+        household_id=1,
         action_type="correct",
         item_id=42,
         proposed_json="{}",
@@ -105,7 +115,7 @@ def test_pending_create_load_terminal_expire_and_sweep(session):
     )
     fresh = create_pending(
         session,
-        user_id=1,
+        household_id=1,
         action_type="correct",
         item_id=42,
         proposed_json="{}",
@@ -114,7 +124,9 @@ def test_pending_create_load_terminal_expire_and_sweep(session):
         chat_id=1,
         now=now,
     )
-    assert expire_for_item(session, user_id=1, item_id=42, exclude_pending_id=fresh.id) == 1
+    assert expire_for_item(
+        session, household_id=1, item_id=42, exclude_pending_id=fresh.id
+    ) == 1
     session.commit()
     session.refresh(old)
     session.refresh(fresh)
@@ -142,7 +154,7 @@ async def test_propose_correct_back_computes_days_and_snapshot(session):
     payload, cost = await propose_correct(
         session,
         llm=fake,
-        user_id=1,
+        household_id=1,
         item=item,
         user_text="expires June 5",
         today=date(2026, 5, 27),
@@ -168,7 +180,7 @@ async def test_propose_correct_rejects_null_and_out_of_range(session):
         await propose_correct(
             session,
             llm=null_fake,
-            user_id=1,
+            household_id=1,
             item=item,
             user_text="looks fine",
             today=date(2026, 5, 27),
@@ -187,7 +199,7 @@ async def test_propose_correct_rejects_null_and_out_of_range(session):
         await propose_correct(
             session,
             llm=range_fake,
-            user_id=1,
+            household_id=1,
             item=item,
             user_text="expired yesterday",
             today=date(2026, 5, 27),
@@ -209,7 +221,7 @@ def test_apply_correct_cache_actions(session):
         confidence=0.9,
     )
 
-    apply_correct(session, user_id=1, item=item, payload=payload)
+    apply_correct(session, household_id=1, item=item, payload=payload)
     session.commit()
     session.refresh(item)
 
@@ -231,7 +243,7 @@ def test_apply_correct_cache_actions(session):
         rationale="category fix",
         confidence=0.9,
     )
-    apply_correct(session, user_id=1, item=item, payload=category_only)
+    apply_correct(session, household_id=1, item=item, payload=category_only)
     session.commit()
     updated_cache = get_cached(session, 1, "heavy cream")
     assert updated_cache is not None
@@ -261,7 +273,7 @@ async def test_propose_add_payload_roundtrip_and_apply(session):
     proposals, total = await propose_add(
         session,
         llm=fake,
-        user_id=1,
+        household_id=1,
         user_text="oat milk, star fruit",
         today=date(2026, 5, 27),
         tz="America/Detroit",
@@ -277,7 +289,7 @@ async def test_propose_add_payload_roundtrip_and_apply(session):
     assert add_payload_from_json(blob).name == "Oat Milk"
     new_id = apply_add(
         session,
-        user_id=1,
+        household_id=1,
         payload=AddPayload(
             name="Basil",
             category="produce",
@@ -302,7 +314,7 @@ def test_pantry_mutation_marks_pending_stale_and_stats_include_text_cost(session
     item = _item(session)
     pending = create_pending(
         session,
-        user_id=1,
+        household_id=1,
         action_type="correct",
         item_id=item.id,
         proposed_json="{}",
@@ -313,7 +325,7 @@ def test_pantry_mutation_marks_pending_stale_and_stats_include_text_cost(session
     )
     create_pending(
         session,
-        user_id=1,
+        household_id=1,
         action_type="add",
         item_id=None,
         proposed_json="{}",
@@ -324,11 +336,11 @@ def test_pantry_mutation_marks_pending_stale_and_stats_include_text_cost(session
     )
 
     assert item.id is not None
-    mark_eaten(session, user_id=1, item_id=item.id, today=date(2026, 5, 27))
+    mark_eaten(session, household_id=1, item_id=item.id, today=date(2026, 5, 27))
     session.refresh(pending)
     assert pending.status == "stale"
 
-    stats = compute_stats(session, user_id=1, now=datetime.now(timezone.utc))
+    stats = compute_stats(session, household_id=1, now=datetime.now(timezone.utc))
     assert stats.text_llm.correction_proposal_count == 1
     assert stats.text_llm.correction_cost_micros == 300
     assert stats.text_llm.add_proposal_count == 1

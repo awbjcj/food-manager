@@ -11,7 +11,7 @@ from app.cook_models import (
     RecipeIngredient,
     ScoredCandidate,
 )
-from app.models import CookSession, User
+from app.models import CookSession, Household, User
 
 
 def _scored(title="Pasta", cuisine="italian", ingredients=("pasta", "tomato")):
@@ -29,9 +29,14 @@ def _engine_with_done_cook(candidates):
     SQLModel.metadata.create_all(engine)
     now = datetime(2026, 5, 30, 12, 0)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
+                    created_at=datetime.now(timezone.utc)))
         db.add(CookSession(
-            user_id=1, status="done", chat_id=1, selected_item_ids="[]",
+            household_id=1, status="done", chat_id=1, selected_item_ids="[]",
             candidates_json=json.dumps([c.model_dump() for c in candidates]),
             chosen_index=0, created_at=now, expires_at=now,
         ))

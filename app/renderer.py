@@ -267,34 +267,47 @@ def build_apply_cancel_keyboard(*, pending_id: int) -> list[list[CallbackButton]
     ]]
 
 
-def _render_card(card: ScoredCandidate, *, rank: int) -> str:
+def _render_card(
+    card: ScoredCandidate,
+    *,
+    rank: int,
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
     r = card.recipe
     n = card.nutrition
-    header = f"{'* ' if rank == 0 else ''}{r.title} ({r.cuisine})"
+    header = f"{'* ' if rank == 0 else ''}{_name(names, r.title)} ({_name(names, r.cuisine)})"
     lines = [
         header,
-        f"  Health {n.health_score}/100 - {n.effort} - {n.est_minutes} min",
+        t("cook.health", lang, score=n.health_score, effort=n.effort, minutes=n.est_minutes),
     ]
-    ingredients = ", ".join(i.name for i in r.ingredients)
+    ingredients = ", ".join(_name(names, i.name) for i in r.ingredients)
     if ingredients:
-        lines.append(f"  Ingredients: {ingredients}")
-    lines.append(f"  {r.method_gist}")
+        lines.append(t("cook.ingredients", lang, items=ingredients))
+    lines.append(f"  {_name(names, r.method_gist)}")
     if r.source_url:
-        lines.append(f"  Recipe: {r.source_url}")
+        lines.append(t("cook.recipe_link", lang, url=r.source_url))
     if rank == 0 and card.shopping_list:
-        lines.append("  Need to buy: " + ", ".join(card.shopping_list))
+        items = ", ".join(_name(names, s) for s in card.shopping_list)
+        lines.append(t("cook.need_buy", lang, items=items))
     elif rank == 0:
-        lines.append("  Need to buy: nothing - you have it all!")
+        lines.append(t("cook.need_buy_none", lang))
     return "\n".join(lines)
 
 
-def render_cook_result(cards: list[ScoredCandidate], *, show_alternatives: bool) -> str:
+def render_cook_result(
+    cards: list[ScoredCandidate],
+    *,
+    show_alternatives: bool,
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
     if not cards:
-        return "Couldn't find a recipe that fits your pantry and restrictions."
-    blocks = [_render_card(cards[0], rank=0)]
+        return t("cook.none", lang)
+    blocks = [_render_card(cards[0], rank=0, lang=lang, names=names)]
     if show_alternatives:
         for idx, card in enumerate(cards[1:], start=1):
-            blocks.append(_render_card(card, rank=idx))
+            blocks.append(_render_card(card, rank=idx, lang=lang, names=names))
     return "\n\n".join(blocks)
 
 
@@ -322,13 +335,18 @@ def build_cook_result_keyboard(
     return rows
 
 
-def render_shopping_list(items: list[ShoppingList]) -> str:
+def render_shopping_list(
+    items: list[ShoppingList],
+    *,
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
     if not items:
-        return "Your shopping list is empty. Tap ➕ Shopping list on a /cook result."
-    lines = ["Shopping list:"]
+        return t("shopping.empty", lang)
+    lines = [t("shopping.title", lang)]
     for item in items:
         qty = _qty_prefix(item.qty, item.unit) if item.qty is not None else ""
-        lines.append(f"  - {qty}{item.name_raw}")
+        lines.append(f"  - {qty}{_name(names, item.name_raw)}")
     return "\n".join(lines)
 
 
@@ -339,12 +357,17 @@ def build_shopping_keyboard(item_ids: list[int]) -> list[list[CallbackButton]]:
     ]
 
 
-def render_favorites(recipes: list[SavedRecipe]) -> str:
+def render_favorites(
+    recipes: list[SavedRecipe],
+    *,
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
     if not recipes:
-        return "No saved recipes yet. Tap ★ Save on a /cook result."
-    lines = ["Saved recipes:"]
+        return t("favorites.empty", lang)
+    lines = [t("favorites.title", lang)]
     for recipe in recipes:
-        lines.append(f"  #{recipe.id} {recipe.title} ({recipe.cuisine})")
+        lines.append(f"  #{recipe.id} {_name(names, recipe.title)} ({_name(names, recipe.cuisine)})")
     return "\n".join(lines)
 
 
@@ -355,18 +378,25 @@ def build_favorites_keyboard(recipe_ids: list[int]) -> list[list[CallbackButton]
     ]
 
 
-def render_recook(recipe: RecipeCandidate, *, shopping: list[str]) -> str:
-    lines = [f"{recipe.title} ({recipe.cuisine})"]
-    ingredients = ", ".join(i.name for i in recipe.ingredients)
+def render_recook(
+    recipe: RecipeCandidate,
+    *,
+    shopping: list[str],
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
+    lines = [f"{_name(names, recipe.title)} ({_name(names, recipe.cuisine)})"]
+    ingredients = ", ".join(_name(names, i.name) for i in recipe.ingredients)
     if ingredients:
-        lines.append(f"  Ingredients: {ingredients}")
-    lines.append(f"  {recipe.method_gist}")
+        lines.append(t("cook.ingredients", lang, items=ingredients))
+    lines.append(f"  {_name(names, recipe.method_gist)}")
     if recipe.source_url:
-        lines.append(f"  Recipe: {recipe.source_url}")
+        lines.append(t("cook.recipe_link", lang, url=recipe.source_url))
     if shopping:
-        lines.append("  Need to buy: " + ", ".join(shopping))
+        items = ", ".join(_name(names, s) for s in shopping)
+        lines.append(t("cook.need_buy", lang, items=items))
     else:
-        lines.append("  Need to buy: nothing - you have it all!")
+        lines.append(t("cook.need_buy_none", lang))
     return "\n".join(lines)
 
 

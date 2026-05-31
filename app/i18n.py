@@ -94,6 +94,66 @@ MESSAGES: dict[str, dict[str, str]] = {
                     "zh": "  - #{id} {name} - 到期 {date} ({days}天){mark}",
                     "fr": "  - #{id} {name} - exp {date} ({days}j){mark}",
                     "es": "  - #{id} {name} - vence {date} ({days}d){mark}"},
+    "cook.none": {
+        "en": "Couldn't find a recipe that fits your pantry and restrictions.",
+        "zh": "找不到符合您储藏和限制的食谱。",
+        "fr": "Aucune recette ne correspond à votre garde-manger et vos restrictions.",
+        "es": "No se encontró ninguna receta que se ajuste a tu despensa y restricciones.",
+    },
+    "cook.health": {
+        "en": "  Health {score}/100 - {effort} - {minutes} min",
+        "zh": "  健康 {score}/100 - {effort} - {minutes} 分钟",
+        "fr": "  Santé {score}/100 - {effort} - {minutes} min",
+        "es": "  Salud {score}/100 - {effort} - {minutes} min",
+    },
+    "cook.ingredients": {
+        "en": "  Ingredients: {items}",
+        "zh": "  食材：{items}",
+        "fr": "  Ingrédients : {items}",
+        "es": "  Ingredientes: {items}",
+    },
+    "cook.recipe_link": {
+        "en": "  Recipe: {url}",
+        "zh": "  食谱链接：{url}",
+        "fr": "  Recette : {url}",
+        "es": "  Receta: {url}",
+    },
+    "cook.need_buy": {
+        "en": "  Need to buy: {items}",
+        "zh": "  需要购买：{items}",
+        "fr": "  À acheter : {items}",
+        "es": "  Necesita comprar: {items}",
+    },
+    "cook.need_buy_none": {
+        "en": "  Need to buy: nothing - you have it all!",
+        "zh": "  无需购买——您已备齐所有食材！",
+        "fr": "  Rien à acheter — vous avez tout ce qu'il faut !",
+        "es": "  No necesita comprar nada - ¡tienes todo lo necesario!",
+    },
+    "shopping.empty": {
+        "en": "Your shopping list is empty. Tap ➕ Shopping list on a /cook result.",
+        "zh": "您的购物清单为空。在 /cook 结果中点击 ➕ Shopping list。",
+        "fr": "Votre liste de courses est vide. Appuyez sur ➕ Shopping list dans un résultat /cook.",
+        "es": "Tu lista de compras está vacía. Toca ➕ Shopping list en un resultado de /cook.",
+    },
+    "shopping.title": {
+        "en": "Shopping list:",
+        "zh": "购物清单：",
+        "fr": "Liste de courses :",
+        "es": "Lista de compras:",
+    },
+    "favorites.empty": {
+        "en": "No saved recipes yet. Tap ★ Save on a /cook result.",
+        "zh": "还没有保存的食谱。在 /cook 结果中点击 ★ Save。",
+        "fr": "Aucune recette sauvegardée. Appuyez sur ★ Save dans un résultat /cook.",
+        "es": "Aún no hay recetas guardadas. Toca ★ Save en un resultado de /cook.",
+    },
+    "favorites.title": {
+        "en": "Saved recipes:",
+        "zh": "已保存的食谱：",
+        "fr": "Recettes sauvegardées :",
+        "es": "Recetas guardadas:",
+    },
 }
 
 

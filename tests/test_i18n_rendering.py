@@ -1,6 +1,15 @@
 from datetime import date
 from app.ingest_service import IngestSummary
-from app.renderer import render_ingest_reply, render_item_line, _fmt_date, render_digest, render_list
+from app.renderer import (
+    render_ingest_reply,
+    render_item_line,
+    _fmt_date,
+    render_digest,
+    render_list,
+    render_cook_result,
+    render_shopping_list,
+    render_favorites,
+)
 from tests.test_renderer_commands import _pantry_item
 
 
@@ -154,3 +163,38 @@ def test_ingest_reply_zh_logged_items_with_names():
     assert "全脂牛奶" in text
     assert "到期" in text        # zh date prefix in item line
     assert "费用：不可用" in text
+
+
+# ---------------------------------------------------------------------------
+# cook / shopping / favorites i18n tests (Task 14)
+# ---------------------------------------------------------------------------
+
+
+def test_cook_none_en_unchanged():
+    assert render_cook_result([], show_alternatives=False) == \
+        "Couldn't find a recipe that fits your pantry and restrictions."
+
+
+def test_cook_none_zh():
+    out = render_cook_result([], show_alternatives=False, lang="zh")
+    assert out == "找不到符合您储藏和限制的食谱。"
+
+
+def test_shopping_empty_en_unchanged():
+    assert render_shopping_list([]) == \
+        "Your shopping list is empty. Tap ➕ Shopping list on a /cook result."
+
+
+def test_favorites_empty_en_unchanged():
+    assert render_favorites([]) == \
+        "No saved recipes yet. Tap ★ Save on a /cook result."
+
+
+def test_shopping_empty_zh():
+    out = render_shopping_list([], lang="zh")
+    assert "购物清单" in out
+
+
+def test_favorites_empty_zh():
+    out = render_favorites([], lang="zh")
+    assert "保存的食谱" in out

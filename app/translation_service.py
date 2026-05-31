@@ -24,6 +24,10 @@ async def translate_texts(
     sent in one batched LLM call, then cached. Any failure yields an English
     (identity) result for the misses and caches nothing, so a translation outage
     never blocks the caller (e.g. the scheduled digest).
+
+    Callers must not hold uncommitted writes on `session`: on a translation
+    failure this calls `session.rollback()`, which would discard them. The bot's
+    callers either only read or commit before translating.
     """
     unique = list(dict.fromkeys(texts))  # preserve order, dedupe
     if lang == "en" or not unique:

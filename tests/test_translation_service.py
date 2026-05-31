@@ -78,3 +78,14 @@ async def test_empty_input_returns_empty():
         out = await translate_texts(s, [], lang="zh", llm=fake)
     assert out == {}
     assert fake.calls == []
+
+
+async def test_count_mismatch_falls_back_to_english():
+    class _ShortLLM:
+        async def translate(self, *, texts, lang):
+            return ["only-one"], 0  # returns 1 translation for 2 inputs -> mismatch
+
+    with _session() as s:
+        out = await translate_texts(s, ["Milk", "Eggs"], lang="zh", llm=_ShortLLM())
+        assert out == {"Milk": "Milk", "Eggs": "Eggs"}      # both fall back to English
+        assert s.get(NameTranslation, ("zh", "Milk")) is None  # nothing cached

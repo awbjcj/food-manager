@@ -163,3 +163,11 @@ class SavedRecipe(SQLModel, table=True):
     ingredients_json: str
     method_gist: str
     saved_at: datetime
+
+
+class NameTranslation(SQLModel, table=True):
+    # Global (household-agnostic): a translation of a display string is a language
+    # fact reusable across households. Keyed by (lang, source_text).
+    lang: str = Field(primary_key=True)
+    source_text: str = Field(primary_key=True)
+    translated_text: str

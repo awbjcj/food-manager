@@ -35,7 +35,7 @@ def create_pending(
 ) -> PendingCorrection:
     created_at = utc_naive(now)
     pending = PendingCorrection(
-        user_id=user_id,
+        household_id=user_id,
         action_type=action_type,
         item_id=item_id,
         proposed_json=proposed_json,
@@ -57,7 +57,7 @@ def load_pending(
     session: Session, *, user_id: int, pending_id: int
 ) -> Optional[PendingCorrection]:
     pending = session.get(PendingCorrection, pending_id)
-    if pending is None or pending.user_id != user_id:
+    if pending is None or pending.household_id != user_id:
         return None
     return pending
 
@@ -96,7 +96,7 @@ def expire_for_item(
     exclude_pending_id: Optional[int] = None,
 ) -> int:
     query = select(PendingCorrection).where(
-        PendingCorrection.user_id == user_id,
+        PendingCorrection.household_id == user_id,
         PendingCorrection.item_id == item_id,
         PendingCorrection.status == "pending",
     )

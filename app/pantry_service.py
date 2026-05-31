@@ -29,9 +29,9 @@ class ListFilter:
         return cls()
 
 
-def list_active(session: Session, *, user_id: int, f: ListFilter, today: date) -> list[PantryItem]:
+def list_active(session: Session, *, household_id: int, f: ListFilter, today: date) -> list[PantryItem]:
     query = select(PantryItem).where(
-        PantryItem.user_id == user_id,
+        PantryItem.household_id == household_id,
         PantryItem.status == "active",
     )
     if f.category is not None:
@@ -47,19 +47,19 @@ def list_active(session: Session, *, user_id: int, f: ListFilter, today: date) -
     return list(session.exec(query).all())
 
 
-def active_pantry_names(session: Session, *, user_id: int, today: date) -> list[str]:
+def active_pantry_names(session: Session, *, household_id: int, today: date) -> list[str]:
     """Normalized names of active, not-yet-expired pantry items (for shopping diffs)."""
     return [
         item.normalized_name
-        for item in list_active(session, user_id=user_id, f=ListFilter.default(), today=today)
+        for item in list_active(session, household_id=household_id, f=ListFilter.default(), today=today)
         if item.expires_on >= today
     ]
 
 
-def list_digest_due(session: Session, *, user_id: int, today: date) -> list[PantryItem]:
+def list_digest_due(session: Session, *, household_id: int, today: date) -> list[PantryItem]:
     query = (
         select(PantryItem)
-        .where(PantryItem.user_id == user_id, PantryItem.status == "active")
+        .where(PantryItem.household_id == household_id, PantryItem.status == "active")
         .where(
             col(PantryItem.snoozed_until).is_(None)
             | (col(PantryItem.snoozed_until) <= today)
@@ -71,7 +71,7 @@ def list_digest_due(session: Session, *, user_id: int, today: date) -> list[Pant
 
 
 class NotOwnerOrMissing(Exception):
-    """Raised when an item lookup is missing or does not belong to user_id."""
+    """Raised when an item lookup is missing or does not belong to household_id."""
 
 
 @dataclass(frozen=True)
@@ -80,9 +80,9 @@ class MutationResult:
     was_already: bool
 
 
-def _load_owned(session: Session, *, user_id: int, item_id: int) -> PantryItem:
+def _load_owned(session: Session, *, household_id: int, item_id: int) -> PantryItem:
     pantry_item = session.get(PantryItem, item_id)
-    if pantry_item is None or pantry_item.user_id != user_id:
+    if pantry_item is None or pantry_item.household_id != household_id:
         raise NotOwnerOrMissing(f"item {item_id}")
     return pantry_item
 
@@ -93,28 +93,30 @@ def _set_terminal(session: Session, pantry_item: PantryItem, status: str) -> Mut
     pantry_item.status = status
     pantry_item.snoozed_until = None
     assert pantry_item.id is not None
-    expire_for_item(session, user_id=pantry_item.user_id, item_id=pantry_item.id)
+    # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
+    expire_for_item(session, user_id=pantry_item.household_id, item_id=pantry_item.id)
     session.add(pantry_item)
     session.commit()
     return MutationResult(applied=True, was_already=False)
 
 
-def mark_eaten(session: Session, *, user_id: int, item_id: int, today: date) -> MutationResult:
-    return _set_terminal(session, _load_owned(session, user_id=user_id, item_id=item_id), "eaten")
+def mark_eaten(session: Session, *, household_id: int, item_id: int, today: date) -> MutationResult:
+    return _set_terminal(session, _load_owned(session, household_id=household_id, item_id=item_id), "eaten")
 
 
-def mark_tossed(session: Session, *, user_id: int, item_id: int, today: date) -> MutationResult:
-    return _set_terminal(session, _load_owned(session, user_id=user_id, item_id=item_id), "tossed")
+def mark_tossed(session: Session, *, household_id: int, item_id: int, today: date) -> MutationResult:
+    return _set_terminal(session, _load_owned(session, household_id=household_id, item_id=item_id), "tossed")
 
 
-def mark_removed(session: Session, *, user_id: int, item_id: int, today: date) -> MutationResult:
-    pantry_item = _load_owned(session, user_id=user_id, item_id=item_id)
+def mark_removed(session: Session, *, household_id: int, item_id: int, today: date) -> MutationResult:
+    pantry_item = _load_owned(session, household_id=household_id, item_id=item_id)
     if pantry_item.status == "removed":
         return MutationResult(applied=False, was_already=True)
     pantry_item.status = "removed"
     pantry_item.snoozed_until = None
     assert pantry_item.id is not None
-    expire_for_item(session, user_id=pantry_item.user_id, item_id=pantry_item.id)
+    # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
+    expire_for_item(session, user_id=pantry_item.household_id, item_id=pantry_item.id)
     session.add(pantry_item)
     session.commit()
     return MutationResult(applied=True, was_already=False)
@@ -128,19 +130,20 @@ SNOOZE_DAYS_MAX = 30
 def snooze_item(
     session: Session,
     *,
-    user_id: int,
+    household_id: int,
     item_id: int,
     today: date,
     days: int = SNOOZE_DAYS_DEFAULT,
 ) -> MutationResult:
     if days < SNOOZE_DAYS_MIN or days > SNOOZE_DAYS_MAX:
         raise ValueError(f"days must be in [{SNOOZE_DAYS_MIN}, {SNOOZE_DAYS_MAX}]")
-    pantry_item = _load_owned(session, user_id=user_id, item_id=item_id)
+    pantry_item = _load_owned(session, household_id=household_id, item_id=item_id)
     if pantry_item.status != "active":
         return MutationResult(applied=False, was_already=True)
     pantry_item.snoozed_until = today + timedelta(days=days)
     assert pantry_item.id is not None
-    expire_for_item(session, user_id=pantry_item.user_id, item_id=pantry_item.id)
+    # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
+    expire_for_item(session, user_id=pantry_item.household_id, item_id=pantry_item.id)
     session.add(pantry_item)
     session.commit()
     return MutationResult(applied=True, was_already=False)
@@ -151,22 +154,23 @@ SHELF_LIFE_DAYS_MAX = 730
 
 
 def correct_item(
-    session: Session, *, user_id: int, item_id: int, days: int, today: date
+    session: Session, *, household_id: int, item_id: int, days: int, today: date
 ) -> PantryItem:
     if days < SHELF_LIFE_DAYS_MIN or days > SHELF_LIFE_DAYS_MAX:
         raise ValueError(f"days must be in [{SHELF_LIFE_DAYS_MIN}, {SHELF_LIFE_DAYS_MAX}]")
-    pantry_item = _load_owned(session, user_id=user_id, item_id=item_id)
+    pantry_item = _load_owned(session, household_id=household_id, item_id=item_id)
     if pantry_item.status == "removed":
         raise ValueError("cannot correct a removed item")
     pantry_item.shelf_life_days = days
     pantry_item.shelf_life_source = "user_correction"
     pantry_item.expires_on = pantry_item.purchased_on + timedelta(days=days)
     assert pantry_item.id is not None
-    expire_for_item(session, user_id=pantry_item.user_id, item_id=pantry_item.id)
+    # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
+    expire_for_item(session, user_id=pantry_item.household_id, item_id=pantry_item.id)
     session.add(pantry_item)
     write_user_correction(
         session,
-        user_id,
+        household_id,
         pantry_item.normalized_name,
         days=days,
         category=pantry_item.category,
@@ -211,12 +215,12 @@ class Stats:
     )
 
 
-def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
+def compute_stats(session: Session, *, household_id: int, now: datetime) -> Stats:
     since = now - timedelta(days=30)
     receipts = list(
         session.exec(
             select(Receipt).where(
-                Receipt.user_id == user_id,
+                Receipt.household_id == household_id,
                 Receipt.scanned_at >= since,
             )
         ).all()
@@ -232,7 +236,7 @@ def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
     items_30d = list(
         session.exec(
             select(PantryItem).where(
-                PantryItem.user_id == user_id,
+                PantryItem.household_id == household_id,
                 PantryItem.created_at >= since,
             )
         ).all()
@@ -259,7 +263,7 @@ def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
     pending_rows = list(
         session.exec(
             select(PendingCorrection).where(
-                PendingCorrection.user_id == user_id,
+                PendingCorrection.household_id == household_id,
                 PendingCorrection.created_at >= since,
             )
         ).all()
@@ -284,7 +288,7 @@ def compute_stats(session: Session, *, user_id: int, now: datetime) -> Stats:
     cook_rows = list(
         session.exec(
             select(CookSession).where(
-                CookSession.user_id == user_id,
+                CookSession.household_id == household_id,
                 CookSession.created_at >= since.replace(tzinfo=None),
             )
         ).all()
@@ -359,17 +363,17 @@ def _expired(reference: datetime, now: datetime) -> bool:
 
 
 def undo_receipt(
-    session: Session, *, user_id: int, receipt_id: int, now: datetime
+    session: Session, *, household_id: int, receipt_id: int, now: datetime
 ) -> UndoResult:
     receipt = session.get(Receipt, receipt_id)
-    if receipt is None or receipt.user_id != user_id:
+    if receipt is None or receipt.household_id != household_id:
         return UndoResult([], [], False, expired=False)
     if _expired(receipt.scanned_at, now):
         return UndoResult([], [], False, expired=True)
 
     items = list(session.exec(
         select(PantryItem).where(
-            PantryItem.user_id == user_id,
+            PantryItem.household_id == household_id,
             PantryItem.source_receipt_id == receipt_id,
         )
     ).all())
@@ -380,7 +384,8 @@ def undo_receipt(
         if is_untouched(item):
             item.status = "removed"
             item.snoozed_until = None
-            expire_for_item(session, user_id=user_id, item_id=item.id)
+            # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
+            expire_for_item(session, user_id=household_id, item_id=item.id)
             removed_ids.append(item.id)
         else:
             skipped.append((item.id, _skip_reason(item)))
@@ -398,10 +403,10 @@ def undo_receipt(
 
 
 def undo_add(
-    session: Session, *, user_id: int, item_id: int, now: datetime
+    session: Session, *, household_id: int, item_id: int, now: datetime
 ) -> UndoResult:
     item = session.get(PantryItem, item_id)
-    if item is None or item.user_id != user_id:
+    if item is None or item.household_id != household_id:
         return UndoResult([], [], False, expired=False)
     if _expired(item.created_at, now):
         return UndoResult([], [], False, expired=True)
@@ -410,7 +415,8 @@ def undo_add(
         return UndoResult([], [(item.id, _skip_reason(item))], False, expired=False)
     item.status = "removed"
     item.snoozed_until = None
-    expire_for_item(session, user_id=user_id, item_id=item.id)
+    # pending_service.expire_for_item is re-keyed in Task 6; value is the household id
+    expire_for_item(session, user_id=household_id, item_id=item.id)
     session.add(item)
     session.commit()
     return UndoResult([item.id], [], receipt_deleted=False, expired=False)

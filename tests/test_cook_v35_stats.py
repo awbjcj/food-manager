@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.models import CookSession, User
+from app.models import CookSession, Household, User
 from app.pantry_service import Stats, compute_stats
 from app.renderer import render_stats
 
@@ -12,12 +12,16 @@ def test_compute_stats_counts_feedback():
     SQLModel.metadata.create_all(engine)
     now = datetime(2026, 5, 30, 12, 0)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         for fb in ("liked", "liked", "disliked", "none"):
-            db.add(CookSession(user_id=1, status="done", chat_id=1, selected_item_ids="[]",
+            db.add(CookSession(household_id=household.id, status="done", chat_id=1, selected_item_ids="[]",
                                feedback=fb, created_at=now, expires_at=now))
         db.commit()
-        stats = compute_stats(db, user_id=1,
+        stats = compute_stats(db, household_id=household.id,
                               now=datetime(2026, 5, 30, 13, 0, tzinfo=timezone.utc))
         assert stats.cook_feedback_count == 3  # liked+liked+disliked
         assert stats.cook_liked_count == 2

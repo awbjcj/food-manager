@@ -2,7 +2,7 @@ import pytest
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 from sqlmodel import SQLModel, Session, create_engine
-from app.models import PantryItem, Receipt, User
+from app.models import Household, PantryItem, Receipt, User
 from app.commands import CallbackAction, CommandError, parse_callback
 from app.pantry_service import UndoResult
 from app.renderer import (
@@ -35,14 +35,18 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
         db.commit()
         yield db
 
 
 def _receipt(session, *, scanned_at):
     r = Receipt(
-        user_id=1,
+        household_id=1,
         photo_file_id=f"p{scanned_at.timestamp()}",
         purchase_date=date(2026, 5, 28),
         purchase_date_source="receipt",
@@ -65,7 +69,7 @@ def _ritem(
     created_at=None,
 ):
     item = PantryItem(
-        user_id=1,
+        household_id=1,
         raw_name=name,
         normalized_name=name.lower(),
         category="produce",
@@ -96,7 +100,7 @@ def test_undo_receipt_full_removes_all_and_deletes_receipt(session):
     from app.pantry_service import undo_receipt
 
     assert r.id is not None
-    result = undo_receipt(session, user_id=1, receipt_id=r.id, now=now)
+    result = undo_receipt(session, household_id=1, receipt_id=r.id, now=now)
     assert result.expired is False
     assert set(result.removed_ids) == {a.id, b.id}
     assert result.skipped == []
@@ -116,7 +120,7 @@ def test_undo_receipt_partial_keeps_receipt(session):
     assert r.id is not None
     from app.pantry_service import undo_receipt
 
-    result = undo_receipt(session, user_id=1, receipt_id=r.id, now=now)
+    result = undo_receipt(session, household_id=1, receipt_id=r.id, now=now)
     assert result.removed_ids == [a.id]
     assert result.skipped == [(eaten.id, "eaten")]
     assert result.receipt_deleted is False
@@ -132,7 +136,7 @@ def test_undo_receipt_expired_after_ttl(session):
     assert r.id is not None
     from app.pantry_service import undo_receipt
 
-    result = undo_receipt(session, user_id=1, receipt_id=r.id, now=now)
+    result = undo_receipt(session, household_id=1, receipt_id=r.id, now=now)
     assert result.expired is True
     assert result.removed_ids == []
 
@@ -143,7 +147,7 @@ def test_undo_add_single_item(session):
     from app.pantry_service import undo_add
 
     assert item.id is not None
-    result = undo_add(session, user_id=1, item_id=item.id, now=now)
+    result = undo_add(session, household_id=1, item_id=item.id, now=now)
     assert result.removed_ids == [item.id]
     assert result.receipt_deleted is False
     session.refresh(item)
@@ -159,7 +163,7 @@ def test_undo_add_explicit_expiry_is_undoable(session):
     from app.pantry_service import undo_add
 
     assert item.id is not None
-    result = undo_add(session, user_id=1, item_id=item.id, now=now)
+    result = undo_add(session, household_id=1, item_id=item.id, now=now)
     assert result.removed_ids == [item.id]
     assert result.skipped == []
     session.refresh(item)
@@ -172,7 +176,7 @@ def test_undo_add_skips_eaten(session):
     from app.pantry_service import undo_add
 
     assert item.id is not None
-    result = undo_add(session, user_id=1, item_id=item.id, now=now)
+    result = undo_add(session, household_id=1, item_id=item.id, now=now)
     assert result.removed_ids == []
     assert result.skipped == [(item.id, "eaten")]
 
@@ -205,7 +209,11 @@ def handler_engine():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=99, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=99, household_id=household.id, created_at=datetime.now(timezone.utc)))
         db.commit()
     return engine
 
@@ -229,7 +237,7 @@ async def test_handle_callback_undo_receipt(handler_engine, monkeypatch):
     # Insert a receipt and an active item referencing it
     with Session(handler_engine) as setup_db:
         receipt = Receipt(
-            user_id=1,
+            household_id=1,
             photo_file_id="ph_undo_test",
             purchase_date=date(2026, 5, 28),
             purchase_date_source="receipt",
@@ -242,7 +250,7 @@ async def test_handle_callback_undo_receipt(handler_engine, monkeypatch):
         assert receipt_id is not None
 
         item = PantryItem(
-            user_id=1,
+            household_id=1,
             raw_name="Eggs",
             normalized_name="eggs",
             category="dairy",

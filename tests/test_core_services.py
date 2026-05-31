@@ -238,7 +238,7 @@ def _item(session, name, days_from_today, *, today=date(2026, 5, 26), status="ac
           category="produce", snoozed_until=None, created_via="manual",
           ingest_source="llm") -> PantryItem:
     pantry_item = PantryItem(
-        user_id=1,
+        household_id=1,
         raw_name=name,
         normalized_name=name.lower(),
         category=category,
@@ -267,12 +267,12 @@ def test_pantry_list_filters_and_digest_due(session):
     _item(session, "A", 1, today=today)
     _item(session, "B", 3, today=today)
     _item(session, "Z", 2, today=today, status="eaten")
-    assert [r.raw_name for r in list_active(session, user_id=1, f=ListFilter.default(), today=today)] == ["A", "B", "C"]
-    assert [r.raw_name for r in list_active(session, user_id=1, f=ListFilter(window="week"), today=today)] == ["A", "B", "C"]
+    assert [r.raw_name for r in list_active(session, household_id=1, f=ListFilter.default(), today=today)] == ["A", "B", "C"]
+    assert [r.raw_name for r in list_active(session, household_id=1, f=ListFilter(window="week"), today=today)] == ["A", "B", "C"]
     _item(session, "expired", -1, today=today)
     _item(session, "future", 8, today=today)
     _item(session, "snoozed", 3, today=today, snoozed_until=today + timedelta(days=2))
-    assert [r.raw_name for r in list_digest_due(session, user_id=1, today=today)] == ["expired", "A", "B", "C"]
+    assert [r.raw_name for r in list_digest_due(session, household_id=1, today=today)] == ["expired", "A", "B", "C"]
     assert "dairy" in ALLOWED_CATEGORIES and "wine" not in ALLOWED_CATEGORIES
 
 
@@ -280,28 +280,28 @@ def test_pantry_mutations_and_correction(session):
     today = date(2026, 5, 26)
     pantry_item = _item(session, "Whole Milk", 7, today=today, category="dairy")
     assert pantry_item.id is not None
-    snooze_item(session, user_id=1, item_id=pantry_item.id, today=today, days=2)
+    snooze_item(session, household_id=1, item_id=pantry_item.id, today=today, days=2)
     session.refresh(pantry_item)
     assert pantry_item.snoozed_until == today + timedelta(days=2)
-    mark_eaten(session, user_id=1, item_id=pantry_item.id, today=today)
+    mark_eaten(session, household_id=1, item_id=pantry_item.id, today=today)
     session.refresh(pantry_item)
     assert pantry_item.status == "eaten" and pantry_item.snoozed_until is None
-    correct_item(session, user_id=1, item_id=pantry_item.id, days=5, today=today)
+    correct_item(session, household_id=1, item_id=pantry_item.id, days=5, today=today)
     session.refresh(pantry_item)
     assert pantry_item.expires_on == today + timedelta(days=5)
     removed = _item(session, "Bad Import", 3, status="active")
     assert removed.id is not None
-    mark_removed(session, user_id=1, item_id=removed.id, today=today)
+    mark_removed(session, household_id=1, item_id=removed.id, today=today)
     with pytest.raises(ValueError):
-        correct_item(session, user_id=1, item_id=removed.id, days=5, today=today)
+        correct_item(session, household_id=1, item_id=removed.id, days=5, today=today)
     with pytest.raises(NotOwnerOrMissing):
-        mark_eaten(session, user_id=2, item_id=pantry_item.id, today=today)
+        mark_eaten(session, household_id=2, item_id=pantry_item.id, today=today)
 
 
 def test_compute_stats(session):
     today = date(2026, 5, 26)
     session.add(Receipt(
-        user_id=1,
+        household_id=1,
         photo_file_id="r1",
         purchase_date=today,
         purchase_date_source="receipt",
@@ -309,7 +309,7 @@ def test_compute_stats(session):
         llm_cost_micros_usd=15000,
     ))
     session.add(Receipt(
-        user_id=1,
+        household_id=1,
         photo_file_id="r2",
         purchase_date=today,
         purchase_date_source="receipt",
@@ -321,7 +321,7 @@ def test_compute_stats(session):
     _item(session, "eaten", 2, today=today, status="eaten")
     _item(session, "tossed", 2, today=today, status="tossed")
     _item(session, "removed", 2, today=today, status="removed")
-    stats = compute_stats(session, user_id=1, now=datetime.now(timezone.utc))
+    stats = compute_stats(session, household_id=1, now=datetime.now(timezone.utc))
     assert stats.receipt_count == 2
     assert stats.tracked_item_count == 4
     assert stats.removed_item_count == 1

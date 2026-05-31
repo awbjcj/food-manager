@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import string
 from datetime import date
 
 log = logging.getLogger(__name__)

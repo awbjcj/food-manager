@@ -50,7 +50,7 @@ async def refine_receipt_items(
     session: Session,
     search: ShelfLifeSearchClient,
     *,
-    user_id: int,
+    household_id: int,
     item_ids: list[int],
     today: date,
 ) -> RefineResult:
@@ -61,7 +61,7 @@ async def refine_receipt_items(
     saw_cost = False
     for item_id in item_ids:
         item = session.get(PantryItem, item_id)
-        if item is None or item.user_id != user_id or not is_untouched(item):
+        if item is None or item.household_id != household_id or not is_untouched(item):
             continue
         result = await search.lookup_shelf_life(name=item.raw_name, category=item.category)
         if result.cost_micros_usd is not None:
@@ -78,7 +78,7 @@ async def refine_receipt_items(
         item.expires_on = item.purchased_on + timedelta(days=days)
         session.add(item)
         put_cached(
-            session, user_id, item.normalized_name,
+            session, household_id, item.normalized_name,
             days=days, category=item.category, confidence=result.confidence,
             source="llm", commit=False,
         )
@@ -114,13 +114,13 @@ async def run_receipt_refine(
     *,
     item_ids: list[int],
     summary,
-    user_id: int,
+    household_id: int,
     receipt_id: int,
     today: date,
 ) -> frozenset:
     with session_factory() as session:
         result = await refine_receipt_items(
-            session, search, user_id=user_id, item_ids=item_ids, today=today,
+            session, search, household_id=household_id, item_ids=item_ids, today=today,
         )
         receipt_exists = session.get(Receipt, receipt_id) is not None
         if receipt_exists:

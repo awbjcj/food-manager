@@ -106,7 +106,7 @@ async def test_refine_updates_untouched_item_and_writes_cache(session):
     result = await refine_receipt_items(
         session,
         search,
-        user_id=1,
+        household_id=1,
         item_ids=[item.id],
         today=date(2026, 5, 28),
     )
@@ -130,7 +130,7 @@ async def test_refine_skips_touched_items(session):
     result = await refine_receipt_items(
         session,
         search,
-        user_id=1,
+        household_id=1,
         item_ids=[corrected.id, eaten.id],
         today=date(2026, 5, 28),
     )
@@ -148,7 +148,7 @@ async def test_refine_skips_low_confidence_keeps_estimate(session):
     result = await refine_receipt_items(
         session,
         search,
-        user_id=1,
+        household_id=1,
         item_ids=[item.id],
         today=date(2026, 5, 28),
     )
@@ -170,7 +170,12 @@ async def test_handle_photo_spawns_refine_and_edits_message(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
+                    created_at=datetime.now(timezone.utc)))
         db.commit()
     session_factory = lambda: Session(engine)
 
@@ -477,7 +482,7 @@ async def test_refine_skips_item_touched_during_search(session):
     result = await refine_receipt_items(
         session,
         search,
-        user_id=1,
+        household_id=1,
         item_ids=[item.id],
         today=date(2026, 5, 28),
     )
@@ -558,7 +563,7 @@ async def test_run_receipt_refine_refreshes_summary_and_accrues_cost():
         search,
         item_ids=[item_id],
         summary=summary,
-        user_id=1,
+        household_id=1,
         receipt_id=receipt_id,
         today=date(2026, 5, 28),
     )
@@ -651,7 +656,7 @@ async def test_run_receipt_refine_suppresses_edit_when_receipt_undone():
         search,
         item_ids=[item_id],
         summary=summary,
-        user_id=1,
+        household_id=1,
         receipt_id=receipt_id,
         today=date(2026, 5, 28),
     )
@@ -730,7 +735,7 @@ async def test_run_receipt_refine_accrues_cost_even_when_nothing_refined():
         search,
         item_ids=[item_id],
         summary=summary,
-        user_id=1,
+        household_id=1,
         receipt_id=receipt_id,
         today=date(2026, 5, 28),
     )

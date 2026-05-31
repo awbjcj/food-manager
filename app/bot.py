@@ -61,6 +61,7 @@ from app.llm import (
     ProfileUpdateLLMClient,
     TextLLMClient,
 )
+from app.household_service import provision_solo_household
 from app.models import CookSession, Household, PantryItem, User
 from app.refine_service import run_receipt_refine
 from app.pantry_service import (
@@ -131,6 +132,7 @@ class AuthDecision:
     user: Optional[User]
     created: bool
     reason: str
+    household: Optional[Household] = None
 
 
 def authorize_and_get_user(
@@ -148,11 +150,15 @@ def authorize_and_get_user(
 
     existing = session.get(User, telegram_user_id)
     if existing is not None:
-        return AuthDecision(True, existing, False, "ok")
+        household = session.get(Household, existing.household_id)
+        if household is None:
+            household = provision_solo_household(session, existing)
+        return AuthDecision(True, existing, False, "ok", household=household)
 
     user = User(
         telegram_id=telegram_user_id,
         chat_id=chat_id,
+        household_id=0,
         tz=DEFAULT_TZ,
         digest_hour=DEFAULT_DIGEST_HOUR,
         llm_provider=DEFAULT_LLM_PROVIDER,
@@ -161,7 +167,8 @@ def authorize_and_get_user(
     session.add(user)
     session.commit()
     session.refresh(user)
-    return AuthDecision(True, user, True, "created")
+    household = provision_solo_household(session, user)
+    return AuthDecision(True, user, True, "created", household=household)
 
 
 def _noop_user_created(user: User) -> None:
@@ -334,7 +341,7 @@ async def handle_list(
             return
         today = now_provider(user.tz).date()
         items = list_active(
-            session, user_id=user.telegram_id, f=list_filter, today=today
+            session, household_id=user.household_id, f=list_filter, today=today
         )
         await msg.answer(render_list(items, today=today))
 
@@ -362,7 +369,7 @@ async def handle_add(
             proposals, _ = await propose_add(
                 session,
                 llm=selected_text_llm,
-                user_id=user.telegram_id,
+                household_id=user.household_id,
                 user_text=parts[1].strip(),
                 today=today,
                 tz=user.tz,
@@ -390,7 +397,7 @@ async def handle_add(
         for proposal in proposals:
             pending = create_pending(
                 session,
-                user_id=user.telegram_id,
+                household_id=user.household_id,
                 action_type="add",
                 item_id=None,
                 proposed_json=add_payload_to_json(proposal.payload),
@@ -443,7 +450,7 @@ async def _terminal_cmd(
         try:
             result = fn(
                 session,
-                user_id=user.telegram_id,
+                household_id=user.household_id,
                 item_id=item_id,
                 today=now_provider(user.tz).date(),
             )
@@ -535,7 +542,7 @@ async def handle_snooze(
         try:
             result = snooze_item(
                 session,
-                user_id=user.telegram_id,
+                household_id=user.household_id,
                 item_id=item_id,
                 today=now_provider(user.tz).date(),
                 days=days,
@@ -582,7 +589,7 @@ async def handle_correct(
             await msg.answer(str(exc))
             return
         item = session.get(PantryItem, item_id)
-        if item is None or item.user_id != user.telegram_id:
+        if item is None or item.household_id != user.household_id:
             await msg.answer(f"no item #{item_id}")
             return
         if item.status != "active":
@@ -594,7 +601,7 @@ async def handle_correct(
             payload, cost = await propose_correct(
                 session,
                 llm=selected_text_llm,
-                user_id=user.telegram_id,
+                household_id=user.household_id,
                 item=item,
                 user_text=parts[2].strip(),
                 today=today,
@@ -624,7 +631,7 @@ async def handle_correct(
 
         pending = create_pending(
             session,
-            user_id=user.telegram_id,
+            household_id=user.household_id,
             action_type="correct",
             item_id=item_id,
             proposed_json=correct_payload_to_json(payload),
@@ -670,7 +677,7 @@ async def handle_stats(
         now = now_provider(user.tz)
         stats = compute_stats(
             session,
-            user_id=user.telegram_id,
+            household_id=user.household_id,
             now=now.astimezone(timezone.utc),
         )
         await msg.answer(render_stats(stats))
@@ -687,7 +694,7 @@ async def handle_shopping(
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
-        items = list_pending(session, user_id=user.telegram_id)
+        items = list_pending(session, household_id=user.household_id)
         keyboard = (
             to_aiogram_keyboard(build_shopping_keyboard([i.id for i in items if i.id]))
             if items
@@ -706,7 +713,7 @@ async def handle_favorites(
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
-        recipes = list_saved(session, user_id=user.telegram_id)
+        recipes = list_saved(session, household_id=user.household_id)
         keyboard = (
             to_aiogram_keyboard(build_favorites_keyboard([r.id for r in recipes if r.id]))
             if recipes
@@ -729,7 +736,7 @@ async def handle_cook(
         now = now_provider(user.tz)
         cook = create_cook_session(
             session,
-            user_id=user.telegram_id,
+            household_id=user.household_id,
             chat_id=msg.chat.id,
             now=now.astimezone(timezone.utc),
         )
@@ -886,7 +893,7 @@ async def handle_photo(
             summary = await ingest_photo(
                 session,
                 selected_llm,
-                user_id=user.telegram_id,
+                household_id=user.household_id,
                 photo_file_id=file_id,
                 image_bytes=await photo_downloader(file_id),
                 today=today,
@@ -925,7 +932,7 @@ async def handle_photo(
             if summary.receipt_id is not None and summary.inserted_food_count
             else None
         )
-        refine_user_id = user.telegram_id
+        refine_household_id = user.household_id
         sent = await msg.answer(
             render_ingest_reply(summary, today=today), reply_markup=keyboard
         )
@@ -948,7 +955,7 @@ async def handle_photo(
                 search,
                 item_ids=item_ids,
                 summary=summary,
-                user_id=refine_user_id,
+                household_id=refine_household_id,
                 receipt_id=receipt_id,
                 today=today,
             )
@@ -972,9 +979,11 @@ async def handle_photo(
         spawn(_run_refine())
 
 
-def _cuisine_options(user: User) -> list[str]:
+def _cuisine_options(household: Household | None) -> list[str]:
     try:
-        prefs = _json.loads(user.preferred_cuisines_json or "[]")
+        prefs = _json.loads(
+            household.preferred_cuisines_json if household is not None else "[]"
+        )
     except (TypeError, ValueError):
         prefs = []
     options = [str(c).title() for c in prefs if str(c).strip()]
@@ -1047,8 +1056,9 @@ async def handle_cook_callback(
         if user is None:
             await cb.answer("not configured")
             return
+        household = session.get(Household, user.household_id)
         cook = load_cook_session(
-            session, user_id=user.telegram_id, cook_id=action.item_id
+            session, household_id=user.household_id, cook_id=action.item_id
         )
         if cook is None or cook.status not in ("collecting", "ready", "done"):
             await cb.answer("this cook session expired - start a new /cook")
@@ -1096,7 +1106,7 @@ async def handle_cook_callback(
             assert cook.id is not None
             keyboard = to_aiogram_keyboard(
                 build_cook_round_keyboard(
-                    cook.id, _cuisine_options(user), round_name="cuisine"
+                    cook.id, _cuisine_options(household), round_name="cuisine"
                 )
             )
             if not await _safe_edit_cb(
@@ -1124,7 +1134,7 @@ async def handle_cook_callback(
             await cb.answer("unrecognized action")
             return
 
-        cuisine_options = _cuisine_options(user)
+        cuisine_options = _cuisine_options(household)
         if option_index < 0 or option_index >= len(cuisine_options):
             await cb.answer("unrecognized action")
             return
@@ -1133,7 +1143,7 @@ async def handle_cook_callback(
             update(CookSession)
             .where(
                 CookSession.id == cook.id,  # type: ignore[arg-type]
-                CookSession.user_id == user.telegram_id,  # type: ignore[arg-type]
+                CookSession.household_id == user.household_id,  # type: ignore[arg-type]
                 CookSession.status == "collecting",  # type: ignore[arg-type]
                 CookSession.meal_type.is_not(None),  # type: ignore[union-attr]
                 CookSession.cuisine.is_(None),  # type: ignore[union-attr]
@@ -1145,13 +1155,16 @@ async def handle_cook_callback(
             await cb.answer("already cooking")
             return
         assert cook.id is not None
-        cook = load_cook_session(session, user_id=user.telegram_id, cook_id=cook.id)
+        cook = load_cook_session(
+            session, household_id=user.household_id, cook_id=cook.id
+        )
         if cook is None:
             await cb.answer("this cook session expired - start a new /cook")
             return
         await _safe_edit_cb(cb, "Thinking...")
         await cb.answer()
         user_id = user.telegram_id
+        household_id = user.household_id
         user_tz = user.tz
         cook_id = cook.id
 
@@ -1161,6 +1174,7 @@ async def handle_cook_callback(
         run_cook_and_render(
             session_factory,
             user_id=user_id,
+            household_id=household_id,
             user_tz=user_tz,
             cook_id=cook_id,
             selection_llm=selection_llm,
@@ -1176,6 +1190,7 @@ async def run_cook_and_render(
     session_factory: _SessionFactory,
     *,
     user_id: int,
+    household_id: int | None = None,
     user_tz: str,
     cook_id: int,
     selection_llm,
@@ -1185,13 +1200,19 @@ async def run_cook_and_render(
     bot,
 ) -> None:
     with session_factory() as session:
-        cook = load_cook_session(session, user_id=user_id, cook_id=cook_id)
-        if cook is None or cook.status != "ready":
-            return
         user = session.get(User, user_id)
         if user is None:
             return
-        profile = profile_from_user(user)
+        resolved_household_id = household_id if household_id is not None else user.household_id
+        cook = load_cook_session(
+            session, household_id=resolved_household_id, cook_id=cook_id
+        )
+        if cook is None or cook.status != "ready":
+            return
+        household = session.get(Household, resolved_household_id)
+        if household is None:
+            return
+        profile = profile_from_household(household)
         chat_id = cook.chat_id
         message_id = cook.message_id
         today = now_provider(user_tz).date()
@@ -1268,7 +1289,9 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
         if action.verb in ("cook_like", "cook_dislike"):
             cook_id = action.item_id
             assert cook_id is not None
-            cook = load_cook_session(session, user_id=user.telegram_id, cook_id=cook_id)
+            cook = load_cook_session(
+                session, household_id=user.household_id, cook_id=cook_id
+            )
             if cook is None or cook.status != "done":
                 await cb.answer("this cook session expired - start a new /cook")
                 return
@@ -1280,7 +1303,9 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
         if action.verb in ("cook_save", "cook_shop"):
             cook_id = action.item_id
             assert cook_id is not None
-            cook = load_cook_session(session, user_id=user.telegram_id, cook_id=cook_id)
+            cook = load_cook_session(
+                session, household_id=user.household_id, cook_id=cook_id
+            )
             if cook is None or cook.status != "done":
                 await cb.answer("this cook session expired - start a new /cook")
                 return
@@ -1298,19 +1323,19 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             candidate = cards[index].recipe
             if action.verb == "cook_save":
                 result = save_candidate(
-                    session, user_id=user.telegram_id, candidate=candidate,
+                    session, household_id=user.household_id, candidate=candidate,
                     now=now_provider(user.tz),
                 )
                 await cb.answer("already saved" if result.duplicate else "saved ★")
                 return
             pantry = active_pantry_names(
-                session, user_id=user.telegram_id, today=today
+                session, household_id=user.household_id, today=today
             )
             missing = missing_ingredients(
                 ingredients=candidate.ingredients, pantry_normalized=pantry
             )
             add_result = add_missing(
-                session, user_id=user.telegram_id, ingredients=missing,
+                session, household_id=user.household_id, ingredients=missing,
                 now=now_provider(user.tz),
             )
             if add_result.added:
@@ -1325,10 +1350,10 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             shopping_id = action.item_id
             assert shopping_id is not None
             ok = check_off(
-                session, user_id=user.telegram_id, shopping_id=shopping_id,
+                session, household_id=user.household_id, shopping_id=shopping_id,
                 now=now_provider(user.tz),
             )
-            remaining = list_pending(session, user_id=user.telegram_id)
+            remaining = list_pending(session, household_id=user.household_id)
             keyboard = (
                 to_aiogram_keyboard(
                     build_shopping_keyboard([i.id for i in remaining if i.id])
@@ -1348,12 +1373,14 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
         if action.verb == "fav_cook":
             recipe_id = action.item_id
             assert recipe_id is not None
-            saved = load_saved(session, user_id=user.telegram_id, recipe_id=recipe_id)
+            saved = load_saved(
+                session, household_id=user.household_id, recipe_id=recipe_id
+            )
             if saved is None:
                 await cb.answer("not found")
                 return
             shopping = recook_shopping_list(
-                session, user_id=user.telegram_id, saved=saved, today=today
+                session, household_id=user.household_id, saved=saved, today=today
             )
             await cb.message.answer(
                 render_recook(recipe_from_saved(saved), shopping=shopping)
@@ -1362,7 +1389,7 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             return
 
         if action.verb == "show_all":
-            rows = list_digest_due(session, user_id=user.telegram_id, today=today)
+            rows = list_digest_due(session, household_id=user.household_id, today=today)
             if not rows:
                 await cb.answer("nothing due")
                 return
@@ -1377,6 +1404,7 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
                 cb,
                 session=session,
                 today=today,
+                household_id=user.household_id,
                 pending_id=pending_id,
                 verb=action.verb,
             )
@@ -1388,11 +1416,17 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
             now = datetime.now(timezone.utc)
             if action.verb == "undo_receipt":
                 result = undo_receipt(
-                    session, user_id=user.telegram_id, receipt_id=target_id, now=now
+                    session,
+                    household_id=user.household_id,
+                    receipt_id=target_id,
+                    now=now,
                 )
             else:
                 result = undo_add(
-                    session, user_id=user.telegram_id, item_id=target_id, now=now
+                    session,
+                    household_id=user.household_id,
+                    item_id=target_id,
+                    now=now,
                 )
             try:
                 await cb.message.edit_text(render_undo_result(result))
@@ -1408,16 +1442,22 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
         try:
             if action.verb == "ate":
                 result = mark_eaten(
-                    session, user_id=cb.from_user.id, item_id=item_id, today=today
+                    session,
+                    household_id=user.household_id,
+                    item_id=item_id,
+                    today=today,
                 )
             elif action.verb == "toss":
                 result = mark_tossed(
-                    session, user_id=cb.from_user.id, item_id=item_id, today=today
+                    session,
+                    household_id=user.household_id,
+                    item_id=item_id,
+                    today=today,
                 )
             elif action.verb == "snooze2":
                 result = snooze_item(
                     session,
-                    user_id=cb.from_user.id,
+                    household_id=user.household_id,
                     item_id=item_id,
                     today=today,
                     days=2,
@@ -1437,7 +1477,7 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
                     "action": action.verb,
                 },
             )
-            await _refresh_digest_message(cb, session, user.telegram_id, today)
+            await _refresh_digest_message(cb, session, user.household_id, today)
         await cb.answer(
             f"#{item_id} -> {action.verb}"
             if result.applied
@@ -1446,9 +1486,9 @@ async def handle_callback(cb, *, session_factory, now_provider) -> None:
 
 
 async def _handle_pending_callback(
-    cb, *, session: Session, today, pending_id: int, verb: str
+    cb, *, session: Session, today, household_id: int, pending_id: int, verb: str
 ) -> None:
-    pending = load_pending(session, user_id=cb.from_user.id, pending_id=pending_id)
+    pending = load_pending(session, household_id=household_id, pending_id=pending_id)
     if pending is None:
         await cb.answer("not found")
         return
@@ -1516,11 +1556,11 @@ async def _handle_pending_callback(
         assert item.id is not None
         expire_for_item(
             session,
-            user_id=cb.from_user.id,
+            household_id=household_id,
             item_id=item.id,
             exclude_pending_id=pending.id,
         )
-        apply_correct(session, user_id=cb.from_user.id, item=item, payload=payload)
+        apply_correct(session, household_id=household_id, item=item, payload=payload)
         mark_applied(session, pending=pending)
         session.commit()
         try:
@@ -1550,7 +1590,7 @@ async def _handle_pending_callback(
         await cb.answer("unknown action")
         return
     payload = add_payload_from_json(pending.proposed_json)
-    new_id = apply_add(session, user_id=cb.from_user.id, payload=payload, today=today)
+    new_id = apply_add(session, household_id=household_id, payload=payload, today=today)
     mark_applied(session, pending=pending)
     session.commit()
     try:
@@ -1570,8 +1610,8 @@ async def _handle_pending_callback(
     await cb.answer("added")
 
 
-async def _refresh_digest_message(cb, session, user_id: int, today) -> None:
-    remaining = list_digest_due(session, user_id=user_id, today=today)
+async def _refresh_digest_message(cb, session, household_id: int, today) -> None:
+    remaining = list_digest_due(session, household_id=household_id, today=today)
     if remaining:
         rendered = render_digest(remaining, today=today)
         keyboard = to_aiogram_keyboard(

@@ -8,7 +8,7 @@ import app.bot as bot_mod
 from app.bot import handle_favorites, handle_shopping
 from app.cook_models import RecipeCandidate, RecipeIngredient
 from app.favorites_service import save_candidate
-from app.models import User
+from app.models import Household, User
 from app.shopping_service import add_missing
 
 
@@ -24,7 +24,12 @@ def _engine_with_user():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
+                    created_at=datetime.now(timezone.utc)))
         db.commit()
     return engine
 
@@ -37,7 +42,7 @@ def test_shopping_lists_pending_with_buttons(monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     with Session(engine) as db:
-        add_missing(db, user_id=1, ingredients=[RecipeIngredient(name="Eggs")], now=_NOW("x"))
+        add_missing(db, household_id=1, ingredients=[RecipeIngredient(name="Eggs")], now=_NOW("x"))
     asyncio.run(handle_shopping(
         _Msg(), session_factory=lambda: Session(engine), now_provider=_NOW))
 
@@ -46,7 +51,7 @@ def test_shopping_handler_renders_items(monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     with Session(engine) as db:
-        add_missing(db, user_id=1, ingredients=[RecipeIngredient(name="Eggs")], now=_NOW("x"))
+        add_missing(db, household_id=1, ingredients=[RecipeIngredient(name="Eggs")], now=_NOW("x"))
     msg = _Msg()
     asyncio.run(handle_shopping(
         msg, session_factory=lambda: Session(engine), now_provider=_NOW))
@@ -62,7 +67,7 @@ def test_favorites_handler_renders_saved(monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     with Session(engine) as db:
-        save_candidate(db, user_id=1, candidate=RecipeCandidate(
+        save_candidate(db, household_id=1, candidate=RecipeCandidate(
             title="Pasta", cuisine="italian", source_url="u",
             ingredients=[RecipeIngredient(name="pasta")], method_gist="boil"),
             now=_NOW("x"))

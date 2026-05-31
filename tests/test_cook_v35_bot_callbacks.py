@@ -117,7 +117,7 @@ def test_save_callback_creates_favorite(monkeypatch):
     asyncio.run(handle_callback(
         cb, session_factory=lambda: Session(engine), now_provider=_NOW))
     with Session(engine) as db:
-        saved = list_saved(db, user_id=1)
+        saved = list_saved(db, household_id=1)
         assert len(saved) == 1 and saved[0].title == "Pasta"
     cb.answer.assert_awaited()
 
@@ -128,7 +128,7 @@ def test_shop_callback_adds_missing_against_pantry(monkeypatch):
     today = date(2026, 5, 30)
     with Session(engine) as db:
         db.add(PantryItem(
-            user_id=1, raw_name="tomato", normalized_name="tomato", category="produce",
+            household_id=1, raw_name="tomato", normalized_name="tomato", category="produce",
             qty=1.0, purchased_on=today, shelf_life_days=5, shelf_life_source="llm",
             ingest_shelf_life_source="llm", expires_on=date(2026, 6, 5), status="active",
             created_via="receipt", created_at=datetime.now(timezone.utc)))
@@ -138,7 +138,7 @@ def test_shop_callback_adds_missing_against_pantry(monkeypatch):
         _Cb(f"cookshop:{cook_id}"),
         session_factory=lambda: Session(engine), now_provider=_NOW))
     with Session(engine) as db:
-        pending = list_pending(db, user_id=1)
+        pending = list_pending(db, household_id=1)
         assert [p.name_normalized for p in pending] == ["pasta"]  # tomato already owned
 
 
@@ -147,7 +147,7 @@ def test_shopdone_callback_checks_off(monkeypatch):
     engine = _engine_with_user()
     now = datetime(2026, 5, 30, 12, 0)
     with Session(engine) as db:
-        db.add(ShoppingList(user_id=1, name_raw="Eggs", name_normalized="eggs",
+        db.add(ShoppingList(household_id=1, name_raw="Eggs", name_normalized="eggs",
                             added_at=now))
         db.commit()
         sid = db.exec(select(ShoppingList)).all()[0].id
@@ -155,7 +155,7 @@ def test_shopdone_callback_checks_off(monkeypatch):
         _Cb(f"shopdone:{sid}"),
         session_factory=lambda: Session(engine), now_provider=_NOW))
     with Session(engine) as db:
-        assert list_pending(db, user_id=1) == []
+        assert list_pending(db, household_id=1) == []
 
 
 def test_favcook_callback_replies_with_recipe(monkeypatch):
@@ -163,7 +163,7 @@ def test_favcook_callback_replies_with_recipe(monkeypatch):
     engine = _engine_with_user()
     now = datetime(2026, 5, 30, 12, 0)
     with Session(engine) as db:
-        db.add(SavedRecipe(user_id=1, title="Pasta", cuisine="italian", source_url="u",
+        db.add(SavedRecipe(household_id=1, title="Pasta", cuisine="italian", source_url="u",
                            ingredients_json=json.dumps([{"name": "pasta"}]),
                            method_gist="boil", saved_at=now))
         db.commit()
@@ -184,7 +184,7 @@ def test_result_keyboard_attached_on_render(monkeypatch):
     with Session(engine) as db:
         for i in range(4):
             db.add(PantryItem(
-                user_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
+                household_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
                 category="produce", qty=1.0, purchased_on=today, shelf_life_days=2,
                 shelf_life_source="llm", ingest_shelf_life_source="llm",
                 expires_on=today + timedelta(days=2), status="active",
@@ -225,7 +225,7 @@ def test_no_result_keyboard_when_no_recipe_found(monkeypatch):
     with Session(engine) as db:
         for i in range(4):
             db.add(PantryItem(
-                user_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
+                household_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
                 category="produce", qty=1.0, purchased_on=today, shelf_life_days=2,
                 shelf_life_source="llm", ingest_shelf_life_source="llm",
                 expires_on=today + timedelta(days=2), status="active",

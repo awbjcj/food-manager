@@ -113,7 +113,7 @@ def test_render_ingest_reply_variants():
 def _pantry_item(name, expires_on, item_id):
     return PantryItem(
         id=item_id,
-        user_id=1,
+        household_id=1,
         raw_name=name,
         normalized_name=name.lower(),
         category="other",

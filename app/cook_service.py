@@ -80,7 +80,9 @@ async def run_cook(
 ) -> list[ScoredCandidate]:
     active_items = [
         item
-        for item in list_active(session, user_id=cook.user_id, f=ListFilter.default(), today=today)
+        for item in list_active(
+            session, household_id=cook.household_id, f=ListFilter.default(), today=today
+        )
         if item.expires_on >= today
     ]
     if len(active_items) < MIN_USABLE_ITEMS:

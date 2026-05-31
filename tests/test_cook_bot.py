@@ -14,7 +14,7 @@ from app.cook_models import (
     RecipeIngredient,
     SelectedItems,
 )
-from app.models import CookSession, PantryItem, User
+from app.models import CookSession, Household, PantryItem, User
 from tests.fakes import FakeNutritionLLM, FakeRecipeLLM, FakeSelectionLLM
 
 
@@ -22,7 +22,12 @@ def _engine_with_user():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
+                    created_at=datetime.now(timezone.utc)))
         db.commit()
     return engine
 
@@ -205,7 +210,7 @@ def test_cook_pick_expires_collecting_session_without_spawning(monkeypatch):
     with Session(engine) as db:
         now = _NOW("America/Detroit").replace(tzinfo=None)
         db.add(CookSession(
-            user_id=1,
+            household_id=1,
             status="collecting",
             chat_id=1,
             selected_item_ids="[]",
@@ -249,13 +254,13 @@ def test_run_cook_and_render_completes_and_edits(monkeypatch):
     with Session(engine) as db:
         for i in range(4):
             db.add(PantryItem(
-                user_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
+                household_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
                 category="produce", qty=1.0, purchased_on=today, shelf_life_days=2,
                 shelf_life_source="llm", ingest_shelf_life_source="llm",
                 expires_on=today + timedelta(days=2), status="active",
                 created_via="receipt", created_at=datetime.now(timezone.utc)))
         now = today_dt.replace(tzinfo=None)
-        db.add(CookSession(user_id=1, status="ready", chat_id=1, meal_type="Dinner",
+        db.add(CookSession(household_id=1, status="ready", chat_id=1, meal_type="Dinner",
                            cuisine="Italian", selected_item_ids="[]", message_id=99,
                            created_at=now, expires_at=now + timedelta(minutes=10)))
         db.commit()

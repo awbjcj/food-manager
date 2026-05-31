@@ -7,7 +7,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 import app.bot as bot_mod
 from app.correction_service import CorrectPayload, correct_payload_to_json
 from app.llm import CorrectionDiff, ProposedAddItem
-from app.models import PantryItem, PendingCorrection, User
+from app.models import Household, PantryItem, PendingCorrection, User
 from app.pending_service import create_pending
 from tests.fakes import FakeTextLLMClient
 
@@ -21,7 +21,12 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        db.add(User(telegram_id=1, chat_id=99, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(telegram_id=1, chat_id=99, household_id=household.id,
+                    created_at=datetime.now(timezone.utc)))
         db.commit()
     return make
 
@@ -49,7 +54,7 @@ def _cb(data: str):
 def _item(session_factory) -> int:
     with session_factory() as db:
         item = PantryItem(
-            user_id=1,
+            household_id=1,
             raw_name="Milk",
             normalized_name="milk",
             category="dairy",
@@ -87,7 +92,7 @@ def _pending_correct(session_factory) -> tuple[int, int]:
     with session_factory() as db:
         pending = create_pending(
             db,
-            user_id=1,
+            household_id=1,
             action_type="correct",
             item_id=item_id,
             proposed_json=correct_payload_to_json(payload),

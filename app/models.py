@@ -25,18 +25,25 @@ CookStatus = Literal["collecting", "ready", "done", "cancelled", "expired"]
 CookFeedback = Literal["none", "liked", "disliked"]
 
 
-class User(SQLModel, table=True):
-    telegram_id: int = Field(primary_key=True)
-    chat_id: int
-    tz: str = "America/Detroit"
-    digest_hour: int = 8
-    llm_provider: str = "anthropic"
+class Household(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = "My Household"
     diet: str = "none"
     exclusions_json: str = "[]"
     preferred_cuisines_json: str = "[]"
     max_cook_minutes: Optional[int] = None
     household_size: int = 1
     profile_note: str = ""
+    created_at: datetime
+
+
+class User(SQLModel, table=True):
+    telegram_id: int = Field(primary_key=True)
+    chat_id: int
+    household_id: int = Field(foreign_key="household.id", index=True)
+    tz: str = "America/Detroit"
+    digest_hour: int = 8
+    llm_provider: str = "anthropic"
     created_at: datetime
 
 

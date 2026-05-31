@@ -21,6 +21,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "... et {n} de plus - appuyez sur [show all]",
         "es": "... y {n} más - toca [show all]",
     },
+    "item.tail.today": {"en": "today", "zh": "今天", "fr": "aujourd'hui", "es": "hoy"},
+    "item.tail.expired": {"en": "expired {n}d", "zh": "已过期 {n}天",
+                          "fr": "périmé {n}j", "es": "caducado hace {n}d"},
+    "item.tail.days": {"en": "({n}d)", "zh": "({n}天)", "fr": "({n}j)", "es": "({n}d)"},
     "list.empty": {"en": "no items match this filter"},
     "lang.set": {
         "en": "Language set to {lang}.",

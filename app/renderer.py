@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -7,15 +8,17 @@ from app.correction_service import AddPayload, CorrectPayload
 from app.cook_models import RecipeCandidate, ScoredCandidate
 from app.models import SavedRecipe, ShoppingList
 from app.ingest_service import IngestSummary
+from app.i18n import t, format_date
 from app.pantry_service import Stats
 from app.profile_service import FoodProfile
 
 
-def _fmt_date(value: date, *, today: date) -> str:
-    base = f"{value:%b} {value.day}"
-    if value.year != today.year:
-        return f"{base} {value.year}"
-    return base
+def _name(names: Mapping[str, str] | None, text: str) -> str:
+    return (names or {}).get(text, text)
+
+
+def _fmt_date(value: date, *, today: date, lang: str = "en") -> str:
+    return format_date(value, today=today, lang=lang)
 
 
 URGENCY_SOON_DAYS = 3
@@ -39,17 +42,18 @@ def _qty_prefix(qty: float, unit: str | None) -> str:
     return ""
 
 
-def render_item_line(item, *, today: date) -> str:
+def render_item_line(item, *, today: date, lang: str = "en", names=None) -> str:
     icon = _urgency_icon(item.expires_on, today=today)
     qty = _qty_prefix(item.qty, item.unit)
+    name = _name(names, item.raw_name)
     delta = (item.expires_on - today).days
     if delta < 0:
-        tail = f"expired {-delta}d"
+        tail = t("item.tail.expired", lang, n=-delta)
     elif delta == 0:
-        tail = "today"
+        tail = t("item.tail.today", lang)
     else:
-        tail = f"{_fmt_date(item.expires_on, today=today)} ({delta}d)"
-    return f"{icon} #{item.id} {qty}{item.raw_name} - {tail}"
+        tail = f"{_fmt_date(item.expires_on, today=today, lang=lang)} {t('item.tail.days', lang, n=delta)}"
+    return f"{icon} #{item.id} {qty}{name} - {tail}"
 
 
 def _fmt_cost(micros: int | None) -> str:

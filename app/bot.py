@@ -152,9 +152,12 @@ def authorize_and_get_user(
     if existing is not None:
         household = session.get(Household, existing.household_id)
         if household is None:
-            household = provision_solo_household(session, existing)
+            household = provision_solo_household(
+                session, existing, created_at=datetime.now(timezone.utc)
+            )
         return AuthDecision(True, existing, False, "ok", household=household)
 
+    now = datetime.now(timezone.utc)
     user = User(
         telegram_id=telegram_user_id,
         chat_id=chat_id,
@@ -162,12 +165,9 @@ def authorize_and_get_user(
         tz=DEFAULT_TZ,
         digest_hour=DEFAULT_DIGEST_HOUR,
         llm_provider=DEFAULT_LLM_PROVIDER,
-        created_at=datetime.now(timezone.utc),
+        created_at=now,
     )
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    household = provision_solo_household(session, user)
+    household = provision_solo_household(session, user, created_at=now)
     return AuthDecision(True, user, True, "created", household=household)
 
 

@@ -26,16 +26,16 @@ PURCHASE_DATE_MIN_CONFIDENCE = 0.7
 
 
 def compute_shelf_life(
-    session: Session, *, user_id: int, parsed: ParsedItem
+    session: Session, *, household_id: int, parsed: ParsedItem
 ) -> ShelfLifeDecision:
     normalized_name = normalize(parsed.name)
-    cached = get_cached(session, user_id, normalized_name)
+    cached = get_cached(session, household_id, normalized_name)
     if cached is not None:
         return ShelfLifeDecision(days=cached.days, source="cache", cache_was_hit=True)
     if parsed.confidence >= CONFIDENCE_FOR_CACHE_WRITE:
         put_cached(
             session,
-            user_id,
+            household_id,
             normalized_name,
             days=parsed.est_shelf_life_days,
             category=parsed.category,
@@ -51,7 +51,7 @@ def compute_shelf_life(
 
 
 class DuplicateReceipt(Exception):
-    """Raised when (user_id, photo_file_id) already has a Receipt row."""
+    """Raised when (household_id, photo_file_id) already has a Receipt row."""
 
 
 @dataclass
@@ -78,14 +78,14 @@ async def ingest_photo(
     session: Session,
     llm: LLMClient,
     *,
-    user_id: int,
+    household_id: int,
     photo_file_id: str,
     image_bytes: bytes,
     today: date,
 ) -> IngestSummary:
     existing = session.exec(
         select(Receipt).where(
-            Receipt.user_id == user_id,
+            Receipt.household_id == household_id,
             Receipt.photo_file_id == photo_file_id,
         )
     ).first()
@@ -134,7 +134,7 @@ async def ingest_photo(
 
     try:
         receipt = Receipt(
-            user_id=user_id,
+            household_id=household_id,
             photo_file_id=photo_file_id,
             purchase_date=purchase_date,
             purchase_date_source=purchase_date_source,
@@ -147,12 +147,12 @@ async def ingest_photo(
         for parsed_item, is_low_confidence in to_insert:
             decision = compute_shelf_life(
                 session,
-                user_id=user_id,
+                household_id=household_id,
                 parsed=parsed_item,
             )
             normalized_name = normalize(parsed_item.name)
             pantry_item = PantryItem(
-                user_id=user_id,
+                household_id=household_id,
                 raw_name=parsed_item.name,
                 normalized_name=normalized_name,
                 category=parsed_item.category,

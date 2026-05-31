@@ -6,7 +6,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.ingest_service import IngestSummary, ingest_photo
 from app.llm import LLMResult, ParseResult, ParsedItem
-from app.models import PantryItem, User
+from app.models import Household, PantryItem, User
 from app.renderer import render_ingest_reply
 from tests.fakes import FakeLLMClient
 
@@ -33,7 +33,16 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(User(
+            telegram_id=1,
+            chat_id=1,
+            household_id=household.id,
+            created_at=datetime.now(timezone.utc),
+        ))
         db.commit()
         yield db
 
@@ -51,7 +60,7 @@ async def test_ingest_excludes_non_trackable_and_reports(session):
         ],
     ), cost_micros_usd=1000))
     summary = await ingest_photo(
-        session, llm, user_id=1, photo_file_id="fid", image_bytes=b"jpg",
+        session, llm, household_id=1, photo_file_id="fid", image_bytes=b"jpg",
         today=date(2026, 5, 28),
     )
     assert summary.inserted_food_count == 1

@@ -171,17 +171,17 @@ def test_fake_llm_client_returns_canned_result():
 
 
 def test_compute_shelf_life_cache_policy(session):
-    decision = compute_shelf_life(session, user_id=1, parsed=_parsed_item())
+    decision = compute_shelf_life(session, household_id=1, parsed=_parsed_item())
     assert decision.days == 7 and decision.source == "llm"
     cached = get_cached(session, 1, "whole milk")
     assert cached is not None and cached.days == 7
     write_user_correction(session, 1, "whole milk", days=5)
-    decision = compute_shelf_life(session, user_id=1, parsed=_parsed_item(days=10))
+    decision = compute_shelf_life(session, household_id=1, parsed=_parsed_item(days=10))
     assert decision.days == 5 and decision.source == "cache"
 
 
 def test_compute_shelf_life_medium_confidence_does_not_write_cache(session):
-    compute_shelf_life(session, user_id=1, parsed=_parsed_item(conf=0.5))
+    compute_shelf_life(session, household_id=1, parsed=_parsed_item(conf=0.5))
     assert get_cached(session, 1, "whole milk") is None
 
 
@@ -195,7 +195,7 @@ async def test_ingest_photo_happy_path_and_duplicate_guard(session):
     summary = await ingest_photo(
         session,
         llm,
-        user_id=1,
+        household_id=1,
         photo_file_id="fid",
         image_bytes=b"jpg",
         today=date(2026, 5, 26),
@@ -210,7 +210,7 @@ async def test_ingest_photo_happy_path_and_duplicate_guard(session):
         await ingest_photo(
             session,
             llm,
-            user_id=1,
+            household_id=1,
             photo_file_id="fid",
             image_bytes=b"jpg",
             today=date(2026, 5, 26),
@@ -225,7 +225,7 @@ async def test_ingest_photo_confidence_and_purchase_date_fallback(session):
         confidence=0.0,
     ))
     summary = await ingest_photo(
-        session, llm, user_id=1, photo_file_id="fid2", image_bytes=b"jpg",
+        session, llm, household_id=1, photo_file_id="fid2", image_bytes=b"jpg",
         today=date(2026, 5, 26),
     )
     assert summary.purchase_date_assumed is True

@@ -154,6 +154,333 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "Recettes sauvegardées :",
         "es": "Recetas guardadas:",
     },
+    # -----------------------------------------------------------------------
+    # Button labels (Task 15)
+    # -----------------------------------------------------------------------
+    "btn.ate": {"en": "Ate", "zh": "吃掉", "fr": "Mangé", "es": "Comido"},
+    "btn.tossed": {"en": "Tossed", "zh": "扔掉", "fr": "Jeté", "es": "Tirado"},
+    "btn.snooze2": {"en": "Remind +2d", "zh": "提醒 +2天", "fr": "Rappel +2j", "es": "Recordar +2d"},
+    "btn.show_all": {"en": "show all", "zh": "显示全部", "fr": "tout afficher", "es": "ver todo"},
+    "btn.undo": {"en": "Undo", "zh": "撤销", "fr": "Annuler", "es": "Deshacer"},
+    "btn.apply": {"en": "Apply", "zh": "应用", "fr": "Appliquer", "es": "Aplicar"},
+    "btn.cancel": {"en": "Cancel", "zh": "取消", "fr": "Annuler", "es": "Cancelar"},
+    "btn.liked": {"en": "👍 Liked", "zh": "👍 喜欢", "fr": "👍 Aimé", "es": "👍 Me gusta"},
+    "btn.disliked": {"en": "👎 Not for me", "zh": "👎 不喜欢", "fr": "👎 Pas pour moi", "es": "👎 No es para mí"},
+    "btn.save": {"en": "★ Save", "zh": "★ 保存", "fr": "★ Sauvegarder", "es": "★ Guardar"},
+    "btn.shopping": {"en": "➕ Shopping list", "zh": "➕ 购物清单", "fr": "➕ Liste de courses", "es": "➕ Lista de compras"},
+    "btn.show_alternatives": {"en": "Show alternatives", "zh": "显示替代方案", "fr": "Voir les alternatives", "es": "Ver alternativas"},
+    "btn.cook_again": {"en": "Cook this again", "zh": "再做一次", "fr": "Refaire ce plat", "es": "Cocinar de nuevo"},
+    "btn.bought": {"en": "Bought ✓", "zh": "已购买 ✓", "fr": "Acheté ✓", "es": "Comprado ✓"},
+    # -----------------------------------------------------------------------
+    # Terminal states (Task 15)
+    # -----------------------------------------------------------------------
+    "terminal.cancelled": {"en": "Cancelled.", "zh": "已取消。", "fr": "Annulé.", "es": "Cancelado."},
+    "terminal.expired": {
+        "en": "This proposal has expired - re-run the command.",
+        "zh": "此提案已过期，请重新运行命令。",
+        "fr": "Cette proposition a expiré - relancez la commande.",
+        "es": "Esta propuesta ha expirado - vuelve a ejecutar el comando.",
+    },
+    "terminal.stale": {
+        "en": "This proposal is stale (the item changed) - re-run the command.",
+        "zh": "此提案已过时（项目已更改），请重新运行命令。",
+        "fr": "Cette proposition est périmée (l'article a changé) - relancez la commande.",
+        "es": "Esta propuesta está desactualizada (el artículo cambió) - vuelve a ejecutar el comando.",
+    },
+    "terminal.applied": {
+        "en": "This proposal was already applied.",
+        "zh": "此提案已经应用。",
+        "fr": "Cette proposition a déjà été appliquée.",
+        "es": "Esta propuesta ya fue aplicada.",
+    },
+    "terminal.unknown": {
+        "en": "This proposal is no longer pending ({status}).",
+        "zh": "此提案不再处于待处理状态（{status}）。",
+        "fr": "Cette proposition n'est plus en attente ({status}).",
+        "es": "Esta propuesta ya no está pendiente ({status}).",
+    },
+    # -----------------------------------------------------------------------
+    # render_correction_diff (Task 15)
+    # -----------------------------------------------------------------------
+    "correction.header": {
+        "en": "Proposed correction for #{item_id} {item_raw_name}:",
+        "zh": "#{item_id} {item_raw_name} 的建议更正：",
+        "fr": "Correction proposée pour #{item_id} {item_raw_name} :",
+        "es": "Corrección propuesta para #{item_id} {item_raw_name}:",
+    },
+    "correction.field": {
+        "en": "  - {field_name}: {old} -> {new}{suffix}",
+        "zh": "  - {field_name}：{old} -> {new}{suffix}",
+        "fr": "  - {field_name} : {old} -> {new}{suffix}",
+        "es": "  - {field_name}: {old} -> {new}{suffix}",
+    },
+    "correction.back_computed": {
+        "en": "  (back-computed from expires_on)",
+        "zh": "  （从 expires_on 反推）",
+        "fr": "  (calculé à rebours depuis expires_on)",
+        "es": "  (calculado desde expires_on)",
+    },
+    "correction.cache": {
+        "en": "  - cache: {cache_action}",
+        "zh": "  - 缓存：{cache_action}",
+        "fr": "  - cache : {cache_action}",
+        "es": "  - caché: {cache_action}",
+    },
+    "correction.rationale": {
+        "en": "Reason: {rationale}",
+        "zh": "原因：{rationale}",
+        "fr": "Raison : {rationale}",
+        "es": "Razón: {rationale}",
+    },
+    "correction.expires": {
+        "en": "Expires in 10 min.",
+        "zh": "10 分钟后过期。",
+        "fr": "Expire dans 10 min.",
+        "es": "Expira en 10 min.",
+    },
+    # -----------------------------------------------------------------------
+    # render_add_diff (Task 15)
+    # -----------------------------------------------------------------------
+    "add.header": {
+        "en": "Proposed add - {name}:",
+        "zh": "建议添加 - {name}：",
+        "fr": "Ajout proposé - {name} :",
+        "es": "Agregar propuesto - {name}:",
+    },
+    "add.category": {
+        "en": "  - category: {category}",
+        "zh": "  - 类别：{category}",
+        "fr": "  - catégorie : {category}",
+        "es": "  - categoría: {category}",
+    },
+    "add.qty_unit": {
+        "en": "  - qty / unit: {qty}{unit}",
+        "zh": "  - 数量/单位：{qty}{unit}",
+        "fr": "  - qté / unité : {qty}{unit}",
+        "es": "  - cant. / unidad: {qty}{unit}",
+    },
+    "add.expires_on": {
+        "en": "  - expires_on: {expires_on}",
+        "zh": "  - 到期日：{expires_on}",
+        "fr": "  - expire le : {expires_on}",
+        "es": "  - vence el: {expires_on}",
+    },
+    "add.shelf_life": {
+        "en": "  - shelf_life_days: {shelf_life_days} (source: {shelf_life_source})",
+        "zh": "  - 保质期（天）：{shelf_life_days}（来源：{shelf_life_source}）",
+        "fr": "  - durée de conservation : {shelf_life_days} j (source : {shelf_life_source})",
+        "es": "  - vida útil (días): {shelf_life_days} (fuente: {shelf_life_source})",
+    },
+    "add.confidence": {
+        "en": "Confidence: {confidence}",
+        "zh": "置信度：{confidence}",
+        "fr": "Confiance : {confidence}",
+        "es": "Confianza: {confidence}",
+    },
+    # -----------------------------------------------------------------------
+    # render_undo_result (Task 15)
+    # -----------------------------------------------------------------------
+    "undo.expired": {
+        "en": "Undo window expired (10 min) - use /delete <id> instead.",
+        "zh": "撤销窗口已过期（10 分钟），请改用 /delete <id>。",
+        "fr": "Fenêtre d'annulation expirée (10 min) - utilisez /delete <id> à la place.",
+        "es": "Ventana de deshacer expirada (10 min) - usa /delete <id> en su lugar.",
+    },
+    "undo.nothing": {
+        "en": "Nothing to undo.",
+        "zh": "没有可撤销的内容。",
+        "fr": "Rien à annuler.",
+        "es": "Nada que deshacer.",
+    },
+    "undo.removed": {
+        "en": "Undone: removed {n} item(s).",
+        "zh": "已撤销：移除了 {n} 项。",
+        "fr": "Annulé : {n} article(s) supprimé(s).",
+        "es": "Deshecho: se eliminaron {n} artículo(s).",
+    },
+    "undo.skipped": {
+        "en": "skipped {skipped}.",
+        "zh": "已跳过 {skipped}。",
+        "fr": "ignoré {skipped}.",
+        "es": "omitido {skipped}.",
+    },
+    # -----------------------------------------------------------------------
+    # render_applied_correction / render_applied_add (Task 15)
+    # -----------------------------------------------------------------------
+    "applied.correction": {
+        "en": "Applied to #{item_id}: {suffix}",
+        "zh": "已应用至 #{item_id}：{suffix}",
+        "fr": "Appliqué à #{item_id} : {suffix}",
+        "es": "Aplicado a #{item_id}: {suffix}",
+    },
+    "applied.correction.no_changes": {
+        "en": "no changes",
+        "zh": "无更改",
+        "fr": "aucun changement",
+        "es": "sin cambios",
+    },
+    "applied.add": {
+        "en": "Added #{item_id} {name} (expires {expires_on})",
+        "zh": "已添加 #{item_id} {name}（到期：{expires_on}）",
+        "fr": "Ajouté #{item_id} {name} (expire le {expires_on})",
+        "es": "Agregado #{item_id} {name} (vence el {expires_on})",
+    },
+    # -----------------------------------------------------------------------
+    # render_stats (Task 15)
+    # -----------------------------------------------------------------------
+    "stats.header": {
+        "en": "Last 30 days",
+        "zh": "最近 30 天",
+        "fr": "30 derniers jours",
+        "es": "Últimos 30 días",
+    },
+    "stats.receipts": {
+        "en": "Receipts: {receipt_count} (unknown-cost: {unknown_cost_receipt_count})",
+        "zh": "收据：{receipt_count}（未知费用：{unknown_cost_receipt_count}）",
+        "fr": "Reçus : {receipt_count} (coût inconnu : {unknown_cost_receipt_count})",
+        "es": "Recibos: {receipt_count} (costo desconocido: {unknown_cost_receipt_count})",
+    },
+    "stats.tracked": {
+        "en": "Tracked items: {tracked_item_count}",
+        "zh": "已跟踪项目：{tracked_item_count}",
+        "fr": "Articles suivis : {tracked_item_count}",
+        "es": "Artículos rastreados: {tracked_item_count}",
+    },
+    "stats.removed": {
+        "en": "Removed (wrong import): {removed_item_count}",
+        "zh": "已移除（导入有误）：{removed_item_count}",
+        "fr": "Supprimés (import incorrect) : {removed_item_count}",
+        "es": "Eliminados (importación incorrecta): {removed_item_count}",
+    },
+    "stats.cache_hit": {
+        "en": "Cache hit rate: {cache_hit}",
+        "zh": "缓存命中率：{cache_hit}",
+        "fr": "Taux de cache : {cache_hit}",
+        "es": "Tasa de aciertos de caché: {cache_hit}",
+    },
+    "stats.llm_spend": {
+        "en": "LLM spend: total {total_cost}  avg {avg_cost} / receipt",
+        "zh": "LLM 花费：总计 {total_cost}  平均 {avg_cost} / 收据",
+        "fr": "Dépense LLM : total {total_cost}  moy. {avg_cost} / reçu",
+        "es": "Gasto LLM: total {total_cost}  prom. {avg_cost} / recibo",
+    },
+    "stats.corrections": {
+        "en": "  Corrections: {count}  (${cost_total} total{unknown})",
+        "zh": "  更正：{count}  （${cost_total} 合计{unknown}）",
+        "fr": "  Corrections : {count}  ({cost_total} $ total{unknown})",
+        "es": "  Correcciones: {count}  (${cost_total} total{unknown})",
+    },
+    "stats.adds": {
+        "en": "  Adds:        {count}  (${cost_total} total{unknown})",
+        "zh": "  添加：        {count}  （${cost_total} 合计{unknown}）",
+        "fr": "  Ajouts :     {count}  ({cost_total} $ total{unknown})",
+        "es": "  Agregar:     {count}  (${cost_total} total{unknown})",
+    },
+    "stats.unknown_suffix": {
+        "en": ", {n} unknown",
+        "zh": "，{n} 个未知",
+        "fr": ", {n} inconnu",
+        "es": ", {n} desconocido",
+    },
+    "stats.cook_sessions": {
+        "en": "Cook sessions: {count} (${cost})",
+        "zh": "烹饪会话：{count}（${cost}）",
+        "fr": "Sessions de cuisine : {count} ({cost} $)",
+        "es": "Sesiones de cocina: {count} (${cost})",
+    },
+    "stats.cooked": {
+        "en": "  Cooked: {feedback_count} (liked {liked_count})",
+        "zh": "  已烹饪：{feedback_count}（喜欢 {liked_count}）",
+        "fr": "  Cuisiné : {feedback_count} (aimé {liked_count})",
+        "es": "  Cocinado: {feedback_count} (gustó {liked_count})",
+    },
+    "stats.waste_rate": {
+        "en": "Waste rate: {waste_rate}",
+        "zh": "浪费率：{waste_rate}",
+        "fr": "Taux de gaspillage : {waste_rate}",
+        "es": "Tasa de desperdicio: {waste_rate}",
+    },
+    # -----------------------------------------------------------------------
+    # render_profile (Task 15)
+    # -----------------------------------------------------------------------
+    "profile.header": {
+        "en": "Your food profile:",
+        "zh": "您的饮食档案：",
+        "fr": "Votre profil alimentaire :",
+        "es": "Tu perfil alimentario:",
+    },
+    "profile.diet": {
+        "en": "  Diet: {diet}",
+        "zh": "  饮食：{diet}",
+        "fr": "  Régime : {diet}",
+        "es": "  Dieta: {diet}",
+    },
+    "profile.avoid": {
+        "en": "  Avoid: {exclusions}",
+        "zh": "  避免：{exclusions}",
+        "fr": "  Éviter : {exclusions}",
+        "es": "  Evitar: {exclusions}",
+    },
+    "profile.cuisines": {
+        "en": "  Cuisines: {cuisines}",
+        "zh": "  菜系：{cuisines}",
+        "fr": "  Cuisines : {cuisines}",
+        "es": "  Cocinas: {cuisines}",
+    },
+    "profile.max_cook": {
+        "en": "  Max cook time: {cook}",
+        "zh": "  最长烹饪时间：{cook}",
+        "fr": "  Temps de cuisson max : {cook}",
+        "es": "  Tiempo máximo de cocción: {cook}",
+    },
+    "profile.household_size": {
+        "en": "  Household size: {household_size}",
+        "zh": "  家庭人数：{household_size}",
+        "fr": "  Taille du foyer : {household_size}",
+        "es": "  Tamaño del hogar: {household_size}",
+    },
+    "profile.notes": {
+        "en": "  Notes: {note}",
+        "zh": "  备注：{note}",
+        "fr": "  Notes : {note}",
+        "es": "  Notas: {note}",
+    },
+    "profile.update_hint": {
+        "en": "Update by typing: /prefs <sentence>  (e.g. /prefs I'm vegan, no peanuts)",
+        "zh": "输入以更新：/prefs <语句>  （例如 /prefs I'm vegan, no peanuts）",
+        "fr": "Mettez à jour en tapant : /prefs <phrase>  (ex. /prefs I'm vegan, no peanuts)",
+        "es": "Actualiza escribiendo: /prefs <frase>  (ej. /prefs I'm vegan, no peanuts)",
+    },
+    "profile.no_limit": {
+        "en": "no limit",
+        "zh": "无限制",
+        "fr": "sans limite",
+        "es": "sin límite",
+    },
+    "profile.none_value": {
+        "en": "none",
+        "zh": "无",
+        "fr": "aucun",
+        "es": "ninguno",
+    },
+    "profile.any_value": {
+        "en": "any",
+        "zh": "任意",
+        "fr": "tout",
+        "es": "cualquiera",
+    },
+    "profile.note_none": {
+        "en": "(none)",
+        "zh": "（无）",
+        "fr": "(aucune)",
+        "es": "(ninguna)",
+    },
+    "profile.cook_minutes": {
+        "en": "{minutes} min",
+        "zh": "{minutes} 分钟",
+        "fr": "{minutes} min",
+        "es": "{minutes} min",
+    },
 }
 
 

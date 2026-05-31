@@ -186,17 +186,17 @@ def render_digest(items: list, *, today: date, lang: str = "en", names=None) -> 
 
 
 def build_digest_keyboard(
-    item_ids: list[int], *, has_more: bool
+    item_ids: list[int], *, has_more: bool, lang: str = "en"
 ) -> list[list[CallbackButton]]:
     rows: list[list[CallbackButton]] = []
     for item_id in item_ids:
         rows.append([
-            CallbackButton(text="Ate", callback_data=f"act:ate:{item_id}"),
-            CallbackButton(text="Tossed", callback_data=f"act:toss:{item_id}"),
-            CallbackButton(text="Remind +2d", callback_data=f"act:snooze2:{item_id}"),
+            CallbackButton(text=t("btn.ate", lang), callback_data=f"act:ate:{item_id}"),
+            CallbackButton(text=t("btn.tossed", lang), callback_data=f"act:toss:{item_id}"),
+            CallbackButton(text=t("btn.snooze2", lang), callback_data=f"act:snooze2:{item_id}"),
         ])
     if has_more:
-        rows.append([CallbackButton(text="show all", callback_data="show:all")])
+        rows.append([CallbackButton(text=t("btn.show_all", lang), callback_data="show:all")])
     return rows
 
 
@@ -208,62 +208,66 @@ def render_correction_diff(
     payload: CorrectPayload,
     item_id: int,
     item_raw_name: str,
+    lang: str = "en",
 ) -> str:
-    lines = [f"Proposed correction for #{item_id} {item_raw_name}:"]
+    lines = [t("correction.header", lang, item_id=item_id, item_raw_name=item_raw_name)]
     for field_name in ("name", "category", "expires_on", "shelf_life_days"):
         change = payload.diff.get(field_name)
         if change is None:
             continue
         suffix = ""
         if field_name == "shelf_life_days" and payload.back_computed_days:
-            suffix = "  (back-computed from expires_on)"
-        lines.append(f"  - {field_name}: {change['old']} -> {change['new']}{suffix}")
-    lines.append(f"  - cache: {payload.cache_action}")
+            suffix = t("correction.back_computed", lang)
+        lines.append(t("correction.field", lang,
+                       field_name=field_name, old=change["old"], new=change["new"], suffix=suffix))
+    lines.append(t("correction.cache", lang, cache_action=payload.cache_action))
     lines.append("")
-    lines.append(f"Reason: {payload.rationale}")
-    lines.append("Expires in 10 min.")
+    lines.append(t("correction.rationale", lang, rationale=payload.rationale))
+    lines.append(t("correction.expires", lang))
     return "\n".join(lines)
 
 
-def render_add_diff(*, pending_id: int, payload: AddPayload) -> str:
+def render_add_diff(*, pending_id: int, payload: AddPayload, lang: str = "en") -> str:
     category = payload.category if payload.category is not None else "(unknown)"
     unit = f" {payload.unit}" if payload.unit else ""
     return "\n".join([
-        f"Proposed add - {payload.name}:",
-        f"  - category: {category}",
-        f"  - qty / unit: {payload.qty}{unit}",
-        f"  - expires_on: {payload.expires_on.isoformat()}",
-        f"  - shelf_life_days: {payload.shelf_life_days} (source: {payload.shelf_life_source})",
+        t("add.header", lang, name=payload.name),
+        t("add.category", lang, category=category),
+        t("add.qty_unit", lang, qty=payload.qty, unit=unit),
+        t("add.expires_on", lang, expires_on=payload.expires_on.isoformat()),
+        t("add.shelf_life", lang,
+          shelf_life_days=payload.shelf_life_days,
+          shelf_life_source=payload.shelf_life_source),
         "",
-        f"Confidence: {payload.confidence:.2f}",
-        "Expires in 10 min.",
+        t("add.confidence", lang, confidence=f"{payload.confidence:.2f}"),
+        t("correction.expires", lang),
     ])
 
 
-def build_undo_keyboard(*, receipt_id: int) -> list[list[CallbackButton]]:
-    return [[CallbackButton(text="Undo", callback_data=f"undo:receipt:{receipt_id}")]]
+def build_undo_keyboard(*, receipt_id: int, lang: str = "en") -> list[list[CallbackButton]]:
+    return [[CallbackButton(text=t("btn.undo", lang), callback_data=f"undo:receipt:{receipt_id}")]]
 
 
-def build_undo_add_keyboard(*, item_id: int) -> list[list[CallbackButton]]:
-    return [[CallbackButton(text="Undo", callback_data=f"undo:add:{item_id}")]]
+def build_undo_add_keyboard(*, item_id: int, lang: str = "en") -> list[list[CallbackButton]]:
+    return [[CallbackButton(text=t("btn.undo", lang), callback_data=f"undo:add:{item_id}")]]
 
 
-def render_undo_result(result) -> str:
+def render_undo_result(result, lang: str = "en") -> str:
     if result.expired:
-        return "Undo window expired (10 min) - use /delete <id> instead."
+        return t("undo.expired", lang)
     if not result.removed_ids and not result.skipped:
-        return "Nothing to undo."
-    parts = [f"Undone: removed {len(result.removed_ids)} item(s)."]
+        return t("undo.nothing", lang)
+    parts = [t("undo.removed", lang, n=len(result.removed_ids))]
     if result.skipped:
         skipped = ", ".join(f"#{i} ({why})" for i, why in result.skipped)
-        parts.append(f"skipped {skipped}.")
+        parts.append(t("undo.skipped", lang, skipped=skipped))
     return " ".join(parts)
 
 
-def build_apply_cancel_keyboard(*, pending_id: int) -> list[list[CallbackButton]]:
+def build_apply_cancel_keyboard(*, pending_id: int, lang: str = "en") -> list[list[CallbackButton]]:
     return [[
-        CallbackButton(text="Apply", callback_data=f"apply:{pending_id}"),
-        CallbackButton(text="Cancel", callback_data=f"cancel:{pending_id}"),
+        CallbackButton(text=t("btn.apply", lang), callback_data=f"apply:{pending_id}"),
+        CallbackButton(text=t("btn.cancel", lang), callback_data=f"cancel:{pending_id}"),
     ]]
 
 
@@ -311,26 +315,26 @@ def render_cook_result(
     return "\n\n".join(blocks)
 
 
-def build_cook_alternatives_keyboard(cook_id: int) -> list[list[CallbackButton]]:
-    return [[CallbackButton(text="Show alternatives", callback_data=f"cookalt:{cook_id}")]]
+def build_cook_alternatives_keyboard(cook_id: int, lang: str = "en") -> list[list[CallbackButton]]:
+    return [[CallbackButton(text=t("btn.show_alternatives", lang), callback_data=f"cookalt:{cook_id}")]]
 
 
 def build_cook_result_keyboard(
-    cook_id: int, *, has_alternatives: bool
+    cook_id: int, *, has_alternatives: bool, lang: str = "en"
 ) -> list[list[CallbackButton]]:
     rows = [
         [
-            CallbackButton(text="👍 Liked", callback_data=f"cookfb:{cook_id}:liked"),
-            CallbackButton(text="👎 Not for me", callback_data=f"cookfb:{cook_id}:disliked"),
+            CallbackButton(text=t("btn.liked", lang), callback_data=f"cookfb:{cook_id}:liked"),
+            CallbackButton(text=t("btn.disliked", lang), callback_data=f"cookfb:{cook_id}:disliked"),
         ],
         [
-            CallbackButton(text="★ Save", callback_data=f"cooksave:{cook_id}"),
-            CallbackButton(text="➕ Shopping list", callback_data=f"cookshop:{cook_id}"),
+            CallbackButton(text=t("btn.save", lang), callback_data=f"cooksave:{cook_id}"),
+            CallbackButton(text=t("btn.shopping", lang), callback_data=f"cookshop:{cook_id}"),
         ],
     ]
     if has_alternatives:
         rows.append(
-            [CallbackButton(text="Show alternatives", callback_data=f"cookalt:{cook_id}")]
+            [CallbackButton(text=t("btn.show_alternatives", lang), callback_data=f"cookalt:{cook_id}")]
         )
     return rows
 
@@ -350,9 +354,9 @@ def render_shopping_list(
     return "\n".join(lines)
 
 
-def build_shopping_keyboard(item_ids: list[int]) -> list[list[CallbackButton]]:
+def build_shopping_keyboard(item_ids: list[int], lang: str = "en") -> list[list[CallbackButton]]:
     return [
-        [CallbackButton(text="Bought ✓", callback_data=f"shopdone:{item_id}")]
+        [CallbackButton(text=t("btn.bought", lang), callback_data=f"shopdone:{item_id}")]
         for item_id in item_ids
     ]
 
@@ -371,9 +375,9 @@ def render_favorites(
     return "\n".join(lines)
 
 
-def build_favorites_keyboard(recipe_ids: list[int]) -> list[list[CallbackButton]]:
+def build_favorites_keyboard(recipe_ids: list[int], lang: str = "en") -> list[list[CallbackButton]]:
     return [
-        [CallbackButton(text="Cook this again", callback_data=f"favcook:{recipe_id}")]
+        [CallbackButton(text=t("btn.cook_again", lang), callback_data=f"favcook:{recipe_id}")]
         for recipe_id in recipe_ids
     ]
 
@@ -414,30 +418,29 @@ def build_cook_round_keyboard(
     ]
 
 
-def render_applied_correction(*, item_id: int, payload: CorrectPayload) -> str:
+def render_applied_correction(*, item_id: int, payload: CorrectPayload, lang: str = "en") -> str:
     changes = []
     for field_name in ("name", "category", "expires_on", "shelf_life_days"):
         change = payload.diff.get(field_name)
         if change is not None:
             changes.append(f"{field_name}={change['new']}")
-    suffix = ", ".join(changes) if changes else "no changes"
-    return f"Applied to #{item_id}: {suffix}"
+    suffix = ", ".join(changes) if changes else t("applied.correction.no_changes", lang)
+    return t("applied.correction", lang, item_id=item_id, suffix=suffix)
 
 
-def render_applied_add(*, item_id: int, payload: AddPayload) -> str:
-    return f"Added #{item_id} {payload.name} (expires {payload.expires_on.isoformat()})"
+def render_applied_add(*, item_id: int, payload: AddPayload, lang: str = "en") -> str:
+    return t("applied.add", lang,
+             item_id=item_id, name=payload.name,
+             expires_on=payload.expires_on.isoformat())
 
 
-_TERMINAL_LABELS = {
-    "cancelled": "Cancelled.",
-    "expired": "This proposal has expired - re-run the command.",
-    "stale": "This proposal is stale (the item changed) - re-run the command.",
-    "applied": "This proposal was already applied.",
-}
+_KNOWN_TERMINAL_STATUSES = frozenset(("cancelled", "expired", "stale", "applied"))
 
 
-def render_terminal_state(status: str) -> str:
-    return _TERMINAL_LABELS.get(status, f"This proposal is no longer pending ({status}).")
+def render_terminal_state(status: str, lang: str = "en") -> str:
+    if status in _KNOWN_TERMINAL_STATUSES:
+        return t(f"terminal.{status}", lang)
+    return t("terminal.unknown", lang, status=status)
 
 
 CATEGORY_ORDER = (
@@ -472,61 +475,67 @@ def _fmt_cost_short(micros: int | None) -> str:
     return f"${micros / 1_000_000:.3f}"
 
 
-def render_stats(stats: Stats) -> str:
+def render_stats(stats: Stats, lang: str = "en") -> str:
     cache_hit = "-" if stats.cache_hit_percent is None else f"{stats.cache_hit_percent:.1f}%"
     waste_rate = "-" if stats.waste_rate_percent is None else f"{stats.waste_rate_percent:.1f}%"
     avg_cost = _fmt_cost_short(stats.avg_cost_micros_usd)
     total_cost = "$0.000" if stats.total_cost_micros_usd == 0 else _fmt_cost_short(stats.total_cost_micros_usd)
     lines = [
-        "Last 30 days",
-        f"Receipts: {stats.receipt_count} (unknown-cost: {stats.unknown_cost_receipt_count})",
-        f"Tracked items: {stats.tracked_item_count}",
-        f"Removed (wrong import): {stats.removed_item_count}",
-        f"Cache hit rate: {cache_hit}",
-        f"LLM spend: total {total_cost}  avg {avg_cost} / receipt",
+        t("stats.header", lang),
+        t("stats.receipts", lang,
+          receipt_count=stats.receipt_count,
+          unknown_cost_receipt_count=stats.unknown_cost_receipt_count),
+        t("stats.tracked", lang, tracked_item_count=stats.tracked_item_count),
+        t("stats.removed", lang, removed_item_count=stats.removed_item_count),
+        t("stats.cache_hit", lang, cache_hit=cache_hit),
+        t("stats.llm_spend", lang, total_cost=total_cost, avg_cost=avg_cost),
     ]
     tl = stats.text_llm
     corr_unknown = (
-        f", {tl.correction_unknown_cost_count} unknown"
+        t("stats.unknown_suffix", lang, n=tl.correction_unknown_cost_count)
         if tl.correction_unknown_cost_count
         else ""
     )
     add_unknown = (
-        f", {tl.add_unknown_cost_count} unknown"
+        t("stats.unknown_suffix", lang, n=tl.add_unknown_cost_count)
         if tl.add_unknown_cost_count
         else ""
     )
-    lines.append(
-        f"  Corrections: {tl.correction_proposal_count}  "
-        f"(${tl.correction_cost_micros / 1_000_000:.4f} total{corr_unknown})"
-    )
-    lines.append(
-        f"  Adds:        {tl.add_proposal_count}  "
-        f"(${tl.add_cost_micros / 1_000_000:.4f} total{add_unknown})"
-    )
-    lines.append(
-        f"Cook sessions: {stats.cook_count} "
-        f"(${stats.cook_cost_micros_usd / 1_000_000:.3f})"
-    )
-    lines.append(
-        f"  Cooked: {stats.cook_feedback_count} (liked {stats.cook_liked_count})"
-    )
-    lines.append(f"Waste rate: {waste_rate}")
+    lines.append(t("stats.corrections", lang,
+                   count=tl.correction_proposal_count,
+                   cost_total=f"{tl.correction_cost_micros / 1_000_000:.4f}",
+                   unknown=corr_unknown))
+    lines.append(t("stats.adds", lang,
+                   count=tl.add_proposal_count,
+                   cost_total=f"{tl.add_cost_micros / 1_000_000:.4f}",
+                   unknown=add_unknown))
+    lines.append(t("stats.cook_sessions", lang,
+                   count=stats.cook_count,
+                   cost=f"{stats.cook_cost_micros_usd / 1_000_000:.3f}"))
+    lines.append(t("stats.cooked", lang,
+                   feedback_count=stats.cook_feedback_count,
+                   liked_count=stats.cook_liked_count))
+    lines.append(t("stats.waste_rate", lang, waste_rate=waste_rate))
     return "\n".join(lines)
 
 
-def render_profile(profile: FoodProfile) -> str:
-    exclusions = ", ".join(profile.exclusions) or "none"
-    cuisines = ", ".join(profile.preferred_cuisines) or "any"
-    cook = f"{profile.max_cook_minutes} min" if profile.max_cook_minutes else "no limit"
-    note = profile.note or "(none)"
-    return (
-        "Your food profile:\n"
-        f"  Diet: {profile.diet}\n"
-        f"  Avoid: {exclusions}\n"
-        f"  Cuisines: {cuisines}\n"
-        f"  Max cook time: {cook}\n"
-        f"  Household size: {profile.household_size}\n"
-        f"  Notes: {note}\n"
-        "Update by typing: /prefs <sentence>  (e.g. /prefs I'm vegan, no peanuts)"
+def render_profile(profile: FoodProfile, lang: str = "en") -> str:
+    exclusions = ", ".join(profile.exclusions) or t("profile.none_value", lang)
+    cuisines = ", ".join(profile.preferred_cuisines) or t("profile.any_value", lang)
+    cook = (
+        t("profile.cook_minutes", lang, minutes=profile.max_cook_minutes)
+        if profile.max_cook_minutes
+        else t("profile.no_limit", lang)
     )
+    note = profile.note or t("profile.note_none", lang)
+    lines = [
+        t("profile.header", lang),
+        t("profile.diet", lang, diet=profile.diet),
+        t("profile.avoid", lang, exclusions=exclusions),
+        t("profile.cuisines", lang, cuisines=cuisines),
+        t("profile.max_cook", lang, cook=cook),
+        t("profile.household_size", lang, household_size=profile.household_size),
+        t("profile.notes", lang, note=note),
+        t("profile.update_hint", lang),
+    ]
+    return "\n".join(lines)

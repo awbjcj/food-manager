@@ -49,11 +49,11 @@ class User(SQLModel, table=True):
 
 class Receipt(SQLModel, table=True):
     __table_args__ = (
-        UniqueConstraint("user_id", "photo_file_id", name="uq_receipt_user_photo"),
+        UniqueConstraint("household_id", "photo_file_id", name="uq_receipt_household_photo"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.telegram_id", index=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
     photo_file_id: str
     purchase_date: date
     purchase_date_source: str
@@ -63,16 +63,16 @@ class Receipt(SQLModel, table=True):
 
 class PantryItem(SQLModel, table=True):
     __table_args__ = (
-        Index("ix_pantry_user_status_expires", "user_id", "status", "expires_on"),
+        Index("ix_pantry_household_status_expires", "household_id", "status", "expires_on"),
         Index(
-            "ix_pantry_user_status_category_expires",
-            "user_id", "status", "category", "expires_on",
+            "ix_pantry_household_status_category_expires",
+            "household_id", "status", "category", "expires_on",
         ),
         Index("ix_pantry_source_receipt", "source_receipt_id"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.telegram_id", index=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
     raw_name: str
     normalized_name: str = Field(index=True)
     category: Optional[str] = Field(default=None, index=True)
@@ -91,7 +91,7 @@ class PantryItem(SQLModel, table=True):
 
 
 class ShelfLifeCache(SQLModel, table=True):
-    user_id: int = Field(foreign_key="user.telegram_id", primary_key=True)
+    household_id: int = Field(foreign_key="household.id", primary_key=True)
     normalized_name: str = Field(primary_key=True)
     days: int
     category: Optional[str] = None
@@ -102,12 +102,12 @@ class ShelfLifeCache(SQLModel, table=True):
 
 class PendingCorrection(SQLModel, table=True):
     __table_args__ = (
-        Index("ix_pending_user_status_created", "user_id", "status", "created_at"),
+        Index("ix_pending_household_status_created", "household_id", "status", "created_at"),
         Index("ix_pending_item", "item_id"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.telegram_id", index=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
     action_type: str
     item_id: Optional[int] = Field(default=None, foreign_key="pantryitem.id")
     proposed_json: str
@@ -122,11 +122,11 @@ class PendingCorrection(SQLModel, table=True):
 
 class CookSession(SQLModel, table=True):
     __table_args__ = (
-        Index("ix_cook_user_status_created", "user_id", "status", "created_at"),
+        Index("ix_cook_household_status_created", "household_id", "status", "created_at"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.telegram_id", index=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
     status: str = "collecting"
     meal_type: Optional[str] = None
     cuisine: Optional[str] = None
@@ -144,7 +144,7 @@ class CookSession(SQLModel, table=True):
 
 class ShoppingList(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.telegram_id", index=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
     name_raw: str
     name_normalized: str = Field(index=True)
     qty: Optional[float] = None
@@ -155,7 +155,7 @@ class ShoppingList(SQLModel, table=True):
 
 class SavedRecipe(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="user.telegram_id", index=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
     title: str
     cuisine: str
     source_url: Optional[str] = None

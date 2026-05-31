@@ -22,6 +22,7 @@ def test_alembic_upgrade_creates_all_tables(tmp_path, monkeypatch):
         ).fetchall()
     }
     assert {
+        "household",
         "user",
         "receipt",
         "pantryitem",
@@ -44,7 +45,7 @@ def test_alembic_upgrade_creates_all_tables(tmp_path, monkeypatch):
         for name, is_unique in indexes.items()
         if is_unique
     }
-    assert ("user_id", "photo_file_id") in unique_columns
+    assert ("household_id", "photo_file_id") in unique_columns
 
     pantry_indexes = {
         row[0]
@@ -52,8 +53,8 @@ def test_alembic_upgrade_creates_all_tables(tmp_path, monkeypatch):
             "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='pantryitem'"
         ).fetchall()
     }
-    assert "ix_pantry_user_status_expires" in pantry_indexes
-    assert "ix_pantry_user_status_category_expires" in pantry_indexes
+    assert "ix_pantry_household_status_expires" in pantry_indexes
+    assert "ix_pantry_household_status_category_expires" in pantry_indexes
     assert "ix_pantry_source_receipt" in pantry_indexes
 
     pending_indexes = {
@@ -63,6 +64,6 @@ def test_alembic_upgrade_creates_all_tables(tmp_path, monkeypatch):
             "WHERE type='index' AND tbl_name='pendingcorrection'"
         ).fetchall()
     }
-    assert "ix_pending_user_status_created" in pending_indexes
+    assert "ix_pending_household_status_created" in pending_indexes
     assert "ix_pending_item" in pending_indexes
     con.close()

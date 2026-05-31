@@ -44,6 +44,7 @@ class User(SQLModel, table=True):
     tz: str = "America/Detroit"
     digest_hour: int = 8
     llm_provider: str = "anthropic"
+    lang: str = "en"
     created_at: datetime
 
 

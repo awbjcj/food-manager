@@ -22,6 +22,18 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "... y {n} más - toca [show all]",
     },
     "list.empty": {"en": "no items match this filter"},
+    "lang.set": {
+        "en": "Language set to {lang}.",
+        "zh": "语言已设置为 {lang}。",
+        "fr": "Langue définie sur {lang}.",
+        "es": "Idioma configurado a {lang}.",
+    },
+    "lang.current": {
+        "en": "Current language: {lang}. Change with /lang [{choices}]",
+        "zh": "当前语言：{lang}。使用 /lang [{choices}] 更改",
+        "fr": "Langue actuelle : {lang}. Changez avec /lang [{choices}]",
+        "es": "Idioma actual: {lang}. Cambia con /lang [{choices}]",
+    },
 }
 
 

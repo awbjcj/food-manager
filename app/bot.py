@@ -18,11 +18,13 @@ from app.commands import (
     parse_callback,
     parse_digest_at,
     parse_item_id_arg,
+    parse_lang,
     parse_llm_provider,
     parse_list_filter,
     parse_snooze_args,
     parse_tz,
 )
+from app.i18n import LANGS, t
 from app.correction_service import (
     NullDiff,
     ProposeCorrectError,
@@ -301,6 +303,32 @@ async def handle_tz(
         session.commit()
         reschedule(user)
         await msg.answer(f"timezone set to {tz}")
+
+
+async def handle_lang(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        try:
+            lang = parse_lang(list((msg.text or "").split()[1:]))
+        except CommandError as exc:
+            await msg.answer(str(exc))
+            return
+        if lang is None:
+            await msg.answer(
+                t("lang.current", user.lang, lang=user.lang, choices="|".join(LANGS))
+            )
+            return
+        user.lang = lang
+        session.add(user)
+        session.commit()
+        await msg.answer(t("lang.set", lang, lang=lang))
 
 
 async def handle_digest_at(
@@ -1697,6 +1725,11 @@ def build_dispatcher(
     async def on_tz(message):
         await handle_tz(message, session_factory=session_factory, reschedule=reschedule)
 
+    async def on_lang(message):
+        await handle_lang(
+            message, session_factory=session_factory, on_user_created=on_user_created
+        )
+
     async def on_digest_at(message):
         await handle_digest_at(
             message, session_factory=session_factory, reschedule=reschedule
@@ -1853,6 +1886,7 @@ def build_dispatcher(
 
     dispatcher.message.register(on_start, Command("start"))
     dispatcher.message.register(on_tz, Command("tz"))
+    dispatcher.message.register(on_lang, Command("lang"))
     dispatcher.message.register(on_digest_at, Command("digest_at"))
     dispatcher.message.register(on_list, Command("list"))
     dispatcher.message.register(on_add, Command("add"))

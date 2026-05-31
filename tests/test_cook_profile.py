@@ -10,11 +10,11 @@ from sqlmodel import SQLModel, Session, create_engine
 
 import app.bot as bot_mod
 from app.bot import handle_prefs
-from app.models import User
+from app.models import Household, User
 from app.profile_service import (
     FoodProfile,
-    apply_profile_to_user,
-    profile_from_user,
+    apply_profile_to_household,
+    profile_from_household,
     update_profile_from_sentence,
 )
 from app.renderer import render_profile
@@ -27,21 +27,32 @@ def _session():
     return Session(engine)
 
 
-def test_user_has_profile_columns_with_defaults():
+def _add_household_user(db: Session) -> Household:
+    household = Household(created_at=datetime.now(timezone.utc))
+    db.add(household)
+    db.commit()
+    db.refresh(household)
+    db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
+                created_at=datetime.now(timezone.utc)))
+    db.commit()
+    return household
+
+
+def test_household_has_profile_columns_with_defaults():
     with _session() as db:
-        user = User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc))
-        db.add(user)
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
         db.commit()
-        db.refresh(user)
-        assert user.diet == "none"
-        assert user.exclusions_json == "[]"
-        assert user.preferred_cuisines_json == "[]"
-        assert user.max_cook_minutes is None
-        assert user.household_size == 1
-        assert user.profile_note == ""
+        db.refresh(household)
+        assert household.diet == "none"
+        assert household.exclusions_json == "[]"
+        assert household.preferred_cuisines_json == "[]"
+        assert household.max_cook_minutes is None
+        assert household.household_size == 1
+        assert household.profile_note == ""
 
 
-def test_migration_0004_adds_profile_columns(tmp_path):
+def test_migration_head_moves_profile_columns_to_household(tmp_path):
     db_path = tmp_path / "m.db"
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
@@ -52,7 +63,8 @@ def test_migration_0004_adds_profile_columns(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     engine = sa.create_engine(f"sqlite:///{db_path}")
-    cols = {c["name"] for c in sa.inspect(engine).get_columns("user")}
+    inspector = sa.inspect(engine)
+    household_cols = {c["name"] for c in inspector.get_columns("household")}
     assert {
         "diet",
         "exclusions_json",
@@ -60,11 +72,14 @@ def test_migration_0004_adds_profile_columns(tmp_path):
         "max_cook_minutes",
         "household_size",
         "profile_note",
-    } <= cols
+    } <= household_cols
+    user_cols = {c["name"] for c in inspector.get_columns("user")}
+    assert "diet" not in user_cols
+    assert "profile_note" not in user_cols
 
 
-def test_profile_round_trips_through_user():
-    user = User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc))
+def test_profile_round_trips_through_household():
+    household = Household(name="x", created_at=datetime.now(timezone.utc))
     profile = FoodProfile(
         diet="vegetarian",
         exclusions=["peanut", "cilantro"],
@@ -73,15 +88,15 @@ def test_profile_round_trips_through_user():
         household_size=2,
         note="prefer one-pot meals",
     )
-    apply_profile_to_user(user, profile)
-    assert user.diet == "vegetarian"
-    assert user.exclusions_json == '["peanut", "cilantro"]'
-    assert profile_from_user(user) == profile
+    apply_profile_to_household(household, profile)
+    assert household.diet == "vegetarian"
+    assert household.exclusions_json == '["peanut", "cilantro"]'
+    assert profile_from_household(household) == profile
 
 
-def test_profile_defaults_from_blank_user():
-    user = User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc))
-    assert profile_from_user(user) == FoodProfile()
+def test_profile_defaults_from_blank_household():
+    household = Household(created_at=datetime.now(timezone.utc))
+    assert profile_from_household(household) == FoodProfile()
 
 
 def test_render_profile_shows_fields():
@@ -109,9 +124,10 @@ def test_fake_profile_client_returns_merged_profile():
 
 def test_update_profile_persists_merge_and_keeps_allergy_structured():
     with _session() as db:
-        user = User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc))
-        db.add(user)
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
         db.commit()
+        db.refresh(household)
         merged = FoodProfile(
             diet="vegetarian",
             exclusions=["peanut"],
@@ -123,13 +139,13 @@ def test_update_profile_persists_merge_and_keeps_allergy_structured():
             update_profile_from_sentence(
                 db,
                 llm=fake,
-                user=user,
+                household=household,
                 sentence="veggie, no peanuts, chinese, spicy ok",
             )
         )
         assert cost == 7
-        db.refresh(user)
-        assert profile_from_user(user) == merged
+        db.refresh(household)
+        assert profile_from_household(household) == merged
         assert "peanut" in profile.exclusions
 
 
@@ -146,8 +162,7 @@ def test_handle_prefs_no_args_shows_profile(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
-        db.commit()
+        _add_household_user(db)
     msg = _Msg("/prefs")
     fake = FakeProfileLLMClient(canned=(FoodProfile(), None))
     asyncio.run(handle_prefs(
@@ -162,8 +177,7 @@ def test_handle_prefs_with_sentence_updates(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        db.add(User(telegram_id=1, chat_id=1, created_at=datetime.now(timezone.utc)))
-        db.commit()
+        _add_household_user(db)
     msg = _Msg("/prefs I'm vegan")
     fake = FakeProfileLLMClient(canned=(FoodProfile(diet="vegan"), None))
     asyncio.run(handle_prefs(

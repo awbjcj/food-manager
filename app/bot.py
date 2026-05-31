@@ -61,7 +61,7 @@ from app.llm import (
     ProfileUpdateLLMClient,
     TextLLMClient,
 )
-from app.models import CookSession, PantryItem, User
+from app.models import CookSession, Household, PantryItem, User
 from app.refine_service import run_receipt_refine
 from app.pantry_service import (
     NotOwnerOrMissing,
@@ -111,7 +111,7 @@ from app.renderer import (
     render_terminal_state,
     render_undo_result,
 )
-from app.profile_service import profile_from_user, update_profile_from_sentence
+from app.profile_service import profile_from_household, update_profile_from_sentence
 
 DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8
@@ -785,14 +785,18 @@ async def handle_prefs(
         user = await _guard(msg, session, on_user_created=on_user_created)
         if user is None:
             return
+        household = session.get(Household, user.household_id)
+        if household is None:
+            await msg.answer("couldn't load your household profile")
+            return
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2 or not parts[1].strip():
-            await msg.answer(render_profile(profile_from_user(user)))
+            await msg.answer(render_profile(profile_from_household(household)))
             return
         try:
             selected = _select_profile_llm(profile_llm, user.llm_provider)
             profile, _ = await update_profile_from_sentence(
-                session, llm=selected, user=user, sentence=parts[1].strip(),
+                session, llm=selected, household=household, sentence=parts[1].strip(),
             )
         except LLMProviderNotConfigured:
             await msg.answer(

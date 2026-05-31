@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Optional
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
-from app.models import User
+from app.models import Household
 
 if TYPE_CHECKING:
     from app.llm import ProfileUpdateLLMClient
@@ -21,37 +21,37 @@ class FoodProfile(BaseModel):
     note: str = ""
 
 
-def profile_from_user(user: User) -> FoodProfile:
+def profile_from_household(household: Household) -> FoodProfile:
     return FoodProfile(
-        diet=user.diet,
-        exclusions=json.loads(user.exclusions_json or "[]"),
-        preferred_cuisines=json.loads(user.preferred_cuisines_json or "[]"),
-        max_cook_minutes=user.max_cook_minutes,
-        household_size=user.household_size,
-        note=user.profile_note,
+        diet=household.diet,
+        exclusions=json.loads(household.exclusions_json or "[]"),
+        preferred_cuisines=json.loads(household.preferred_cuisines_json or "[]"),
+        max_cook_minutes=household.max_cook_minutes,
+        household_size=household.household_size,
+        note=household.profile_note,
     )
 
 
-def apply_profile_to_user(user: User, profile: FoodProfile) -> None:
-    user.diet = profile.diet
-    user.exclusions_json = json.dumps(profile.exclusions)
-    user.preferred_cuisines_json = json.dumps(profile.preferred_cuisines)
-    user.max_cook_minutes = profile.max_cook_minutes
-    user.household_size = profile.household_size
-    user.profile_note = profile.note
+def apply_profile_to_household(household: Household, profile: FoodProfile) -> None:
+    household.diet = profile.diet
+    household.exclusions_json = json.dumps(profile.exclusions)
+    household.preferred_cuisines_json = json.dumps(profile.preferred_cuisines)
+    household.max_cook_minutes = profile.max_cook_minutes
+    household.household_size = profile.household_size
+    household.profile_note = profile.note
 
 
 async def update_profile_from_sentence(
     session: Session,
     *,
     llm: "ProfileUpdateLLMClient",
-    user: User,
+    household: Household,
     sentence: str,
 ) -> tuple[FoodProfile, Optional[int]]:
-    current = profile_from_user(user)
+    current = profile_from_household(household)
     merged, cost = await llm.parse_profile_update(current=current, sentence=sentence)
-    apply_profile_to_user(user, merged)
-    session.add(user)
+    apply_profile_to_household(household, merged)
+    session.add(household)
     session.commit()
-    session.refresh(user)
+    session.refresh(household)
     return merged, cost

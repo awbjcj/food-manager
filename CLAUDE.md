@@ -47,6 +47,8 @@ Single-user Telegram bot: user sends grocery receipt photos → Claude parses th
 | `app/i18n.py` | Static `MESSAGES` catalog, `t(key, lang, **kw)`, locale date/weekday helpers |
 | `app/ingest_service.py` | Photo and `/add` text → `PantryItem` rows; `IngestSummary` dataclass |
 | `app/pantry_service.py` | CRUD: list, snooze, mark eaten/tossed/removed, correct shelf life |
+| `app/household_service.py` | Provision/restore a user's household-of-one |
+| `app/invite_service.py` | Single-use household invites + membership (join/leave/remove) |
 | `app/cache.py` | `ShelfLifeCache` read/write/user-correction |
 | `app/commands.py` | Parse raw Telegram command argument strings into typed values |
 | `app/renderer.py` | Format `PantryItem` lists into Telegram message text + inline keyboards |
@@ -74,6 +76,16 @@ Per-user language (`User.lang`, one of `en|zh|fr|es`; `/lang` to set). **The DB 
 - **Static chrome** (headers, buttons, `/help`) → `app/i18n.py` `MESSAGES` catalog via `t(key, lang, **kw)`, English fallback for any missing variant.
 - **Dynamic names** (item names, recipe title/cuisine/method) → `translate_texts()` lazily LLM-translates and caches in the global `NameTranslation` table; any failure falls back to English so the daily digest is never blocked.
 - **English must stay byte-identical**: every renderer defaults `lang="en"`, and existing tests assert exact English strings. When adding a catalog key, its `en` value must equal the literal it replaces; the integrity test in `tests/test_i18n.py` enforces placeholder parity across languages.
+
+### Multi-user households (v4.2)
+
+A household can have multiple members who share everything household-scoped (pantry, shopping list, `ShelfLifeCache`, food profile) automatically — sharing is a consequence of every domain row being keyed by `household_id`, so no per-feature work is needed. Per-user settings (`lang`, `tz`, `digest_hour`, `llm_provider`, digest job) stay on `User`.
+
+- **Single authorization gate**: `resolve_authorization()` in `bot.py` is the one membership check, used by `authorize_and_get_user` (commands) and `_authorized_callback_user` (callback queries). A Telegram id is allowed iff it has a `User` row (member of some household) or equals the bootstrap `ALLOWED_TELEGRAM_USER_ID` on first contact. Everyone else is rejected; the only other way in is redeeming an invite.
+- **Roles** (`User.role`): `owner` (household creator; backfilled for pre-v4.2 users) and `member`. Any member may `/invite`; only the owner may `/remove` members; the owner cannot `/leave`.
+- **Invites** (`HouseholdInvite`, `invite_service.py`): 24h TTL, `secrets.token_urlsafe` token. `max_uses` controls redemptions — `1` (default, `/invite`) is single-use; `None` (`/invite family`) is reusable until expiry for onboarding several people at once; `uses` counts redemptions. `/invite` yields both a `t.me/<bot>?start=<token>` deep-link and a raw code for `/join <code>`; both route through `_try_redeem_invite`. Leaving/removal deletes **all** the user's invites (a multi-use link stays live after its first redemption, so filtering on `redeemed_by` would miss it). `max_uses` has no DB `server_default` on purpose — one would coerce app-inserted `NULL` (unlimited) back to `1`; existing rows are backfilled via `UPDATE` in migration `0011`.
+- **Join notifications**: on a successful redeem, `_notify_household_join` best-effort DMs every existing member (in their own language) that someone joined; failures are swallowed so a blocked chat never breaks the join.
+- A removed/left user's `User` row is deleted (deauthorized) and their digest job is cancelled via the `unschedule` callback wired in `bin/run.py`.
 
 ### Database
 

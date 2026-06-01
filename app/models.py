@@ -23,6 +23,7 @@ PendingStatus = Literal["pending", "applied", "cancelled", "expired", "stale"]
 CacheAction = Literal["move", "add_new", "leave"]
 CookStatus = Literal["collecting", "ready", "done", "cancelled", "expired"]
 CookFeedback = Literal["none", "liked", "disliked"]
+Role = Literal["owner", "member"]
 
 
 class Household(SQLModel, table=True):
@@ -45,6 +46,7 @@ class User(SQLModel, table=True):
     digest_hour: int = 8
     llm_provider: str = "anthropic"
     lang: str = "en"
+    role: str = "member"  # "owner" | "member"; owner is the household creator
     created_at: datetime
 
 
@@ -171,3 +173,22 @@ class NameTranslation(SQLModel, table=True):
     lang: str = Field(primary_key=True)
     source_text: str = Field(primary_key=True)
     translated_text: str
+
+
+class HouseholdInvite(SQLModel, table=True):
+    # A single-use, time-limited token that lets a new Telegram user join an
+    # existing household. Redeeming links the new user to ``household_id`` and
+    # stamps ``redeemed_by``/``redeemed_at`` so the token cannot be reused.
+    id: Optional[int] = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    token: str = Field(index=True, unique=True)
+    created_by: int  # telegram_id of the inviting member
+    created_at: datetime
+    expires_at: datetime
+    # None = unlimited redemptions until expiry. Default is None (not 1) so an
+    # explicit None survives insert: a SQLAlchemy column default of 1 would
+    # coerce None back to 1. create_invite always passes max_uses explicitly.
+    max_uses: Optional[int] = None
+    uses: int = 0  # redemptions so far
+    redeemed_by: Optional[int] = None  # telegram_id of the last joiner; None = unused
+    redeemed_at: Optional[datetime] = None

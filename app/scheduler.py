@@ -154,6 +154,16 @@ def schedule_user_digest(
     )
 
 
+def unschedule_user_digest(scheduler: AsyncIOScheduler, telegram_id: int) -> None:
+    """Remove a user's digest cron job (e.g. when they leave/are removed)."""
+    job_id = f"digest:{telegram_id}"
+    if scheduler.get_job(job_id) is not None:
+        try:
+            scheduler.remove_job(job_id)
+        except JobLookupError:
+            pass
+
+
 def register_all_user_digests(
     scheduler: AsyncIOScheduler,
     *,

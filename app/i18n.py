@@ -508,6 +508,11 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /cook - get a recipe from your pantry\n"
             "  /shopping - view your to-buy list; tap an item when bought\n"
             "  /favorites - view saved recipes; tap to re-cook against your pantry\n"
+            "  /invite [family] - invite one person (or 'family' for a reusable link)\n"
+            "  /join <code> - join a household you were invited to\n"
+            "  /household - list household members\n"
+            "  /leave - leave your household\n"
+            "  /remove <id> - (owner) remove a member\n"
             "  /help - this message\n"
             "Send a receipt photo to log it."
         ),
@@ -534,6 +539,11 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /cook - 从您的储藏获取食谱\n"
             "  /shopping - 查看待购清单；点击已购买的物品\n"
             "  /favorites - 查看已保存食谱；点击重新烹饪\n"
+            "  /invite [family] - 邀请一人（或用 'family' 生成可重复使用的链接）\n"
+            "  /join <code> - 加入您被邀请的家庭\n"
+            "  /household - 列出家庭成员\n"
+            "  /leave - 离开您的家庭\n"
+            "  /remove <id> -（所有者）移除成员\n"
             "  /help - 本消息\n"
             "发送收据照片以记录。"
         ),
@@ -560,6 +570,11 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /cook - obtenir une recette depuis votre garde-manger\n"
             "  /shopping - voir votre liste de courses ; appuyez sur un article acheté\n"
             "  /favorites - voir les recettes sauvegardées ; appuyez pour recuire\n"
+            "  /invite [family] - inviter une personne (ou 'family' pour un lien réutilisable)\n"
+            "  /join <code> - rejoindre un foyer où vous êtes invité\n"
+            "  /household - lister les membres du foyer\n"
+            "  /leave - quitter votre foyer\n"
+            "  /remove <id> - (propriétaire) retirer un membre\n"
             "  /help - ce message\n"
             "Envoyez une photo de reçu pour l'enregistrer."
         ),
@@ -586,6 +601,11 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /cook - obtener una receta de tu despensa\n"
             "  /shopping - ver tu lista de compras; toca un artículo comprado\n"
             "  /favorites - ver recetas guardadas; toca para volver a cocinar\n"
+            "  /invite [family] - invitar a una persona (o 'family' para un enlace reutilizable)\n"
+            "  /join <code> - unirte a un hogar al que te invitaron\n"
+            "  /household - listar miembros del hogar\n"
+            "  /leave - salir de tu hogar\n"
+            "  /remove <id> - (propietario) quitar un miembro\n"
             "  /help - este mensaje\n"
             "Envía una foto de un recibo para registrarlo."
         ),
@@ -633,6 +653,130 @@ MESSAGES: dict[str, dict[str, str]] = {
         "zh": "未来7天食品储藏无到期提醒。",
         "fr": "Le garde-manger est vide pour les 7 prochains jours.",
         "es": "La despensa está despejada para los próximos 7 días.",
+    },
+    # -----------------------------------------------------------------------
+    # Household invites & membership (v4.2)
+    # -----------------------------------------------------------------------
+    "invite.created": {
+        "en": (
+            "Invite created - single use, expires in 24h.\n\n"
+            "Tap to join: {link}\n"
+            "Or send this to /join: {code}\n\n"
+            "Whoever joins shares this household's pantry, shopping list, and preferences."
+        ),
+        "zh": (
+            "邀请已创建 - 一次性使用，24小时后过期。\n\n"
+            "点击加入：{link}\n"
+            "或将此发送给 /join：{code}\n\n"
+            "加入者将共享此家庭的食品储藏、购物清单和偏好设置。"
+        ),
+        "fr": (
+            "Invitation créée - usage unique, expire dans 24 h.\n\n"
+            "Appuyez pour rejoindre : {link}\n"
+            "Ou envoyez ceci à /join : {code}\n\n"
+            "Qui rejoint partage le garde-manger, la liste de courses et les préférences de ce foyer."
+        ),
+        "es": (
+            "Invitación creada - un solo uso, caduca en 24 h.\n\n"
+            "Toca para unirte: {link}\n"
+            "O envía esto a /join: {code}\n\n"
+            "Quien se una comparte la despensa, la lista de compras y las preferencias de este hogar."
+        ),
+    },
+    "join.success": {
+        "en": "You've joined the household. You now share its pantry, shopping list, and preferences. Type /help to get started.",
+        "zh": "您已加入家庭。现在您将共享其食品储藏、购物清单和偏好设置。输入 /help 开始使用。",
+        "fr": "Vous avez rejoint le foyer. Vous partagez désormais son garde-manger, sa liste de courses et ses préférences. Tapez /help pour commencer.",
+        "es": "Te has unido al hogar. Ahora compartes su despensa, lista de compras y preferencias. Escribe /help para empezar.",
+    },
+    "join.invalid": {
+        "en": "That invite is invalid, expired, or already used. Ask a household member for a fresh /invite.",
+        "zh": "该邀请无效、已过期或已被使用。请向家庭成员索取新的 /invite。",
+        "fr": "Cette invitation est invalide, expirée ou déjà utilisée. Demandez un nouveau /invite à un membre du foyer.",
+        "es": "Esa invitación no es válida, caducó o ya se usó. Pide un nuevo /invite a un miembro del hogar.",
+    },
+    "join.already_member": {
+        "en": "You're already in a household. Use /leave first if you want to switch.",
+        "zh": "您已在一个家庭中。如需切换，请先使用 /leave。",
+        "fr": "Vous êtes déjà dans un foyer. Utilisez d'abord /leave pour en changer.",
+        "es": "Ya estás en un hogar. Usa /leave primero si quieres cambiarte.",
+    },
+    "household.title": {
+        "en": "Household members ({n}):",
+        "zh": "家庭成员（{n}）：",
+        "fr": "Membres du foyer ({n}) :",
+        "es": "Miembros del hogar ({n}):",
+    },
+    "household.role.owner": {"en": "owner", "zh": "所有者", "fr": "propriétaire", "es": "propietario"},
+    "household.role.member": {"en": "member", "zh": "成员", "fr": "membre", "es": "miembro"},
+    "household.you": {"en": " (you)", "zh": "（您）", "fr": " (vous)", "es": " (tú)"},
+    "leave.success": {
+        "en": "You've left the household and no longer have access. Ask a member for a new /invite to rejoin.",
+        "zh": "您已离开家庭，不再拥有访问权限。如需重新加入，请向成员索取新的 /invite。",
+        "fr": "Vous avez quitté le foyer et n'y avez plus accès. Demandez un nouveau /invite à un membre pour le rejoindre.",
+        "es": "Has salido del hogar y ya no tienes acceso. Pide a un miembro un nuevo /invite para volver a unirte.",
+    },
+    "leave.owner": {
+        "en": "You're the household owner - you can't leave. Use /remove <id> to remove members.",
+        "zh": "您是家庭所有者 - 无法离开。请使用 /remove <id> 移除成员。",
+        "fr": "Vous êtes le propriétaire du foyer - vous ne pouvez pas partir. Utilisez /remove <id> pour retirer des membres.",
+        "es": "Eres el propietario del hogar - no puedes salir. Usa /remove <id> para quitar miembros.",
+    },
+    "remove.success": {
+        "en": "Removed member {id} from your household.",
+        "zh": "已从您的家庭中移除成员 {id}。",
+        "fr": "Membre {id} retiré de votre foyer.",
+        "es": "Se eliminó al miembro {id} de tu hogar.",
+    },
+    "remove.not_owner": {
+        "en": "Only the household owner can remove members.",
+        "zh": "只有家庭所有者才能移除成员。",
+        "fr": "Seul le propriétaire du foyer peut retirer des membres.",
+        "es": "Solo el propietario del hogar puede quitar miembros.",
+    },
+    "remove.self": {
+        "en": "You can't remove yourself.",
+        "zh": "您不能移除自己。",
+        "fr": "Vous ne pouvez pas vous retirer vous-même.",
+        "es": "No puedes eliminarte a ti mismo.",
+    },
+    "remove.not_found": {
+        "en": "No member with id {id} in your household.",
+        "zh": "您的家庭中没有 id 为 {id} 的成员。",
+        "fr": "Aucun membre avec l'id {id} dans votre foyer.",
+        "es": "No hay ningún miembro con id {id} en tu hogar.",
+    },
+    "invite.created_reusable": {
+        "en": (
+            "Reusable invite created - anyone can join until it expires in 24h.\n\n"
+            "Tap to join: {link}\n"
+            "Or send this to /join: {code}\n\n"
+            "Everyone who joins shares this household's pantry, shopping list, and preferences."
+        ),
+        "zh": (
+            "可重复使用的邀请已创建 - 24小时内任何人都可加入。\n\n"
+            "点击加入：{link}\n"
+            "或将此发送给 /join：{code}\n\n"
+            "每位加入者都将共享此家庭的食品储藏、购物清单和偏好设置。"
+        ),
+        "fr": (
+            "Invitation réutilisable créée - tout le monde peut rejoindre avant son expiration dans 24 h.\n\n"
+            "Appuyez pour rejoindre : {link}\n"
+            "Ou envoyez ceci à /join : {code}\n\n"
+            "Tous ceux qui rejoignent partagent le garde-manger, la liste de courses et les préférences de ce foyer."
+        ),
+        "es": (
+            "Invitación reutilizable creada - cualquiera puede unirse hasta que caduque en 24 h.\n\n"
+            "Toca para unirte: {link}\n"
+            "O envía esto a /join: {code}\n\n"
+            "Todos los que se unan comparten la despensa, la lista de compras y las preferencias de este hogar."
+        ),
+    },
+    "household.member_joined": {
+        "en": "A new member (id {id}) joined your household.",
+        "zh": "新成员（id {id}）已加入您的家庭。",
+        "fr": "Un nouveau membre (id {id}) a rejoint votre foyer.",
+        "es": "Un nuevo miembro (id {id}) se unió a tu hogar.",
     },
 }
 

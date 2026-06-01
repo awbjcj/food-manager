@@ -106,6 +106,33 @@ def parse_lang(args: Sequence[str]) -> Optional[str]:
     return token
 
 
+def parse_invite_mode(args: Sequence[str]) -> Optional[int]:
+    """Parse ``/invite`` arguments into a ``max_uses`` value.
+
+    No argument -> 1 (single-use). ``family`` -> None (reusable until expiry).
+    """
+    if not args:
+        return 1
+    if len(args) != 1 or args[0].lower() != "family":
+        raise CommandError("usage: /invite [family]")
+    return None
+
+
+def parse_invite_token(args: Sequence[str]) -> str:
+    if len(args) != 1 or not args[0].strip():
+        raise CommandError("usage: /join <invite-code>")
+    return args[0].strip()
+
+
+def parse_member_id(args: Sequence[str]) -> int:
+    if len(args) != 1:
+        raise CommandError("usage: /remove <member-id>")
+    try:
+        return int(args[0].strip())
+    except ValueError as exc:
+        raise CommandError(f"expected a numeric member id, got {args[0]!r}") from exc
+
+
 Verb = Literal[
     "ate",
     "toss",

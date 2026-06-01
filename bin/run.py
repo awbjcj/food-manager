@@ -65,6 +65,7 @@ from app.scheduler import (
     register_sweep_expired_pendings,
     schedule_user_digest,
     send_digest_with_retry,
+    unschedule_user_digest,
 )
 from app.settings import Settings
 
@@ -253,6 +254,9 @@ async def _amain(settings: Settings) -> None:
     def reschedule(user) -> None:
         schedule_user_digest(scheduler, user, send=send)
 
+    def unschedule(telegram_id: int) -> None:
+        unschedule_user_digest(scheduler, telegram_id)
+
     dispatcher = build_dispatcher(
         bot=bot,
         session_factory=session_factory,
@@ -266,6 +270,7 @@ async def _amain(settings: Settings) -> None:
         now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
         on_user_created=reschedule,
         reschedule=reschedule,
+        unschedule=unschedule,
         translation_llm=translation_llm,
     )
 

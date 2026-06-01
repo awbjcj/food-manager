@@ -17,14 +17,17 @@ from app.commands import (
     CommandError,
     parse_callback,
     parse_digest_at,
+    parse_invite_mode,
+    parse_invite_token,
     parse_item_id_arg,
     parse_lang,
     parse_llm_provider,
     parse_list_filter,
+    parse_member_id,
     parse_snooze_args,
     parse_tz,
 )
-from app.i18n import LANGS, t
+from app.i18n import DEFAULT_LANG, LANGS, t
 from app.correction_service import (
     NullDiff,
     ProposeCorrectError,
@@ -66,6 +69,19 @@ from app.llm import (
 from app.household_service import (
     provision_solo_household,
     restore_household_for_user,
+)
+from app.invite_service import (
+    AlreadyMember,
+    CannotRemoveSelf,
+    InviteInvalid,
+    MemberNotFound,
+    NotOwner,
+    OwnerCannotLeave,
+    create_invite,
+    leave_household,
+    list_members,
+    redeem_invite,
+    remove_member,
 )
 from app.models import CookSession, Household, PantryItem, User
 from app.refine_service import run_receipt_refine
@@ -141,6 +157,41 @@ class AuthDecision:
     household: Optional[Household] = None
 
 
+@dataclass
+class AuthStatus:
+    """Result of the single membership gate.
+
+    ``allowed`` is True for a known member (any household) or the bootstrap
+    owner on first contact. ``user`` is the existing row, or None when the
+    caller is the bootstrap owner who has not been provisioned yet.
+    """
+
+    allowed: bool
+    user: Optional[User]
+    is_bootstrap: bool
+
+
+def resolve_authorization(
+    session: Session,
+    *,
+    allowed_user_id: int,
+    telegram_user_id: int,
+) -> AuthStatus:
+    """Single source of truth for "may this Telegram id use the bot?".
+
+    A user is authorized if they already have a ``User`` row (i.e. they are a
+    member of some household), or if they are the configured bootstrap owner
+    making first contact. Everyone else is rejected here; the only other way in
+    is redeeming an invite (see ``redeem_invite`` / ``/join`` / ``/start <token>``).
+    """
+    existing = session.get(User, telegram_user_id)
+    if existing is not None:
+        return AuthStatus(True, existing, is_bootstrap=False)
+    if telegram_user_id == allowed_user_id:
+        return AuthStatus(True, None, is_bootstrap=True)
+    return AuthStatus(False, None, is_bootstrap=False)
+
+
 def authorize_and_get_user(
     session: Session,
     *,
@@ -149,13 +200,18 @@ def authorize_and_get_user(
     chat_id: int,
     chat_type: str,
 ) -> AuthDecision:
-    if telegram_user_id != allowed_user_id:
+    status = resolve_authorization(
+        session,
+        allowed_user_id=allowed_user_id,
+        telegram_user_id=telegram_user_id,
+    )
+    if not status.allowed:
         return AuthDecision(False, None, False, "not authorized")
     if chat_type != "private":
         return AuthDecision(False, None, False, "this bot only works in private chat")
 
-    existing = session.get(User, telegram_user_id)
-    if existing is not None:
+    if status.user is not None:
+        existing = status.user
         household = session.get(Household, existing.household_id)
         if household is None:
             household = restore_household_for_user(
@@ -163,6 +219,7 @@ def authorize_and_get_user(
             )
         return AuthDecision(True, existing, False, "ok", household=household)
 
+    # Bootstrap owner, first contact: provision a fresh solo household.
     now = datetime.now(timezone.utc)
     user = User(
         telegram_id=telegram_user_id,
@@ -171,6 +228,7 @@ def authorize_and_get_user(
         tz=DEFAULT_TZ,
         digest_hour=DEFAULT_DIGEST_HOUR,
         llm_provider=DEFAULT_LLM_PROVIDER,
+        role="owner",
         created_at=now,
     )
     household = provision_solo_household(session, user, created_at=now)
@@ -242,6 +300,20 @@ def _render_llm_status(user: User, llm: LLMClient, text_llm: TextLLMClient) -> s
     )
 
 
+def _authorized_callback_user(session: Session, telegram_id: int) -> User | None:
+    """Membership gate for callback queries (shared with ``_guard``/``handle_start``
+    via ``resolve_authorization``). Returns the member ``User`` or None if the
+    sender is not a member of any household."""
+    status = resolve_authorization(
+        session,
+        allowed_user_id=ALLOWED_TELEGRAM_USER_ID,
+        telegram_user_id=telegram_id,
+    )
+    if not status.allowed:
+        return None
+    return status.user  # None only for a bootstrap owner with no row yet
+
+
 async def _guard(
     msg,
     session: Session,
@@ -268,13 +340,101 @@ async def _guard(
     return user
 
 
+def _start_token(text: str | None) -> Optional[str]:
+    """Extract a deep-link payload from ``/start <token>`` (None if absent)."""
+    parts = (text or "").split(maxsplit=1)
+    if len(parts) == 2 and parts[1].strip():
+        return parts[1].strip()
+    return None
+
+
+async def _notify_household_join(
+    bot, session: Session, *, household_id: int, joiner_id: int
+) -> None:
+    """Best-effort DM to existing members announcing a new joiner.
+
+    A blocked/unreachable chat must never break the join, so each send is
+    guarded; the joiner themselves is skipped."""
+    if bot is None:
+        return
+    for member in list_members(session, household_id=household_id):
+        if member.telegram_id == joiner_id:
+            continue
+        member_user = session.get(User, member.telegram_id)
+        if member_user is None:
+            continue
+        try:
+            await bot.send_message(
+                member_user.chat_id,
+                t("household.member_joined", member_user.lang, id=joiner_id),
+            )
+        except Exception:
+            log.warning(
+                "member_join_notify_failed",
+                extra={"telegram_user_id": member.telegram_id},
+            )
+
+
+async def _try_redeem_invite(
+    msg,
+    session: Session,
+    *,
+    token: str,
+    on_user_created: Callable[[User], None],
+    bot=None,
+) -> bool:
+    """Attempt to join a household via ``token``. Returns True if the message
+    was handled (joined, or a join-specific error was reported)."""
+    if msg.chat.type != "private":
+        await msg.answer("this bot only works in private chat")
+        return True
+    try:
+        result = redeem_invite(
+            session,
+            token=token,
+            telegram_user_id=msg.from_user.id,
+            chat_id=msg.chat.id,
+            now=datetime.now(timezone.utc),
+            tz=DEFAULT_TZ,
+            digest_hour=DEFAULT_DIGEST_HOUR,
+            llm_provider=DEFAULT_LLM_PROVIDER,
+        )
+    except AlreadyMember:
+        # The sender already has a row, so honour their language preference.
+        existing = session.get(User, msg.from_user.id)
+        lang = existing.lang if existing is not None else DEFAULT_LANG
+        await msg.answer(t("join.already_member", lang))
+        return True
+    except InviteInvalid:
+        # No User row yet for a newcomer, so fall back to the default language.
+        await msg.answer(t("join.invalid", DEFAULT_LANG))
+        return True
+    on_user_created(result.user)
+    await msg.answer(t("join.success", result.user.lang))
+    await _notify_household_join(
+        bot, session, household_id=result.household_id, joiner_id=msg.from_user.id
+    )
+    return True
+
+
 async def handle_start(
     msg,
     *,
     session_factory: _SessionFactory,
     on_user_created: Callable[[User], None],
+    bot=None,
 ) -> None:
     with session_factory() as session:
+        token = _start_token(msg.text)
+        # A newcomer (no User row yet) tapping an invite deep-link redeems it;
+        # existing members ignore any token and get the normal start message
+        # (unlike /join, which tells an existing member they're already in a
+        # household — a deep-link re-tap should just be a friendly no-op).
+        if token is not None and session.get(User, msg.from_user.id) is None:
+            await _try_redeem_invite(
+                msg, session, token=token, on_user_created=on_user_created, bot=bot
+            )
+            return
         decision = authorize_and_get_user(
             session,
             allowed_user_id=ALLOWED_TELEGRAM_USER_ID,
@@ -295,6 +455,139 @@ async def handle_start(
         await msg.answer(
             t("start.ready", user.lang, tz=user.tz, digest_hour=user.digest_hour)
         )
+
+
+async def handle_invite(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    bot: Bot,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        try:
+            max_uses = parse_invite_mode(list((msg.text or "").split()[1:]))
+        except CommandError as exc:
+            await msg.answer(str(exc))
+            return
+        result = create_invite(
+            session,
+            household_id=user.household_id,
+            created_by=user.telegram_id,
+            now=datetime.now(timezone.utc),
+            max_uses=max_uses,
+        )
+        me = await bot.get_me()
+        link = f"https://t.me/{me.username}?start={result.token}"
+        key = "invite.created" if max_uses == 1 else "invite.created_reusable"
+        await msg.answer(t(key, user.lang, link=link, code=result.token))
+
+
+async def handle_join(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+    bot=None,
+) -> None:
+    with session_factory() as session:
+        try:
+            token = parse_invite_token(list((msg.text or "").split()[1:]))
+        except CommandError as exc:
+            await msg.answer(str(exc))
+            return
+        # redeem_invite raises AlreadyMember if the sender already has a row,
+        # so existing members who /join are told to /leave first.
+        await _try_redeem_invite(
+            msg, session, token=token, on_user_created=on_user_created, bot=bot
+        )
+
+
+async def handle_household(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        members = list_members(session, household_id=user.household_id)
+        lines = [t("household.title", user.lang, n=len(members))]
+        for member in members:
+            role_label = t(f"household.role.{member.role}", user.lang)
+            you = (
+                t("household.you", user.lang)
+                if member.telegram_id == user.telegram_id
+                else ""
+            )
+            lines.append(f"  {member.telegram_id} - {role_label}{you}")
+        await msg.answer("\n".join(lines))
+
+
+async def handle_leave(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    unschedule: Callable[[int], None],
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        # Capture before leave_household deletes the row — `user` is detached
+        # after the delete+commit, so reading user.* below would raise.
+        lang = user.lang
+        telegram_id = user.telegram_id
+        try:
+            leave_household(session, telegram_user_id=telegram_id)
+        except OwnerCannotLeave:
+            await msg.answer(t("leave.owner", lang))
+            return
+        unschedule(telegram_id)
+        await msg.answer(t("leave.success", lang))
+
+
+async def handle_remove(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    unschedule: Callable[[int], None],
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            return
+        lang = user.lang
+        try:
+            target_id = parse_member_id(list((msg.text or "").split()[1:]))
+        except CommandError as exc:
+            await msg.answer(str(exc))
+            return
+        try:
+            removed = remove_member(
+                session,
+                household_id=user.household_id,
+                actor_id=user.telegram_id,
+                target_id=target_id,
+            )
+        except NotOwner:
+            await msg.answer(t("remove.not_owner", lang))
+            return
+        except CannotRemoveSelf:
+            await msg.answer(t("remove.self", lang))
+            return
+        except MemberNotFound:
+            await msg.answer(t("remove.not_found", lang, id=target_id))
+            return
+        unschedule(removed.telegram_id)
+        await msg.answer(t("remove.success", lang, id=removed.telegram_id))
 
 
 async def handle_tz(
@@ -1103,13 +1396,6 @@ async def handle_cook_callback(
     bot,
     translation_llm=None,
 ) -> None:
-    if cb.from_user.id != ALLOWED_TELEGRAM_USER_ID:
-        log.info(
-            "unauthorized_update_rejected",
-            extra={"telegram_user_id": cb.from_user.id},
-        )
-        await cb.answer("not authorized", show_alert=False)
-        return
     try:
         action = parse_callback(cb.data or "")
     except CommandError:
@@ -1120,9 +1406,13 @@ async def handle_cook_callback(
         return
 
     with session_factory() as session:
-        user = session.get(User, cb.from_user.id)
+        user = _authorized_callback_user(session, cb.from_user.id)
         if user is None:
-            await cb.answer("not configured")
+            log.info(
+                "unauthorized_update_rejected",
+                extra={"telegram_user_id": cb.from_user.id},
+            )
+            await cb.answer("not authorized", show_alert=False)
             return
         cook = load_cook_session(
             session, household_id=user.household_id, cook_id=action.item_id
@@ -1368,13 +1658,6 @@ async def run_cook_and_render(
 async def handle_callback(
     cb, *, session_factory, now_provider, translation_llm=None
 ) -> None:
-    if cb.from_user.id != ALLOWED_TELEGRAM_USER_ID:
-        log.info(
-            "unauthorized_update_rejected",
-            extra={"telegram_user_id": cb.from_user.id},
-        )
-        await cb.answer("not authorized", show_alert=False)
-        return
     try:
         action = parse_callback(cb.data)
     except CommandError:
@@ -1382,9 +1665,13 @@ async def handle_callback(
         return
 
     with session_factory() as session:
-        user = session.get(User, cb.from_user.id)
+        user = _authorized_callback_user(session, cb.from_user.id)
         if user is None:
-            await cb.answer("not configured")
+            log.info(
+                "unauthorized_update_rejected",
+                extra={"telegram_user_id": cb.from_user.id},
+            )
+            await cb.answer("not authorized", show_alert=False)
             return
         today = now_provider(user.tz).date()
 
@@ -1824,6 +2111,7 @@ def build_dispatcher(
     now_provider: NowProvider,
     on_user_created: Callable[[User], None],
     reschedule: Callable[[User], None],
+    unschedule: Callable[[int], None] = lambda _telegram_id: None,
     search=None,
     selection_llm=None,
     recipe_llm=None,
@@ -1845,6 +2133,46 @@ def build_dispatcher(
         await handle_start(
             message,
             session_factory=session_factory,
+            on_user_created=on_user_created,
+            bot=bot,
+        )
+
+    async def on_invite(message):
+        await handle_invite(
+            message,
+            session_factory=session_factory,
+            bot=bot,
+            on_user_created=on_user_created,
+        )
+
+    async def on_join(message):
+        await handle_join(
+            message,
+            session_factory=session_factory,
+            on_user_created=on_user_created,
+            bot=bot,
+        )
+
+    async def on_household(message):
+        await handle_household(
+            message,
+            session_factory=session_factory,
+            on_user_created=on_user_created,
+        )
+
+    async def on_leave(message):
+        await handle_leave(
+            message,
+            session_factory=session_factory,
+            unschedule=unschedule,
+            on_user_created=on_user_created,
+        )
+
+    async def on_remove(message):
+        await handle_remove(
+            message,
+            session_factory=session_factory,
+            unschedule=unschedule,
             on_user_created=on_user_created,
         )
 
@@ -2019,6 +2347,11 @@ def build_dispatcher(
         )
 
     dispatcher.message.register(on_start, Command("start"))
+    dispatcher.message.register(on_invite, Command("invite"))
+    dispatcher.message.register(on_join, Command("join"))
+    dispatcher.message.register(on_household, Command("household"))
+    dispatcher.message.register(on_leave, Command("leave"))
+    dispatcher.message.register(on_remove, Command("remove"))
     dispatcher.message.register(on_tz, Command("tz"))
     dispatcher.message.register(on_lang, Command("lang"))
     dispatcher.message.register(on_digest_at, Command("digest_at"))

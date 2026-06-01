@@ -125,7 +125,8 @@ Receipt-level fields:
 Return all recognizable purchased line items, excluding store metadata,
 subtotals, totals, taxes, discounts, coupons, and payment lines. For each
 returned line item:
-  - is_food: true if this is a pantry-relevant food item, false for purchased
+  - is_food: true if this is a pantry-relevant food OR drink item (beverages
+    like juice, milk drinks, soda, water all count), false for purchased
     non-food items such as paper towels or bags
   - name: clean human-readable name ("Whole Milk 1 gal"), expand abbreviations
   - qty: display-oriented purchased quantity (1.0 if ambiguous)
@@ -137,9 +138,11 @@ returned line item:
   - confidence: 0.0-1.0
   - track_worthy: false for items not worth expiry-tracking even if edible:
     medicines/supplements/vitamins, condiments & sauces (ketchup, soy sauce,
-    dressing, jam), spices & seasonings (salt, pepper, dried herbs), and
-    household/toiletries. true for genuinely perishable food AND legitimately
-    stocked staples (canned beans, rice, pasta).
+    dressing, jam), spices & seasonings (salt, pepper, dried herbs),
+    shelf-stable beverages (soda, bottled water, sealed juice, coffee beans,
+    tea bags), and household/toiletries. true for genuinely perishable food,
+    perishable drinks (fresh juice, milk-based drinks, opened cartons), AND
+    legitimately stocked staples (canned beans, rice, pasta).
   - exclusion_reason: when track_worthy is false, one of "non_food",
     "shelf_stable", "household". null when track_worthy is true.
 

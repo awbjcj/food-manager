@@ -6,12 +6,14 @@ import pytest
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.cache import get_cached, put_cached
+from app.correction_service import propose_correct
 from app.frozen_shelf_life import FROZEN_DEFAULT_DAYS, resolve_frozen_days
 from app.ingest_service import ingest_photo
-from app.llm import LLMResult, ParseResult, ParsedItem
+from app.llm import CorrectionDiff, LLMResult, ParseResult, ParsedItem
 from app.models import Household, PantryItem, User
-from app.refine_service import ShelfLifeSearchResult
-from tests.fakes import FakeLLMClient, FakeSearchClient
+from app.pantry_service import correct_item, freeze_item
+from app.refine_service import ShelfLifeSearchResult, refine_receipt_items
+from tests.fakes import FakeLLMClient, FakeSearchClient, FakeTextLLMClient
 
 
 @pytest.fixture
@@ -218,3 +220,163 @@ async def test_ingest_frozen_foodkeeper_miss_uses_search(session):
     assert item.shelf_life_source == "frozen_llm"
     assert search.calls == ["frozen Durian"]
     assert summary.uncached_item_ids == []
+
+
+def _fresh_item(
+    session,
+    *,
+    name="Chicken",
+    normalized="chicken",
+    days=2,
+    today=date(2026, 6, 8),
+    category="meat",
+):
+    item = PantryItem(
+        household_id=1,
+        raw_name=name,
+        normalized_name=normalized,
+        category=category,
+        qty=1.0,
+        purchased_on=today,
+        shelf_life_days=days,
+        shelf_life_source="llm",
+        ingest_shelf_life_source="llm",
+        expires_on=today + timedelta(days=days),
+        status="active",
+        created_via="receipt",
+        created_at=datetime.now(timezone.utc),
+    )
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    assert item.id is not None
+    return item
+
+
+@pytest.mark.asyncio
+async def test_freeze_item_recomputes_expiry_from_today(session):
+    today = date(2026, 6, 8)
+    item = _fresh_item(session, today=today)
+    result = await freeze_item(session, household_id=1, item_id=item.id, today=today)
+    assert result.applied is True
+    session.refresh(item)
+    assert item.storage == "frozen"
+    assert item.frozen_on == today
+    assert item.shelf_life_days == 270
+    assert item.expires_on == today + timedelta(days=270)
+    assert item.shelf_life_source == "frozen_foodkeeper"
+
+
+@pytest.mark.asyncio
+async def test_freeze_item_idempotent(session):
+    today = date(2026, 6, 8)
+    item = _fresh_item(session, today=today)
+    await freeze_item(session, household_id=1, item_id=item.id, today=today)
+    again = await freeze_item(session, household_id=1, item_id=item.id, today=today)
+    assert again.applied is False
+    assert again.was_already is True
+
+
+@pytest.mark.asyncio
+async def test_freeze_item_rejects_non_active(session):
+    today = date(2026, 6, 8)
+    item = _fresh_item(session, today=today)
+    item.status = "eaten"
+    session.add(item)
+    session.commit()
+    result = await freeze_item(session, household_id=1, item_id=item.id, today=today)
+    assert result.applied is False
+    assert result.was_already is True
+
+
+@pytest.mark.asyncio
+async def test_freeze_item_clears_snooze(session):
+    today = date(2026, 6, 8)
+    item = _fresh_item(session, today=today)
+    item.snoozed_until = today + timedelta(days=2)
+    session.add(item)
+    session.commit()
+    await freeze_item(session, household_id=1, item_id=item.id, today=today)
+    session.refresh(item)
+    assert item.snoozed_until is None
+
+
+def test_correct_item_uses_frozen_on_origin(session):
+    purchase = date(2026, 6, 1)
+    freeze_day = date(2026, 6, 8)
+    item = _fresh_item(session, today=purchase)
+    item.storage = "frozen"
+    item.frozen_on = freeze_day
+    session.add(item)
+    session.commit()
+    corrected = correct_item(
+        session,
+        household_id=1,
+        item_id=item.id,
+        days=100,
+        today=freeze_day,
+    )
+    assert corrected.expires_on == freeze_day + timedelta(days=100)
+
+
+@pytest.mark.asyncio
+async def test_propose_correct_uses_frozen_on_origin(session):
+    purchase = date(2026, 6, 1)
+    freeze_day = date(2026, 6, 8)
+    item = _fresh_item(session, today=purchase)
+    item.storage = "frozen"
+    item.frozen_on = freeze_day
+    session.add(item)
+    session.commit()
+    llm = FakeTextLLMClient(
+        canned_correct=(
+            CorrectionDiff(
+                expires_on=freeze_day + timedelta(days=100),
+                cache_action="leave",
+                rationale="freezer timing",
+                confidence=0.9,
+            ),
+            5,
+        )
+    )
+    payload, cost = await propose_correct(
+        session,
+        llm=llm,
+        household_id=1,
+        item=item,
+        user_text="expires in 100 days from frozen",
+        today=freeze_day,
+    )
+    assert cost == 5
+    assert payload.back_computed_days is True
+    assert payload.diff["shelf_life_days"] == {"old": 2, "new": 100}
+
+
+@pytest.mark.asyncio
+async def test_refine_receipt_items_skips_frozen_items(session):
+    purchase = date(2026, 6, 1)
+    freeze_day = date(2026, 6, 8)
+    item = _fresh_item(session, today=purchase)
+    item.storage = "frozen"
+    item.frozen_on = freeze_day
+    original_expires = item.expires_on
+    session.add(item)
+    session.commit()
+    search = FakeSearchClient(
+        default=ShelfLifeSearchResult(
+            days=100,
+            confidence=0.9,
+            cost_micros_usd=10,
+        )
+    )
+    result = await refine_receipt_items(
+        session,
+        search,
+        household_id=1,
+        item_ids=[item.id],
+        today=freeze_day,
+    )
+    session.refresh(item)
+    assert result.updated_ids == []
+    assert item.expires_on == original_expires
+    assert search.calls == []

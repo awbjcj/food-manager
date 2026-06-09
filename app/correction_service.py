@@ -59,6 +59,10 @@ class ProposeCorrectError(Exception):
 CONSERVATIVE_FALLBACK_DAYS = 3
 
 
+def _expiry_origin(item: PantryItem) -> date:
+    return item.frozen_on or item.purchased_on
+
+
 def correct_payload_to_json(payload: CorrectPayload) -> str:
     return payload.model_dump_json()
 
@@ -90,6 +94,8 @@ def _snapshot(item: PantryItem) -> dict[str, Any]:
         "qty": item.qty,
         "unit": item.unit,
         "purchased_on": item.purchased_on.isoformat(),
+        "storage": item.storage,
+        "frozen_on": item.frozen_on.isoformat() if item.frozen_on else None,
         "shelf_life_days": item.shelf_life_days,
         "expires_on": item.expires_on.isoformat(),
         "status": item.status,
@@ -141,17 +147,18 @@ async def propose_correct(
     new_expires = diff.expires_on
     new_days = diff.shelf_life_days
     back_computed = False
+    origin = _expiry_origin(item)
 
     if new_expires is not None and new_days is not None:
-        new_expires = item.purchased_on + timedelta(days=new_days)
+        new_expires = origin + timedelta(days=new_days)
     elif new_expires is not None:
-        delta = (new_expires - item.purchased_on).days
+        delta = (new_expires - origin).days
         if delta < 1 or delta > 730:
-            raise ProposeCorrectError("expires_on out of range for purchase date")
+            raise ProposeCorrectError("expires_on out of range for shelf-life origin")
         new_days = delta
         back_computed = True
     elif new_days is not None:
-        new_expires = item.purchased_on + timedelta(days=new_days)
+        new_expires = origin + timedelta(days=new_days)
 
     payload_diff: dict[str, Optional[dict[str, Any]]] = {
         "name": (
@@ -216,6 +223,7 @@ def apply_correct(
             raise ValueError(f"shelf_life_days {new_days} out of range [1, 730]")
         item.shelf_life_days = new_days
         item.shelf_life_source = "user_correction"
+        item.expires_on = _expiry_origin(item) + timedelta(days=new_days)
     if expires_change is not None:
         item.expires_on = date.fromisoformat(expires_change["new"])
     session.add(item)

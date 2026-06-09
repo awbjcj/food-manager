@@ -594,7 +594,8 @@ Output schema (all keys required; use null for unchanged fields):
 
 You receive (in the user message):
   - item_snapshot: {id, raw_name, normalized_name, category, qty, unit,
-                    purchased_on, shelf_life_days, expires_on, status}
+                    purchased_on, storage, frozen_on, shelf_life_days,
+                    expires_on, status}
   - cache_snapshot: null OR {normalized_name, days, category,
                               source, confidence, learned_at}
   - today: YYYY-MM-DD in the user's local timezone

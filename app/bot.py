@@ -1243,6 +1243,7 @@ async def handle_photo(
                 photo_file_id=file_id,
                 image_bytes=await photo_downloader(file_id),
                 today=today,
+                search=search,
             )
         except LLMProviderNotConfigured:
             await msg.answer(

@@ -1,15 +1,17 @@
 import sqlite3
 import subprocess
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.cache import get_cached, put_cached
 from app.frozen_shelf_life import FROZEN_DEFAULT_DAYS, resolve_frozen_days
+from app.ingest_service import ingest_photo
+from app.llm import LLMResult, ParseResult, ParsedItem
 from app.models import Household, PantryItem, User
 from app.refine_service import ShelfLifeSearchResult
-from tests.fakes import FakeSearchClient
+from tests.fakes import FakeLLMClient, FakeSearchClient
 
 
 @pytest.fixture
@@ -141,3 +143,78 @@ async def test_resolver_default_when_no_search_and_unknown(session):
     assert decision.days == FROZEN_DEFAULT_DAYS
     cached = get_cached(session, 1, "frozen durian")
     assert cached is not None and cached.days == FROZEN_DEFAULT_DAYS
+
+
+def _frozen_parse(name="Ice Cream", category="dairy"):
+    return LLMResult(
+        parse=ParseResult(
+            purchase_date=None,
+            purchase_date_confidence=0.0,
+            items=[
+                ParsedItem(
+                    is_food=True,
+                    name=name,
+                    qty=1.0,
+                    unit=None,
+                    category=category,
+                    est_shelf_life_days=7,
+                    confidence=0.9,
+                    track_worthy=True,
+                    frozen=True,
+                ),
+            ],
+        ),
+        cost_micros_usd=10,
+    )
+
+
+@pytest.mark.asyncio
+async def test_ingest_marks_frozen_item_with_long_expiry(session):
+    today = date(2026, 6, 8)
+    llm = FakeLLMClient(canned=_frozen_parse())
+    summary = await ingest_photo(
+        session,
+        llm,
+        household_id=1,
+        photo_file_id="p1",
+        image_bytes=b"x",
+        today=today,
+    )
+    assert summary.inserted_food_count == 1
+    item = session.get(PantryItem, summary.inserted_item_ids[0])
+    assert item is not None
+    assert item.storage == "frozen"
+    assert item.frozen_on == today
+    assert item.shelf_life_days == 60
+    assert item.expires_on == today + timedelta(days=60)
+    assert item.shelf_life_source == "frozen_foodkeeper"
+    assert summary.uncached_item_ids == []
+
+
+@pytest.mark.asyncio
+async def test_ingest_frozen_foodkeeper_miss_uses_search(session):
+    today = date(2026, 6, 8)
+    llm = FakeLLMClient(canned=_frozen_parse(name="Durian", category="produce"))
+    search = FakeSearchClient(
+        default=ShelfLifeSearchResult(
+            days=150,
+            confidence=0.9,
+            cost_micros_usd=10,
+        )
+    )
+    summary = await ingest_photo(
+        session,
+        llm,
+        household_id=1,
+        photo_file_id="p2",
+        image_bytes=b"x",
+        today=today,
+        search=search,
+    )
+    item = session.get(PantryItem, summary.inserted_item_ids[0])
+    assert item is not None
+    assert item.storage == "frozen"
+    assert item.shelf_life_days == 150
+    assert item.shelf_life_source == "frozen_llm"
+    assert search.calls == ["frozen Durian"]
+    assert summary.uncached_item_ids == []

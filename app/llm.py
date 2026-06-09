@@ -33,6 +33,7 @@ class ParsedItem(BaseModel):
     est_shelf_life_days: int = Field(ge=1, le=730)
     confidence: float = Field(ge=0.0, le=1.0)
     track_worthy: bool = True
+    frozen: bool = False
     exclusion_reason: Optional[str] = None
 
 
@@ -132,6 +133,10 @@ returned line item:
   - qty: display-oriented purchased quantity (1.0 if ambiguous)
   - unit: "gal"|"lb"|"oz"|"g"|"kg"|"ml"|"l"|"ct"|"bunch"|"each"|null
   - category: "dairy"|"produce"|"meat"|"seafood"|"bakery"|"pantry"|"frozen"|"beverage"|"other"
+  - frozen: true ONLY for items sold frozen (ice cream, frozen vegetables or
+    fruit, fish/meat sold frozen, frozen prepared meals, hash browns, frozen
+    pizza). Otherwise false. Set category to the underlying food type
+    (meat/seafood/bakery/dairy/produce/...), not "frozen".
   - est_shelf_life_days: integer 1..730. Conservative estimates. Examples:
         whole milk = 7, fresh chicken = 2, bananas = 5,
         canned beans = 365, fresh bread = 4, eggs = 28

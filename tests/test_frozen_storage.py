@@ -7,7 +7,7 @@ from sqlmodel import SQLModel, Session, create_engine
 
 from app.cache import get_cached, put_cached
 from app.commands import parse_callback
-from app.correction_service import propose_correct
+from app.correction_service import CorrectPayload, apply_correct, propose_correct
 from app.frozen_shelf_life import FROZEN_DEFAULT_DAYS, resolve_frozen_days
 from app.ingest_service import ingest_photo
 from app.llm import CorrectionDiff, LLMResult, ParseResult, ParsedItem
@@ -93,6 +93,21 @@ async def test_resolver_foodkeeper_hit_and_caches(session):
 
 
 @pytest.mark.asyncio
+async def test_resolver_handles_already_frozen_normalized_names(session):
+    decision = await resolve_frozen_days(
+        session,
+        household_id=1,
+        normalized_name="frozen peas",
+        food_name="Frozen Peas 12 oz",
+    )
+    assert decision.source == "frozen_foodkeeper"
+    assert decision.days == 300
+    assert get_cached(session, 1, "frozen frozen peas") is None
+    cached = get_cached(session, 1, "frozen peas")
+    assert cached is not None and cached.days == 300
+
+
+@pytest.mark.asyncio
 async def test_resolver_cache_hit(session):
     put_cached(
         session,
@@ -132,7 +147,29 @@ async def test_resolver_search_fallback_for_unknown_food(session):
     )
     assert decision.source == "frozen_llm"
     assert decision.days == 150
+    assert search.calls == ["frozen Durian"]
     assert get_cached(session, 1, "frozen durian") is not None
+
+
+@pytest.mark.asyncio
+async def test_resolver_search_name_does_not_double_frozen_prefix(session):
+    search = FakeSearchClient(
+        default=ShelfLifeSearchResult(
+            days=150,
+            confidence=0.9,
+            cost_micros_usd=10,
+        )
+    )
+    decision = await resolve_frozen_days(
+        session,
+        household_id=1,
+        normalized_name="frozen durian",
+        food_name="Frozen Durian",
+        search=search,
+    )
+    assert decision.source == "frozen_llm"
+    assert decision.days == 150
+    assert search.calls == ["Frozen Durian"]
 
 
 @pytest.mark.asyncio
@@ -321,6 +358,26 @@ def test_correct_item_uses_frozen_on_origin(session):
     assert corrected.expires_on == freeze_day + timedelta(days=100)
 
 
+def test_correct_item_updates_frozen_cache_key(session):
+    purchase = date(2026, 6, 1)
+    freeze_day = date(2026, 6, 8)
+    item = _fresh_item(session, today=purchase)
+    item.storage = "frozen"
+    item.frozen_on = freeze_day
+    session.add(item)
+    session.commit()
+    correct_item(
+        session,
+        household_id=1,
+        item_id=item.id,
+        days=100,
+        today=freeze_day,
+    )
+    assert get_cached(session, 1, "chicken") is None
+    cached = get_cached(session, 1, "frozen chicken")
+    assert cached is not None and cached.days == 100
+
+
 @pytest.mark.asyncio
 async def test_propose_correct_uses_frozen_on_origin(session):
     purchase = date(2026, 6, 1)
@@ -330,6 +387,15 @@ async def test_propose_correct_uses_frozen_on_origin(session):
     item.frozen_on = freeze_day
     session.add(item)
     session.commit()
+    put_cached(
+        session,
+        1,
+        "frozen chicken",
+        days=120,
+        category="meat",
+        confidence=1.0,
+        source="user_correction",
+    )
     llm = FakeTextLLMClient(
         canned_correct=(
             CorrectionDiff(
@@ -352,6 +418,42 @@ async def test_propose_correct_uses_frozen_on_origin(session):
     assert cost == 5
     assert payload.back_computed_days is True
     assert payload.diff["shelf_life_days"] == {"old": 2, "new": 100}
+    assert llm.correct_calls[0]["cache_snapshot"]["normalized_name"] == "frozen chicken"
+
+
+def test_apply_correct_moves_frozen_cache_key(session):
+    purchase = date(2026, 6, 1)
+    freeze_day = date(2026, 6, 8)
+    item = _fresh_item(session, today=purchase)
+    item.storage = "frozen"
+    item.frozen_on = freeze_day
+    session.add(item)
+    put_cached(
+        session,
+        1,
+        "frozen chicken",
+        days=270,
+        category="meat",
+        confidence=1.0,
+        source="user_correction",
+    )
+    payload = CorrectPayload(
+        diff={
+            "name": {"old": "Chicken", "new": "Turkey"},
+            "category": None,
+            "expires_on": None,
+            "shelf_life_days": {"old": 2, "new": 240},
+        },
+        cache_action="move",
+        rationale="corrected frozen item",
+        confidence=0.9,
+    )
+    apply_correct(session, household_id=1, item=item, payload=payload)
+    session.flush()
+    assert get_cached(session, 1, "frozen chicken") is None
+    assert get_cached(session, 1, "turkey") is None
+    cached = get_cached(session, 1, "frozen turkey")
+    assert cached is not None and cached.days == 240
 
 
 @pytest.mark.asyncio

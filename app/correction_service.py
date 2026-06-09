@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.cache import get_cached, put_cached, write_user_correction
+from app.frozen_shelf_life import storage_cache_key
 from app.llm import TextLLMClient
 from app.refine_service import ShelfLifeSearchClient, resolve_search_days
 from app.models import PantryItem, ShelfLifeCache
@@ -61,6 +62,10 @@ CONSERVATIVE_FALLBACK_DAYS = 3
 
 def _expiry_origin(item: PantryItem) -> date:
     return item.frozen_on or item.purchased_on
+
+
+def _cache_key_for_item(item: PantryItem) -> str:
+    return storage_cache_key(item.normalized_name, item.storage)
 
 
 def correct_payload_to_json(payload: CorrectPayload) -> str:
@@ -128,7 +133,7 @@ async def propose_correct(
     user_text: str,
     today: date,
 ) -> tuple[CorrectPayload, Optional[int]]:
-    cache_row = get_cached(session, household_id, item.normalized_name)
+    cache_row = get_cached(session, household_id, _cache_key_for_item(item))
     diff, cost = await llm.parse_correct(
         item_snapshot=_snapshot(item),
         cache_snapshot=_cache_snapshot(cache_row),
@@ -206,6 +211,7 @@ def apply_correct(
     payload: CorrectPayload,
 ) -> None:
     old_normalized = item.normalized_name
+    old_storage = item.storage
 
     name_change = payload.diff.get("name")
     category_change = payload.diff.get("category")
@@ -229,18 +235,20 @@ def apply_correct(
     session.add(item)
 
     new_normalized = item.normalized_name
+    old_cache_key = storage_cache_key(old_normalized, old_storage)
+    new_cache_key = storage_cache_key(new_normalized, item.storage)
     new_days = item.shelf_life_days
     new_category = item.category
 
     if payload.cache_action == "move":
-        old_row = session.get(ShelfLifeCache, (household_id, old_normalized))
-        if old_row is not None and old_normalized != new_normalized:
+        old_row = session.get(ShelfLifeCache, (household_id, old_cache_key))
+        if old_row is not None and old_cache_key != new_cache_key:
             session.delete(old_row)
             session.flush()
         write_user_correction(
             session,
             household_id,
-            new_normalized,
+            new_cache_key,
             days=new_days,
             category=new_category,
             commit=False,
@@ -249,7 +257,7 @@ def apply_correct(
         write_user_correction(
             session,
             household_id,
-            new_normalized,
+            new_cache_key,
             days=new_days,
             category=new_category,
             commit=False,
@@ -259,7 +267,7 @@ def apply_correct(
             write_user_correction(
                 session,
                 household_id,
-                new_normalized,
+                new_cache_key,
                 days=new_days,
                 category=new_category,
                 commit=False,

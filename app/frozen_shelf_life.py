@@ -45,11 +45,31 @@ _FOODKEEPER_FREEZER_DAYS: dict[str, int] = {
 
 
 def frozen_cache_key(normalized_name: str) -> str:
-    return f"frozen {normalized_name}"
+    return f"frozen {_canonical_frozen_name(normalized_name)}"
+
+
+def storage_cache_key(normalized_name: str, storage: str) -> str:
+    if storage == "frozen":
+        return frozen_cache_key(normalized_name)
+    return normalized_name
+
+
+def _canonical_frozen_name(normalized_name: str) -> str:
+    value = normalized_name.strip()
+    while value.startswith("frozen "):
+        value = value[len("frozen "):].strip()
+    return value
+
+
+def _frozen_search_name(food_name: str) -> str:
+    value = food_name.strip()
+    if value.lower().startswith("frozen "):
+        return value
+    return f"frozen {value}"
 
 
 def lookup_foodkeeper(normalized_name: str) -> Optional[int]:
-    return _FOODKEEPER_FREEZER_DAYS.get(normalized_name)
+    return _FOODKEEPER_FREEZER_DAYS.get(_canonical_frozen_name(normalized_name))
 
 
 @dataclass(frozen=True)
@@ -94,7 +114,7 @@ async def resolve_frozen_days(
     if search is not None:
         try:
             result = await search.lookup_shelf_life(
-                name=f"frozen {food_name}",
+                name=_frozen_search_name(food_name),
                 category=None,
             )
         except Exception:

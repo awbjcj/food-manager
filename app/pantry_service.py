@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Literal, Optional
 from sqlmodel import Session, col, select
 
 from app.cache import write_user_correction
-from app.frozen_shelf_life import resolve_frozen_days
+from app.frozen_shelf_life import resolve_frozen_days, storage_cache_key
 from app.models import PantryItem, PendingCorrection, Receipt
 from app.pending_service import expire_for_item
 
@@ -207,7 +207,7 @@ def correct_item(
     write_user_correction(
         session,
         household_id,
-        pantry_item.normalized_name,
+        storage_cache_key(pantry_item.normalized_name, pantry_item.storage),
         days=days,
         category=pantry_item.category,
         commit=False,

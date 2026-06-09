@@ -275,6 +275,29 @@ async def test_act_callback_skips_edit_when_already_eaten(session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_act_freeze_callback_extends_expiry(session, monkeypatch):
+    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    today = date(2026, 5, 26)
+    item = _add_item(session, name="Chicken", days=2)
+    cb = _cb(f"act:freeze:{item.id}")
+    cb.message.edit_text = AsyncMock()
+    await handle_callback(
+        cb,
+        session_factory=lambda: session,
+        now_provider=lambda tz: datetime.combine(
+            today,
+            datetime.min.time(),
+            timezone.utc,
+        ),
+    )
+    frozen = session.get(PantryItem, item.id)
+    assert frozen is not None
+    assert frozen.storage == "frozen"
+    assert frozen.frozen_on == today
+    assert frozen.expires_on == today + timedelta(days=270)
+
+
+@pytest.mark.asyncio
 async def test_show_all_callback_sends_due_items_followup(session, monkeypatch):
     monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)

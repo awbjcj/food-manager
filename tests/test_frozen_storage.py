@@ -6,6 +6,7 @@ import pytest
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.cache import get_cached, put_cached
+from app.commands import parse_callback
 from app.correction_service import propose_correct
 from app.frozen_shelf_life import FROZEN_DEFAULT_DAYS, resolve_frozen_days
 from app.ingest_service import ingest_photo
@@ -380,3 +381,9 @@ async def test_refine_receipt_items_skips_frozen_items(session):
     assert result.updated_ids == []
     assert item.expires_on == original_expires
     assert search.calls == []
+
+
+def test_parse_callback_freeze():
+    action = parse_callback("act:freeze:42")
+    assert action.verb == "freeze"
+    assert action.item_id == 42

@@ -5,7 +5,11 @@ from datetime import date, datetime, timezone
 import pytest
 from sqlmodel import SQLModel, Session, create_engine
 
+from app.cache import get_cached, put_cached
+from app.frozen_shelf_life import FROZEN_DEFAULT_DAYS, resolve_frozen_days
 from app.models import Household, PantryItem, User
+from app.refine_service import ShelfLifeSearchResult
+from tests.fakes import FakeSearchClient
 
 
 @pytest.fixture
@@ -65,3 +69,75 @@ def test_migration_0012_adds_frozen_columns(tmp_path, monkeypatch):
     con.close()
     assert "storage" in cols
     assert "frozen_on" in cols
+
+
+@pytest.mark.asyncio
+async def test_resolver_foodkeeper_hit_and_caches(session):
+    decision = await resolve_frozen_days(
+        session,
+        household_id=1,
+        normalized_name="chicken",
+        food_name="Chicken",
+    )
+    assert decision.source == "frozen_foodkeeper"
+    assert decision.cache_was_hit is False
+    assert decision.days == 270
+    cached = get_cached(session, 1, "frozen chicken")
+    assert cached is not None and cached.days == 270
+
+
+@pytest.mark.asyncio
+async def test_resolver_cache_hit(session):
+    put_cached(
+        session,
+        1,
+        "frozen chicken",
+        days=200,
+        category=None,
+        confidence=0.9,
+        source="llm",
+    )
+    decision = await resolve_frozen_days(
+        session,
+        household_id=1,
+        normalized_name="chicken",
+        food_name="Chicken",
+    )
+    assert decision.source == "cache"
+    assert decision.cache_was_hit is True
+    assert decision.days == 200
+
+
+@pytest.mark.asyncio
+async def test_resolver_search_fallback_for_unknown_food(session):
+    search = FakeSearchClient(
+        default=ShelfLifeSearchResult(
+            days=150,
+            confidence=0.9,
+            cost_micros_usd=10,
+        )
+    )
+    decision = await resolve_frozen_days(
+        session,
+        household_id=1,
+        normalized_name="durian",
+        food_name="Durian",
+        search=search,
+    )
+    assert decision.source == "frozen_llm"
+    assert decision.days == 150
+    assert get_cached(session, 1, "frozen durian") is not None
+
+
+@pytest.mark.asyncio
+async def test_resolver_default_when_no_search_and_unknown(session):
+    decision = await resolve_frozen_days(
+        session,
+        household_id=1,
+        normalized_name="durian",
+        food_name="Durian",
+    )
+    assert decision.source == "frozen_default"
+    assert decision.days == FROZEN_DEFAULT_DAYS
+    cached = get_cached(session, 1, "frozen durian")
+    assert cached is not None and cached.days == FROZEN_DEFAULT_DAYS

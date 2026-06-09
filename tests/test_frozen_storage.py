@@ -1,3 +1,5 @@
+import sqlite3
+import subprocess
 from datetime import date, datetime, timezone
 
 import pytest
@@ -47,3 +49,19 @@ def test_pantryitem_storage_defaults(session):
     session.refresh(item)
     assert item.storage == "default"
     assert item.frozen_on is None
+
+
+def test_migration_0012_adds_frozen_columns(tmp_path, monkeypatch):
+    db = tmp_path / "m.db"
+    monkeypatch.setenv("DATABASE_PATH", str(db))
+    result = subprocess.run(
+        ["uv", "run", "alembic", "upgrade", "head"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    con = sqlite3.connect(str(db))
+    cols = {row[1] for row in con.execute("PRAGMA table_info('pantryitem')").fetchall()}
+    con.close()
+    assert "storage" in cols
+    assert "frozen_on" in cols

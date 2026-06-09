@@ -14,6 +14,7 @@ from app.llm import CorrectionDiff, LLMResult, ParseResult, ParsedItem
 from app.models import Household, PantryItem, User
 from app.pantry_service import correct_item, freeze_item
 from app.refine_service import ShelfLifeSearchResult, refine_receipt_items
+from app.renderer import build_digest_keyboard, render_item_line
 from tests.fakes import FakeLLMClient, FakeSearchClient, FakeTextLLMClient
 
 
@@ -387,3 +388,34 @@ def test_parse_callback_freeze():
     action = parse_callback("act:freeze:42")
     assert action.verb == "freeze"
     assert action.item_id == 42
+
+
+def test_digest_keyboard_includes_freeze_button():
+    rows = build_digest_keyboard([7], has_more=False, lang="en")
+    labels = [button.text for button in rows[0]]
+    datas = [button.callback_data for button in rows[0]]
+    assert "❄️ Freeze" in labels
+    assert "act:freeze:7" in datas
+
+
+def test_render_item_line_frozen_badge(session):
+    today = date(2026, 6, 8)
+    item = _fresh_item(session, name="Chicken", today=today)
+    item.storage = "frozen"
+    item.frozen_on = today
+    line = render_item_line(item, today=today, lang="en")
+    assert "❄️" in line
+
+
+def test_render_item_line_default_has_no_badge(session):
+    today = date(2026, 6, 8)
+    item = _fresh_item(
+        session,
+        name="Milk",
+        normalized="milk",
+        days=2,
+        today=today,
+        category="dairy",
+    )
+    line = render_item_line(item, today=today, lang="en")
+    assert "❄️" not in line

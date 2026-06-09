@@ -253,7 +253,12 @@ def test_terminal_state_zh():
 
 def test_digest_keyboard_en_button_labels_unchanged():
     rows = build_digest_keyboard([1], has_more=False)
-    assert [b.text for b in rows[0]] == ["Ate", "Tossed", "Remind +2d"]
+    assert [b.text for b in rows[0]] == [
+        "Ate",
+        "Tossed",
+        "Remind +2d",
+        "❄️ Freeze",
+    ]
 
 
 def test_digest_keyboard_en_show_all_unchanged():
@@ -266,6 +271,7 @@ def test_digest_keyboard_callback_data_unchanged():
     assert rows[0][0].callback_data == "act:ate:42"
     assert rows[0][1].callback_data == "act:toss:42"
     assert rows[0][2].callback_data == "act:snooze2:42"
+    assert rows[0][3].callback_data == "act:freeze:42"
     assert rows[1][0].callback_data == "show:all"
 
 
@@ -275,6 +281,7 @@ def test_digest_keyboard_zh_button_labels():
     assert labels[0] == "吃掉"
     assert labels[1] == "扔掉"
     assert labels[2] == "提醒 +2天"
+    assert labels[3] == "❄️ 冷冻"
 
 
 def test_digest_keyboard_zh_show_all():

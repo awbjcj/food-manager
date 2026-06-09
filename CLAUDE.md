@@ -87,6 +87,19 @@ A household can have multiple members who share everything household-scoped (pan
 - **Join notifications**: on a successful redeem, `_notify_household_join` best-effort DMs every existing member (in their own language) that someone joined; failures are swallowed so a blocked chat never breaks the join.
 - A removed/left user's `User` row is deleted (deauthorized) and their digest job is cancelled via the `unschedule` callback wired in `bin/run.py`.
 
+### Frozen storage state (v4.6)
+
+`PantryItem.storage` (`default | frozen`) is a storage axis orthogonal to `category`:
+`category` is what the food is, and `storage` is how it is kept for shelf-life
+purposes. Expiry is `(frozen_on or purchased_on) + shelf_life_days`; `frozen_on`
+is set when an item enters the freezer (purchase date for LLM-flagged frozen buys,
+today for a `❄️ Freeze` tap). Frozen durations come from
+`app/frozen_shelf_life.py` (`resolve_frozen_days`): cache -> vendored USDA
+FoodKeeper table -> the existing `ShelfLifeSearchClient` queried as
+`"frozen <food>"` -> a cached 90-day default. Freezing is one-way (no thaw).
+Frozen items are excluded from the post-ingest fresh web-search refine path and,
+with their long expiries, fall out of the 7-day digest window automatically.
+
 ### Database
 
 SQLite via SQLModel/SQLAlchemy. Migrations managed by Alembic in `migrations/`. The `DATABASE_PATH` env var (default `./food.db`) is passed to both Alembic and the app engine.

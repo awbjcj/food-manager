@@ -5,8 +5,11 @@ import pytest
 from app.commands import (
     CallbackAction,
     CommandError,
+    ItemAction,
     parse_callback,
+    parse_correct_reply_marker,
     parse_digest_at,
+    parse_item_callback,
     parse_item_id_arg,
     parse_llm_provider,
     parse_list_filter,
@@ -55,6 +58,39 @@ def test_callback_parser():
     assert parse_callback("show:all") == CallbackAction(verb="show_all", item_id=None)
     with pytest.raises(CommandError):
         parse_callback("act:nope:1")
+
+
+def test_parse_item_callback_kinds():
+    assert parse_item_callback("item:open:3") == ItemAction(kind="open", item_id=3)
+    assert parse_item_callback("item:corr:3") == ItemAction(kind="corr", item_id=3)
+    assert parse_item_callback("item:ctext:3") == ItemAction(kind="ctext", item_id=3)
+    assert parse_item_callback("item:rm:3") == ItemAction(kind="rm", item_id=3)
+    assert parse_item_callback("item:rmok:3") == ItemAction(kind="rmok", item_id=3)
+    assert parse_item_callback("item:list") == ItemAction(kind="list", item_id=None)
+    assert parse_item_callback("item:nudge:3:p7") == ItemAction(
+        kind="nudge",
+        item_id=3,
+        nudge_code="p7",
+    )
+
+
+def test_parse_item_callback_rejects_bad():
+    for bad in (
+        "item:open:x",
+        "item:nudge:3:zz",
+        "item:nudge:3",
+        "item:bogus:3",
+        "act:ate:3",
+        "item:",
+    ):
+        with pytest.raises(CommandError):
+            parse_item_callback(bad)
+
+
+def test_parse_correct_reply_marker():
+    assert parse_correct_reply_marker("fix #3 spinach [correct:#3]") == 3
+    assert parse_correct_reply_marker("no marker here") is None
+    assert parse_correct_reply_marker(None) is None
 
 
 def _summary(**kwargs) -> IngestSummary:

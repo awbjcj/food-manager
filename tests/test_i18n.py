@@ -74,3 +74,16 @@ def test_translation_placeholders_match_english():
         en_ph = _placeholders(variants["en"])
         for lang, template in variants.items():
             assert _placeholders(template) == en_ph, f"{key}/{lang} placeholder mismatch"
+
+
+def test_v48_card_keys_present_en():
+    assert t("btn.correct", "en") == "✏️ Correct"
+    assert t("btn.remove", "en") == "❌ Remove"
+    assert t("btn.back_to_list", "en") == "⬅ Back to list"
+    assert t("btn.back", "en") == "⬅ Back"
+    assert t("btn.remove_yes", "en") == "✅ Yes, remove"
+    assert t("btn.correct_other", "en") == "💬 Something else…"
+    assert "[correct:#7]" in t("correct.freetext_prompt", "en", id=7, name="milk")
+    assert t("remove.confirm", "en", id=3, name="spinach") == (
+        "Remove #3 spinach?\nThis can't be undone here."
+    )

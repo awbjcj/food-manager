@@ -121,6 +121,7 @@ async def resolve_frozen_days(
             result = None
         days = resolve_search_days(result) if result is not None else None
         if days is not None:
+            assert result is not None
             put_cached(
                 session,
                 household_id,

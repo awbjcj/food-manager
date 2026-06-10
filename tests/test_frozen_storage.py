@@ -10,7 +10,7 @@ from app.commands import parse_callback
 from app.correction_service import CorrectPayload, apply_correct, propose_correct
 from app.frozen_shelf_life import FROZEN_DEFAULT_DAYS, resolve_frozen_days
 from app.ingest_service import ingest_photo
-from app.llm import CorrectionDiff, LLMResult, ParseResult, ParsedItem
+from app.llm import Category, CorrectionDiff, LLMResult, ParseResult, ParsedItem
 from app.models import Household, PantryItem, User
 from app.pantry_service import correct_item, freeze_item
 from app.refine_service import ShelfLifeSearchResult, refine_receipt_items
@@ -186,7 +186,7 @@ async def test_resolver_default_when_no_search_and_unknown(session):
     assert cached is not None and cached.days == FROZEN_DEFAULT_DAYS
 
 
-def _frozen_parse(name="Ice Cream", category="dairy"):
+def _frozen_parse(name: str = "Ice Cream", category: Category = "dairy"):
     return LLMResult(
         parse=ParseResult(
             purchase_date=None,
@@ -264,11 +264,11 @@ async def test_ingest_frozen_foodkeeper_miss_uses_search(session):
 def _fresh_item(
     session,
     *,
-    name="Chicken",
-    normalized="chicken",
-    days=2,
-    today=date(2026, 6, 8),
-    category="meat",
+    name: str = "Chicken",
+    normalized: str = "chicken",
+    days: int = 2,
+    today: date = date(2026, 6, 8),
+    category: Category = "meat",
 ):
     item = PantryItem(
         household_id=1,
@@ -296,6 +296,7 @@ def _fresh_item(
 async def test_freeze_item_recomputes_expiry_from_today(session):
     today = date(2026, 6, 8)
     item = _fresh_item(session, today=today)
+    assert item.id is not None
     result = await freeze_item(session, household_id=1, item_id=item.id, today=today)
     assert result.applied is True
     session.refresh(item)
@@ -310,6 +311,7 @@ async def test_freeze_item_recomputes_expiry_from_today(session):
 async def test_freeze_item_idempotent(session):
     today = date(2026, 6, 8)
     item = _fresh_item(session, today=today)
+    assert item.id is not None
     await freeze_item(session, household_id=1, item_id=item.id, today=today)
     again = await freeze_item(session, household_id=1, item_id=item.id, today=today)
     assert again.applied is False
@@ -320,6 +322,7 @@ async def test_freeze_item_idempotent(session):
 async def test_freeze_item_rejects_non_active(session):
     today = date(2026, 6, 8)
     item = _fresh_item(session, today=today)
+    assert item.id is not None
     item.status = "eaten"
     session.add(item)
     session.commit()
@@ -332,6 +335,7 @@ async def test_freeze_item_rejects_non_active(session):
 async def test_freeze_item_clears_snooze(session):
     today = date(2026, 6, 8)
     item = _fresh_item(session, today=today)
+    assert item.id is not None
     item.snoozed_until = today + timedelta(days=2)
     session.add(item)
     session.commit()
@@ -348,6 +352,7 @@ def test_correct_item_uses_frozen_on_origin(session):
     item.frozen_on = freeze_day
     session.add(item)
     session.commit()
+    assert item.id is not None
     corrected = correct_item(
         session,
         household_id=1,
@@ -366,6 +371,7 @@ def test_correct_item_updates_frozen_cache_key(session):
     item.frozen_on = freeze_day
     session.add(item)
     session.commit()
+    assert item.id is not None
     correct_item(
         session,
         household_id=1,
@@ -466,6 +472,7 @@ async def test_refine_receipt_items_skips_frozen_items(session):
     original_expires = item.expires_on
     session.add(item)
     session.commit()
+    assert item.id is not None
     search = FakeSearchClient(
         default=ShelfLifeSearchResult(
             days=100,

@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Optional, Protocol
 
-from app.cook_models import Purpose, RecipeCriteria
+from app.cook_models import (
+    NutritionScore,
+    Purpose,
+    RecipeCandidate,
+    RecipeCriteria,
+    RecipeIngredient,
+    SourcedRecipe,
+)
 from app.profile_service import FoodProfile
 
 log = logging.getLogger(__name__)
@@ -78,3 +85,117 @@ def spoonacular_params(criteria: RecipeCriteria, *, api_key: str) -> dict:
     if sort:
         params["sort"] = sort
     return params
+
+
+_SPOON_URL = "https://api.spoonacular.com/recipes/complexSearch"
+
+
+def _effort_for(minutes: Optional[int]) -> str:
+    if minutes is None:
+        return "medium"
+    if minutes <= 20:
+        return "easy"
+    if minutes <= 45:
+        return "medium"
+    return "hard"
+
+
+def _nutrition_rationale(raw: dict) -> str:
+    nutrients = (raw.get("nutrition") or {}).get("nutrients") or []
+    wanted = {"Calories": None, "Protein": None, "Fat": None, "Carbohydrates": None}
+    for nutrient in nutrients:
+        if nutrient.get("name") in wanted:
+            wanted[nutrient["name"]] = (
+                f"{round(nutrient.get('amount', 0))}{nutrient.get('unit', '')}"
+            )
+    parts = [f"{name} {value}" for name, value in wanted.items() if value]
+    return ", ".join(parts) if parts else "nutrition from recipe database"
+
+
+def map_spoonacular(payload: dict) -> list[SourcedRecipe]:
+    out: list[SourcedRecipe] = []
+    for raw in payload.get("results", []):
+        ingredients = [
+            RecipeIngredient(
+                name=ingredient.get("name", ""),
+                qty=ingredient.get("amount"),
+                unit=ingredient.get("unit") or None,
+            )
+            for ingredient in (raw.get("extendedIngredients") or [])
+            if ingredient.get("name")
+        ]
+        steps = [
+            step.get("step", "")
+            for block in (raw.get("analyzedInstructions") or [])
+            for step in (block.get("steps") or [])
+        ]
+        method = " ".join(steps).strip()[:500] or "See source for full method."
+        cuisines = raw.get("cuisines") or []
+        minutes = raw.get("readyInMinutes")
+        recipe = RecipeCandidate(
+            title=raw.get("title", "Untitled"),
+            cuisine=cuisines[0] if cuisines else "various",
+            source_url=raw.get("sourceUrl"),
+            ingredients=ingredients or [RecipeIngredient(name="(see source)")],
+            method_gist=method,
+            deliciousness=max(
+                0.0,
+                min(
+                    1.0,
+                    (50.0 if raw.get("spoonacularScore") is None else raw["spoonacularScore"])
+                    / 100.0,
+                ),
+            ),
+        )
+        nutrition = NutritionScore(
+            health_score=int(50 if raw.get("healthScore") is None else raw["healthScore"]),
+            effort=_effort_for(minutes),
+            est_minutes=int(minutes) if minutes else 30,
+            rationale=_nutrition_rationale(raw),
+        )
+        raw_id = raw.get("id")
+        out.append(
+            SourcedRecipe(
+                recipe=recipe,
+                nutrition=nutrition,
+                external_id=None if raw_id is None else str(raw_id),
+            )
+        )
+    return out
+
+
+class RecipeSource(Protocol):
+    def available(self) -> bool: ...
+    async def search(
+        self, criteria: RecipeCriteria
+    ) -> tuple[list[SourcedRecipe], Optional[int]]: ...
+
+
+class SpoonacularSource:
+    def __init__(self, *, http, api_key: Optional[str], timeout: float = 12.0):
+        self._http = http
+        self._api_key = api_key
+        self._timeout = timeout
+
+    def available(self) -> bool:
+        return bool(self._api_key)
+
+    async def search(
+        self, criteria: RecipeCriteria
+    ) -> tuple[list[SourcedRecipe], Optional[int]]:
+        if not self._api_key:
+            return [], None
+        try:
+            response = await self._http.get(
+                _SPOON_URL,
+                params=spoonacular_params(criteria, api_key=self._api_key),
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+            return map_spoonacular(response.json()), None
+        except Exception as exc:
+            log.warning(
+                "spoonacular_search_failed",
+                extra={"error_class": type(exc).__name__},
+            )
+            return [], None

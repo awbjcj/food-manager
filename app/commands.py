@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.i18n import LANGS
 from app.pantry_service import (
     ALLOWED_CATEGORIES,
+    NUDGE_CODES,
     ListFilter,
     SNOOZE_DAYS_DEFAULT,
     SNOOZE_DAYS_MAX,
@@ -269,7 +270,7 @@ def parse_item_callback(data: str) -> ItemAction:
             raise CommandError(f"bad item callback {data!r}")
         return ItemAction(kind="list")
     if kind == "nudge":
-        if len(parts) != 4 or parts[3] not in ("p7", "p3", "m3", "today"):
+        if len(parts) != 4 or parts[3] not in NUDGE_CODES:
             raise CommandError(f"bad item nudge {data!r}")
         try:
             return ItemAction(kind="nudge", item_id=int(parts[2]), nudge_code=parts[3])

@@ -183,6 +183,7 @@ def render_digest(
 
     has_more = cap is not None and total > cap
     if has_more:
+        assert cap is not None  # narrowed by has_more; keeps `total - cap` type-safe
         lines.append(t("digest.more", lang, n=total - cap))
 
     return DigestRender(

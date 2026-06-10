@@ -266,7 +266,7 @@ async def test_act_callback_clears_digest_when_no_items_remain(session, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_act_callback_skips_edit_when_already_eaten(session, monkeypatch):
+async def test_act_callback_refreshes_digest_when_already_eaten(session, monkeypatch):
     monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     already_id = _add_item(session, name="Stale", days=2, status="eaten").id

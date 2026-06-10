@@ -77,6 +77,16 @@ def test_settings_load_openai_provider_from_env(monkeypatch):
     assert settings.openai_text_model == "gpt-5.4-mini"
 
 
+def test_recipe_api_keys_optional(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
+    monkeypatch.setenv("ALLOWED_TELEGRAM_USER_ID", "1")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    settings = Settings()  # type: ignore[call-arg]
+    assert settings.spoonacular_api_key is None
+    monkeypatch.setenv("SPOONACULAR_API_KEY", "spk")
+    assert Settings().spoonacular_api_key == "spk"  # type: ignore[call-arg]
+
+
 def test_make_engine_and_session_factory(tmp_path):
     db = tmp_path / "t.db"
     engine = make_engine(str(db))

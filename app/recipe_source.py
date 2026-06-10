@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json as _json
 import logging
 from typing import Optional, Protocol
 
+from app.cook_logic import violates_exclusions
 from app.cook_models import (
     NutritionScore,
     Purpose,
@@ -280,3 +282,88 @@ class TheMealDbSource:
             nutrition=nutrition,
             external_id=f"mealdb:{meal.get('idMeal')}",
         )
+
+
+class LlmRecipeSource:
+    """Last-resort source: the existing recipe LLM plus nutrition LLM."""
+
+    def __init__(self, *, recipe_llm, nutrition_llm):
+        self._recipe_llm = recipe_llm
+        self._nutrition_llm = nutrition_llm
+
+    def available(self) -> bool:
+        return self._recipe_llm is not None and self._nutrition_llm is not None
+
+    async def search(
+        self, criteria: RecipeCriteria
+    ) -> tuple[list[SourcedRecipe], Optional[int]]:
+        if not self.available():
+            return [], None
+        prompt = _json.dumps(
+            {
+                "ingredients": criteria.include_ingredients,
+                "meal_type": criteria.meal_type,
+                "cuisine": criteria.cuisine,
+                "purpose": criteria.purpose.value,
+                "must_avoid": criteria.exclude_ingredients,
+            },
+            sort_keys=True,
+        )
+        total: Optional[int] = 0
+        recipes, recipe_cost = await self._recipe_llm.fetch_recipes(prompt=prompt)
+        total = None if recipe_cost is None else (total or 0) + recipe_cost
+        candidates = [
+            candidate
+            for candidate in recipes.candidates
+            if not violates_exclusions(
+                [ingredient.name for ingredient in candidate.ingredients],
+                exclusions=criteria.exclude_ingredients,
+            )
+        ]
+        if recipes.candidates and not candidates and criteria.exclude_ingredients:
+            violated = sorted(
+                {
+                    ingredient.name
+                    for candidate in recipes.candidates
+                    for ingredient in candidate.ingredients
+                    if violates_exclusions(
+                        [ingredient.name],
+                        exclusions=criteria.exclude_ingredients,
+                    )
+                }
+            )
+            regenerated, regen_cost = await self._recipe_llm.fetch_recipes(
+                prompt=_json.dumps(
+                    {
+                        "ingredients": criteria.include_ingredients,
+                        "meal_type": criteria.meal_type,
+                        "cuisine": criteria.cuisine,
+                        "purpose": criteria.purpose.value,
+                        "must_avoid": criteria.exclude_ingredients,
+                        "violated_ingredients": violated,
+                    },
+                    sort_keys=True,
+                )
+            )
+            total = None if total is None or regen_cost is None else total + regen_cost
+            candidates = [
+                candidate
+                for candidate in regenerated.candidates
+                if not violates_exclusions(
+                    [ingredient.name for ingredient in candidate.ingredients],
+                    exclusions=criteria.exclude_ingredients,
+                )
+            ]
+        if not candidates:
+            return [], total
+        nutrition, nutrition_cost = await self._nutrition_llm.score(
+            prompt=_json.dumps(
+                {"candidates": [candidate.model_dump() for candidate in candidates]},
+                sort_keys=True,
+            )
+        )
+        total = None if total is None or nutrition_cost is None else total + nutrition_cost
+        out: list[SourcedRecipe] = []
+        for candidate, score in zip(candidates, nutrition.scores):
+            out.append(SourcedRecipe(recipe=candidate, nutrition=score, external_id=None))
+        return out, total

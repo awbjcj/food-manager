@@ -1,8 +1,17 @@
 import pytest
 
-from app.cook_models import Purpose, RecipeCriteria
+from app.cook_models import (
+    NutritionScore,
+    NutritionScores,
+    Purpose,
+    RecipeCandidate,
+    RecipeCandidates,
+    RecipeCriteria,
+    RecipeIngredient,
+)
 from app.profile_service import FoodProfile
 from app.recipe_source import (
+    LlmRecipeSource,
     MEAL_TYPE_TO_SPOON,
     SpoonacularSource,
     TheMealDbSource,
@@ -180,6 +189,34 @@ class _SeqHttp:
         return _FakeResp({"meals": None})
 
 
+class _FakeRecipeLLM:
+    async def fetch_recipes(self, *, prompt):
+        return RecipeCandidates(
+            candidates=[
+                RecipeCandidate(
+                    title="LLM Stew",
+                    cuisine="rustic",
+                    ingredients=[RecipeIngredient(name="carrot")],
+                    method_gist="simmer",
+                )
+            ]
+        ), 1000
+
+
+class _FakeNutritionLLM:
+    async def score(self, *, prompt):
+        return NutritionScores(
+            scores=[
+                NutritionScore(
+                    health_score=55,
+                    effort="medium",
+                    est_minutes=40,
+                    rationale="ok",
+                )
+            ]
+        ), 500
+
+
 @pytest.mark.asyncio
 async def test_spoonacular_source_search_maps_and_counts():
     source = SpoonacularSource(http=_FakeHttp(_FakeResp(_CANNED)), api_key="K")
@@ -235,3 +272,17 @@ async def test_themealdb_empty_yields_empty():
     )
     assert recipes == []
     assert cost is None
+
+
+@pytest.mark.asyncio
+async def test_llm_recipe_source_pairs_recipe_and_nutrition():
+    source = LlmRecipeSource(
+        recipe_llm=_FakeRecipeLLM(),
+        nutrition_llm=_FakeNutritionLLM(),
+    )
+    recipes, cost = await source.search(
+        RecipeCriteria(include_ingredients=["carrot"], purpose=Purpose.SURPRISE)
+    )
+    assert recipes[0].recipe.title == "LLM Stew"
+    assert recipes[0].nutrition.health_score == 55
+    assert cost == 1500

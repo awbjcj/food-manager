@@ -199,3 +199,84 @@ class SpoonacularSource:
                 extra={"error_class": type(exc).__name__},
             )
             return [], None
+
+
+_MEALDB_FILTER_URL = "https://www.themealdb.com/api/json/v1/1/filter.php"
+_MEALDB_LOOKUP_URL = "https://www.themealdb.com/api/json/v1/1/lookup.php"
+
+
+def _mealdb_ingredients(meal: dict) -> list[RecipeIngredient]:
+    out: list[RecipeIngredient] = []
+    for index in range(1, 21):
+        name = (meal.get(f"strIngredient{index}") or "").strip()
+        if not name:
+            continue
+        measure = (meal.get(f"strMeasure{index}") or "").strip() or None
+        out.append(RecipeIngredient(name=name, unit=measure))
+    return out
+
+
+class TheMealDbSource:
+    def __init__(self, *, http, timeout: float = 12.0):
+        self._http = http
+        self._timeout = timeout
+
+    def available(self) -> bool:
+        return True
+
+    async def search(
+        self, criteria: RecipeCriteria
+    ) -> tuple[list[SourcedRecipe], Optional[int]]:
+        if not criteria.include_ingredients:
+            return [], None
+        try:
+            main = criteria.include_ingredients[0]
+            filtered = await self._http.get(
+                _MEALDB_FILTER_URL,
+                params={"i": main},
+                timeout=self._timeout,
+            )
+            filtered.raise_for_status()
+            meals = (filtered.json() or {}).get("meals") or []
+            out: list[SourcedRecipe] = []
+            for stub in meals[: criteria.number]:
+                lookup = await self._http.get(
+                    _MEALDB_LOOKUP_URL,
+                    params={"i": stub["idMeal"]},
+                    timeout=self._timeout,
+                )
+                lookup.raise_for_status()
+                detail = ((lookup.json() or {}).get("meals") or [None])[0]
+                if not detail:
+                    continue
+                out.append(self._to_sourced(detail))
+            return out, None
+        except Exception as exc:
+            log.warning(
+                "themealdb_search_failed",
+                extra={"error_class": type(exc).__name__},
+            )
+            return [], None
+
+    def _to_sourced(self, meal: dict) -> SourcedRecipe:
+        recipe = RecipeCandidate(
+            title=meal.get("strMeal", "Untitled"),
+            cuisine=meal.get("strArea") or "various",
+            source_url=meal.get("strSource") or meal.get("strYoutube"),
+            ingredients=_mealdb_ingredients(meal)
+            or [RecipeIngredient(name="(see source)")],
+            method_gist=(meal.get("strInstructions") or "").strip()[:500]
+            or "See source.",
+            deliciousness=0.5,
+        )
+        nutrition = NutritionScore(
+            health_score=50,
+            effort="medium",
+            est_minutes=30,
+            rationale="nutrition unavailable",
+        )
+        return SourcedRecipe(
+            recipe=recipe,
+            nutrition=nutrition,
+            external_id=f"mealdb:{meal.get('idMeal')}",
+        )

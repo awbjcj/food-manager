@@ -5,6 +5,7 @@ from app.profile_service import FoodProfile
 from app.recipe_source import (
     MEAL_TYPE_TO_SPOON,
     SpoonacularSource,
+    TheMealDbSource,
     build_criteria,
     map_spoonacular,
     spoonacular_params,
@@ -34,6 +35,25 @@ _CANNED = {
                     {"name": "Protein", "amount": 14, "unit": "g"},
                 ]
             },
+        }
+    ]
+}
+
+_MEALDB_FILTER = {"meals": [{"idMeal": "52772"}]}
+_MEALDB_LOOKUP = {
+    "meals": [
+        {
+            "idMeal": "52772",
+            "strMeal": "Teriyaki Chicken",
+            "strArea": "Japanese",
+            "strSource": "https://ex.com/teriyaki",
+            "strInstructions": "Marinate. Grill.",
+            "strIngredient1": "chicken",
+            "strMeasure1": "2",
+            "strIngredient2": "soy",
+            "strMeasure2": "1 tbsp",
+            "strIngredient3": "",
+            "strMeasure3": "",
         }
     ]
 }
@@ -147,6 +167,19 @@ class _FakeHttp:
         return self._response
 
 
+class _SeqHttp:
+    def __init__(self, routes):
+        self.routes = routes
+        self.calls = []
+
+    async def get(self, url, params=None, timeout=None):
+        self.calls.append((url, params))
+        for fragment, payload in self.routes:
+            if fragment in url:
+                return _FakeResp(payload)
+        return _FakeResp({"meals": None})
+
+
 @pytest.mark.asyncio
 async def test_spoonacular_source_search_maps_and_counts():
     source = SpoonacularSource(http=_FakeHttp(_FakeResp(_CANNED)), api_key="K")
@@ -173,6 +206,32 @@ async def test_spoonacular_source_no_key_unavailable():
     assert source.available() is False
     recipes, cost = await source.search(
         RecipeCriteria(include_ingredients=["egg"], purpose=Purpose.USE_IT_UP)
+    )
+    assert recipes == []
+    assert cost is None
+
+
+@pytest.mark.asyncio
+async def test_themealdb_source_maps_recipe_without_nutrition():
+    http = _SeqHttp([("filter.php", _MEALDB_FILTER), ("lookup.php", _MEALDB_LOOKUP)])
+    source = TheMealDbSource(http=http)
+    recipes, cost = await source.search(
+        RecipeCriteria(include_ingredients=["chicken"], purpose=Purpose.USE_IT_UP)
+    )
+    assert recipes
+    assert recipes[0].recipe.title == "Teriyaki Chicken"
+    assert recipes[0].recipe.source_url == "https://ex.com/teriyaki"
+    assert "chicken" in [ingredient.name for ingredient in recipes[0].recipe.ingredients]
+    assert recipes[0].nutrition.rationale == "nutrition unavailable"
+    assert cost is None
+
+
+@pytest.mark.asyncio
+async def test_themealdb_empty_yields_empty():
+    http = _SeqHttp([("filter.php", {"meals": None})])
+    source = TheMealDbSource(http=http)
+    recipes, cost = await source.search(
+        RecipeCriteria(include_ingredients=["unobtainium"], purpose=Purpose.USE_IT_UP)
     )
     assert recipes == []
     assert cost is None

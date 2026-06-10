@@ -9,7 +9,7 @@ from typing import Awaitable, Callable, Optional, cast
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import update
 from sqlmodel import Session
 
@@ -19,6 +19,7 @@ from app.commands import (
     parse_digest_at,
     parse_invite_mode,
     parse_invite_token,
+    parse_item_callback,
     parse_item_id_arg,
     parse_lang,
     parse_llm_provider,
@@ -88,7 +89,9 @@ from app.refine_service import run_receipt_refine
 from app.pantry_service import (
     NotOwnerOrMissing,
     active_pantry_names,
+    compute_nudge_days,
     compute_stats,
+    correct_item,
     freeze_item,
     list_active,
     list_digest_due,
@@ -111,24 +114,30 @@ from app.pending_service import (
 from app.renderer import (
     CallbackButton,
     build_apply_cancel_keyboard,
+    build_correct_menu_keyboard,
     build_cook_result_keyboard,
     build_cook_round_keyboard,
     build_digest_keyboard,
     build_favorites_keyboard,
+    build_item_card_keyboard,
+    build_remove_confirm_keyboard,
     build_shopping_keyboard,
     build_undo_add_keyboard,
     build_undo_keyboard,
     render_add_diff,
     render_applied_add,
     render_applied_correction,
+    render_correct_menu,
     render_correction_diff,
     render_cook_result,
     render_digest,
     render_favorites,
     render_ingest_reply,
+    render_item_card,
     render_list,
     render_profile,
     render_recook,
+    render_remove_confirm,
     render_shopping_list,
     render_stats,
     render_terminal_state,
@@ -1657,6 +1666,155 @@ async def run_cook_and_render(
         )
 
 
+async def handle_item_callback(
+    cb, *, session_factory, now_provider, translation_llm=None
+) -> None:
+    try:
+        action = parse_item_callback(cb.data)
+    except CommandError:
+        await cb.answer("unrecognized action")
+        return
+
+    with session_factory() as session:
+        user = _authorized_callback_user(session, cb.from_user.id)
+        if user is None:
+            await cb.answer("not authorized", show_alert=False)
+            return
+        today = now_provider(user.tz).date()
+
+        if action.kind == "list":
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
+            await cb.answer()
+            return
+
+        item_id = action.item_id
+        assert item_id is not None
+        item = session.get(PantryItem, item_id)
+        if item is None or item.household_id != user.household_id:
+            await cb.answer("item not found")
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
+            return
+        if item.status != "active":
+            await cb.answer(f"#{item_id} already updated")
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
+            return
+
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=[item.raw_name],
+            translation_llm=translation_llm,
+        )
+
+        if action.kind == "open":
+            await _safe_edit_cb(
+                cb,
+                render_item_card(item, today=today, lang=user.lang, names=names),
+                to_aiogram_keyboard(build_item_card_keyboard(item, lang=user.lang)),
+            )
+            await cb.answer()
+            return
+
+        if action.kind == "corr":
+            await _safe_edit_cb(
+                cb,
+                render_correct_menu(item, today=today, lang=user.lang, names=names),
+                to_aiogram_keyboard(build_correct_menu_keyboard(item_id, lang=user.lang)),
+            )
+            await cb.answer()
+            return
+
+        if action.kind == "nudge":
+            assert action.nudge_code is not None
+            origin = item.frozen_on or item.purchased_on
+            new_days = compute_nudge_days(
+                current_days=item.shelf_life_days,
+                origin=origin,
+                today=today,
+                code=action.nudge_code,
+            )
+            item = correct_item(
+                session,
+                household_id=user.household_id,
+                item_id=item_id,
+                days=new_days,
+                today=today,
+            )
+            await _safe_edit_cb(
+                cb,
+                render_correct_menu(item, today=today, lang=user.lang, names=names),
+                to_aiogram_keyboard(build_correct_menu_keyboard(item_id, lang=user.lang)),
+            )
+            await cb.answer("updated")
+            return
+
+        if action.kind == "rm":
+            await _safe_edit_cb(
+                cb,
+                render_remove_confirm(item, lang=user.lang, names=names),
+                to_aiogram_keyboard(build_remove_confirm_keyboard(item_id, lang=user.lang)),
+            )
+            await cb.answer()
+            return
+
+        if action.kind == "rmok":
+            mark_removed(
+                session,
+                household_id=user.household_id,
+                item_id=item_id,
+                today=today,
+            )
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
+            await cb.answer("removed")
+            return
+
+        if action.kind == "ctext":
+            display_name = names.get(item.raw_name, item.raw_name)
+            prompt = t(
+                "correct.freetext_prompt",
+                user.lang,
+                id=item_id,
+                name=display_name,
+            )
+            try:
+                await cb.message.answer(prompt, reply_markup=ForceReply())
+            except Exception as exc:
+                log.warning(
+                    "correct_prompt_failed",
+                    extra={"error_class": type(exc).__name__},
+                )
+            await cb.answer()
+            return
+
+
 async def handle_callback(
     cb, *, session_factory, now_provider, translation_llm=None, search=None
 ) -> None:
@@ -1815,10 +1973,20 @@ async def handle_callback(
                 texts=[i.raw_name for i in rows],
                 translation_llm=translation_llm,
             )
-            await cb.message.answer(
-                render_list(rows, today=today, lang=user.lang, names=row_names)
+            rendered = render_digest(
+                rows, today=today, lang=user.lang, names=row_names, cap=None
             )
-            await cb.answer("sent full digest list")
+            keyboard = to_aiogram_keyboard(
+                build_digest_keyboard(
+                    rendered.rendered_items,
+                    has_more=False,
+                    today=today,
+                    lang=user.lang,
+                    names=row_names,
+                )
+            )
+            await _safe_edit_cb(cb, rendered.text, keyboard)
+            await cb.answer()
             return
 
         if action.verb in ("apply", "cancel"):
@@ -1902,6 +2070,14 @@ async def handle_callback(
                 return
         except NotOwnerOrMissing:
             await cb.answer("item not found")
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
             return
         if result.applied:
             log.info(
@@ -1912,14 +2088,14 @@ async def handle_callback(
                     "action": action.verb,
                 },
             )
-            await _refresh_digest_message(
-                cb,
-                session,
-                user.household_id,
-                today,
-                lang=user.lang,
-                translation_llm=translation_llm,
-            )
+        await _refresh_digest_message(
+            cb,
+            session,
+            user.household_id,
+            today,
+            lang=user.lang,
+            translation_llm=translation_llm,
+        )
         await cb.answer(
             f"#{item_id} -> {action.verb}"
             if result.applied
@@ -2350,6 +2526,14 @@ def build_dispatcher(
                 nutrition_llm=nutrition_llm,
                 spawn=asyncio.create_task,
                 bot=bot,
+                translation_llm=translation_llm,
+            )
+            return
+        if (callback.data or "").startswith("item:"):
+            await handle_item_callback(
+                callback,
+                session_factory=session_factory,
+                now_provider=now_provider,
                 translation_llm=translation_llm,
             )
             return

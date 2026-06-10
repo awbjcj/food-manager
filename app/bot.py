@@ -9,16 +9,18 @@ from typing import Awaitable, Callable, Optional, cast
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import update
 from sqlmodel import Session
 
 from app.commands import (
     CommandError,
     parse_callback,
+    parse_correct_reply_marker,
     parse_digest_at,
     parse_invite_mode,
     parse_invite_token,
+    parse_item_callback,
     parse_item_id_arg,
     parse_lang,
     parse_llm_provider,
@@ -88,7 +90,9 @@ from app.refine_service import run_receipt_refine
 from app.pantry_service import (
     NotOwnerOrMissing,
     active_pantry_names,
+    compute_nudge_days,
     compute_stats,
+    correct_item,
     freeze_item,
     list_active,
     list_digest_due,
@@ -111,24 +115,30 @@ from app.pending_service import (
 from app.renderer import (
     CallbackButton,
     build_apply_cancel_keyboard,
+    build_correct_menu_keyboard,
     build_cook_result_keyboard,
     build_cook_round_keyboard,
     build_digest_keyboard,
     build_favorites_keyboard,
+    build_item_card_keyboard,
+    build_remove_confirm_keyboard,
     build_shopping_keyboard,
     build_undo_add_keyboard,
     build_undo_keyboard,
     render_add_diff,
     render_applied_add,
     render_applied_correction,
+    render_correct_menu,
     render_correction_diff,
     render_cook_result,
     render_digest,
     render_favorites,
     render_ingest_reply,
+    render_item_card,
     render_list,
     render_profile,
     render_recook,
+    render_remove_confirm,
     render_shopping_list,
     render_stats,
     render_terminal_state,
@@ -916,6 +926,86 @@ async def handle_snooze(
             await msg.answer(f"#{item_id} is not active")
 
 
+async def _propose_and_send_correction(
+    msg,
+    *,
+    session: Session,
+    user: User,
+    item: PantryItem,
+    user_text: str,
+    today,
+    text_llm: TextLLMClient,
+) -> None:
+    assert item.id is not None
+    item_id = item.id
+    try:
+        selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
+        payload, cost = await propose_correct(
+            session,
+            llm=selected_text_llm,
+            household_id=user.household_id,
+            item=item,
+            user_text=user_text,
+            today=today,
+        )
+    except LLMProviderNotConfigured:
+        await msg.answer(
+            f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
+        )
+        return
+    except NullDiff:
+        await msg.answer("no changes detected")
+        return
+    except ProposeCorrectError as exc:
+        await msg.answer(str(exc))
+        return
+    except Exception as exc:
+        log.warning(
+            "correction_propose_failed",
+            extra={
+                "user_id": user.telegram_id,
+                "item_id": item_id,
+                "error_class": type(exc).__name__,
+            },
+        )
+        await msg.answer("couldn't parse that correction - try simpler wording")
+        return
+
+    pending = create_pending(
+        session,
+        household_id=user.household_id,
+        action_type="correct",
+        item_id=item_id,
+        proposed_json=correct_payload_to_json(payload),
+        snapshot_json=item_snapshot_to_json(item),
+        cost_micros_usd=cost,
+        chat_id=msg.chat.id,
+        now=datetime.now(timezone.utc),
+    )
+    assert pending.id is not None
+    text = render_correction_diff(
+        pending_id=pending.id,
+        payload=payload,
+        item_id=item_id,
+        item_raw_name=item.raw_name,
+        lang=user.lang,
+    )
+    keyboard = to_aiogram_keyboard(
+        build_apply_cancel_keyboard(pending_id=pending.id, lang=user.lang)
+    )
+    try:
+        sent = await msg.answer(text, reply_markup=keyboard)
+    except Exception as exc:
+        log.warning(
+            "correct_send_failed",
+            extra={"pending_id": pending.id, "error_class": type(exc).__name__},
+        )
+        mark_cancelled(session, pending=pending)
+        session.commit()
+        return
+    set_message_id(session, pending=pending, message_id=sent.message_id)
+
+
 async def handle_correct(
     msg,
     *,
@@ -945,72 +1035,54 @@ async def handle_correct(
             await msg.answer(f"#{item_id} is {item.status}; cannot correct")
             return
         today = now_provider(user.tz).date()
-        try:
-            selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
-            payload, cost = await propose_correct(
-                session,
-                llm=selected_text_llm,
-                household_id=user.household_id,
-                item=item,
-                user_text=parts[2].strip(),
-                today=today,
-            )
-        except LLMProviderNotConfigured:
-            await msg.answer(
-                f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
-            )
-            return
-        except NullDiff:
-            await msg.answer("no changes detected")
-            return
-        except ProposeCorrectError as exc:
-            await msg.answer(str(exc))
-            return
-        except Exception as exc:
-            log.warning(
-                "correction_propose_failed",
-                extra={
-                    "user_id": user.telegram_id,
-                    "item_id": item_id,
-                    "error_class": type(exc).__name__,
-                },
-            )
-            await msg.answer("couldn't parse that correction - try simpler wording")
-            return
+        await _propose_and_send_correction(
+            msg,
+            session=session,
+            user=user,
+            item=item,
+            user_text=parts[2].strip(),
+            today=today,
+            text_llm=text_llm,
+        )
 
-        pending = create_pending(
-            session,
-            household_id=user.household_id,
-            action_type="correct",
-            item_id=item_id,
-            proposed_json=correct_payload_to_json(payload),
-            snapshot_json=item_snapshot_to_json(item),
-            cost_micros_usd=cost,
-            chat_id=msg.chat.id,
-            now=datetime.now(timezone.utc),
-        )
-        assert pending.id is not None
-        text = render_correction_diff(
-            pending_id=pending.id,
-            payload=payload,
-            item_id=item_id,
-            item_raw_name=item.raw_name,
-            lang=user.lang,
-        )
-        keyboard = to_aiogram_keyboard(
-            build_apply_cancel_keyboard(pending_id=pending.id, lang=user.lang)
-        )
-        try:
-            sent = await msg.answer(text, reply_markup=keyboard)
-        except Exception as exc:
-            log.warning(
-                "correct_send_failed",
-                extra={"pending_id": pending.id, "error_class": type(exc).__name__},
-            )
-            mark_cancelled(session, pending=pending)
-            session.commit()
+
+async def handle_correct_reply(
+    msg,
+    *,
+    session_factory,
+    now_provider,
+    text_llm: TextLLMClient,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+):
+    marker_text = getattr(getattr(msg, "reply_to_message", None), "text", None)
+    item_id = parse_correct_reply_marker(marker_text)
+    if item_id is None:
+        return
+
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
             return
-        set_message_id(session, pending=pending, message_id=sent.message_id)
+        item = session.get(PantryItem, item_id)
+        if item is None or item.household_id != user.household_id:
+            await msg.answer(f"no item #{item_id}")
+            return
+        if item.status != "active":
+            await msg.answer(f"#{item_id} is {item.status}; cannot correct")
+            return
+        user_text = (msg.text or "").strip()
+        if not user_text:
+            await msg.answer("reply with the correction text")
+            return
+        await _propose_and_send_correction(
+            msg,
+            session=session,
+            user=user,
+            item=item,
+            user_text=user_text,
+            today=now_provider(user.tz).date(),
+            text_llm=text_llm,
+        )
 
 
 async def handle_stats(
@@ -1657,6 +1729,155 @@ async def run_cook_and_render(
         )
 
 
+async def handle_item_callback(
+    cb, *, session_factory, now_provider, translation_llm=None
+) -> None:
+    try:
+        action = parse_item_callback(cb.data)
+    except CommandError:
+        await cb.answer("unrecognized action")
+        return
+
+    with session_factory() as session:
+        user = _authorized_callback_user(session, cb.from_user.id)
+        if user is None:
+            await cb.answer("not authorized", show_alert=False)
+            return
+        today = now_provider(user.tz).date()
+
+        if action.kind == "list":
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
+            await cb.answer()
+            return
+
+        item_id = action.item_id
+        assert item_id is not None
+        item = session.get(PantryItem, item_id)
+        if item is None or item.household_id != user.household_id:
+            await cb.answer("item not found")
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
+            return
+        if item.status != "active":
+            await cb.answer(f"#{item_id} already updated")
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
+            return
+
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=[item.raw_name],
+            translation_llm=translation_llm,
+        )
+
+        if action.kind == "open":
+            await _safe_edit_cb(
+                cb,
+                render_item_card(item, today=today, lang=user.lang, names=names),
+                to_aiogram_keyboard(build_item_card_keyboard(item, lang=user.lang)),
+            )
+            await cb.answer()
+            return
+
+        if action.kind == "corr":
+            await _safe_edit_cb(
+                cb,
+                render_correct_menu(item, today=today, lang=user.lang, names=names),
+                to_aiogram_keyboard(build_correct_menu_keyboard(item_id, lang=user.lang)),
+            )
+            await cb.answer()
+            return
+
+        if action.kind == "nudge":
+            assert action.nudge_code is not None
+            origin = item.frozen_on or item.purchased_on
+            new_days = compute_nudge_days(
+                current_days=item.shelf_life_days,
+                origin=origin,
+                today=today,
+                code=action.nudge_code,
+            )
+            item = correct_item(
+                session,
+                household_id=user.household_id,
+                item_id=item_id,
+                days=new_days,
+                today=today,
+            )
+            await _safe_edit_cb(
+                cb,
+                render_correct_menu(item, today=today, lang=user.lang, names=names),
+                to_aiogram_keyboard(build_correct_menu_keyboard(item_id, lang=user.lang)),
+            )
+            await cb.answer("updated")
+            return
+
+        if action.kind == "rm":
+            await _safe_edit_cb(
+                cb,
+                render_remove_confirm(item, lang=user.lang, names=names),
+                to_aiogram_keyboard(build_remove_confirm_keyboard(item_id, lang=user.lang)),
+            )
+            await cb.answer()
+            return
+
+        if action.kind == "rmok":
+            mark_removed(
+                session,
+                household_id=user.household_id,
+                item_id=item_id,
+                today=today,
+            )
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
+            await cb.answer("removed")
+            return
+
+        if action.kind == "ctext":
+            display_name = names.get(item.raw_name, item.raw_name)
+            prompt = t(
+                "correct.freetext_prompt",
+                user.lang,
+                id=item_id,
+                name=display_name,
+            )
+            try:
+                await cb.message.answer(prompt, reply_markup=ForceReply())
+            except Exception as exc:
+                log.warning(
+                    "correct_prompt_failed",
+                    extra={"error_class": type(exc).__name__},
+                )
+            await cb.answer()
+            return
+
+
 async def handle_callback(
     cb, *, session_factory, now_provider, translation_llm=None, search=None
 ) -> None:
@@ -1815,10 +2036,20 @@ async def handle_callback(
                 texts=[i.raw_name for i in rows],
                 translation_llm=translation_llm,
             )
-            await cb.message.answer(
-                render_list(rows, today=today, lang=user.lang, names=row_names)
+            rendered = render_digest(
+                rows, today=today, lang=user.lang, names=row_names, cap=None
             )
-            await cb.answer("sent full digest list")
+            keyboard = to_aiogram_keyboard(
+                build_digest_keyboard(
+                    rendered.rendered_items,
+                    has_more=False,
+                    today=today,
+                    lang=user.lang,
+                    names=row_names,
+                )
+            )
+            await _safe_edit_cb(cb, rendered.text, keyboard)
+            await cb.answer()
             return
 
         if action.verb in ("apply", "cancel"):
@@ -1902,6 +2133,14 @@ async def handle_callback(
                 return
         except NotOwnerOrMissing:
             await cb.answer("item not found")
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
             return
         if result.applied:
             log.info(
@@ -1912,14 +2151,14 @@ async def handle_callback(
                     "action": action.verb,
                 },
             )
-            await _refresh_digest_message(
-                cb,
-                session,
-                user.household_id,
-                today,
-                lang=user.lang,
-                translation_llm=translation_llm,
-            )
+        await _refresh_digest_message(
+            cb,
+            session,
+            user.household_id,
+            today,
+            lang=user.lang,
+            translation_llm=translation_llm,
+        )
         await cb.answer(
             f"#{item_id} -> {action.verb}"
             if result.applied
@@ -2077,7 +2316,11 @@ async def _refresh_digest_message(
         rendered = render_digest(remaining, today=today, lang=lang, names=names)
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
-                rendered.rendered_item_ids, has_more=rendered.has_more, lang=lang
+                rendered.rendered_items,
+                has_more=rendered.has_more,
+                today=today,
+                lang=lang,
+                names=names,
             )
         )
         try:
@@ -2259,6 +2502,15 @@ def build_dispatcher(
             on_user_created=on_user_created,
         )
 
+    async def on_correct_reply(message):
+        await handle_correct_reply(
+            message,
+            session_factory=session_factory,
+            now_provider=now_provider,
+            text_llm=text_llm,
+            on_user_created=on_user_created,
+        )
+
     async def on_stats(message):
         await handle_stats(
             message,
@@ -2349,6 +2601,14 @@ def build_dispatcher(
                 translation_llm=translation_llm,
             )
             return
+        if (callback.data or "").startswith("item:"):
+            await handle_item_callback(
+                callback,
+                session_factory=session_factory,
+                now_provider=now_provider,
+                translation_llm=translation_llm,
+            )
+            return
         await handle_callback(
             callback,
             session_factory=session_factory,
@@ -2380,6 +2640,7 @@ def build_dispatcher(
     dispatcher.message.register(on_llm, Command("llm"))
     dispatcher.message.register(on_prefs, Command("prefs"))
     dispatcher.message.register(on_help, Command("help"))
+    dispatcher.message.register(on_correct_reply, F.text & F.reply_to_message)
     dispatcher.message.register(on_photo, F.photo)
     dispatcher.callback_query.register(on_callback)
     return dispatcher

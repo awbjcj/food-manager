@@ -1,4 +1,5 @@
 from datetime import date, date as _date
+from types import SimpleNamespace
 from app.correction_service import AddPayload, CorrectPayload
 from app.ingest_service import IngestSummary
 from app.pantry_service import Stats, UndoResult
@@ -251,41 +252,51 @@ def test_terminal_state_zh():
 
 # --- build_digest_keyboard ---
 
-def test_digest_keyboard_en_button_labels_unchanged():
-    rows = build_digest_keyboard([1], has_more=False)
-    assert [b.text for b in rows[0]] == [
-        "Ate",
-        "Tossed",
-        "Remind +2d",
-        "❄️ Freeze",
-    ]
+def _kb_item(item_id=42, name="milk"):
+    return SimpleNamespace(
+        id=item_id,
+        raw_name=name,
+        expires_on=date(2026, 6, 10),
+        storage="default",
+        qty=1,
+        unit=None,
+    )
+
+
+def test_digest_keyboard_en_open_button_label():
+    rows = build_digest_keyboard([_kb_item()], has_more=False, today=date(2026, 6, 9))
+    assert rows[0][0].text == "🟡 #42 milk"
 
 
 def test_digest_keyboard_en_show_all_unchanged():
-    rows = build_digest_keyboard([1], has_more=True)
+    rows = build_digest_keyboard([_kb_item()], has_more=True, today=date(2026, 6, 9))
     assert rows[-1][0].text == "show all"
 
 
-def test_digest_keyboard_callback_data_unchanged():
-    rows = build_digest_keyboard([42], has_more=True)
-    assert rows[0][0].callback_data == "act:ate:42"
-    assert rows[0][1].callback_data == "act:toss:42"
-    assert rows[0][2].callback_data == "act:snooze2:42"
-    assert rows[0][3].callback_data == "act:freeze:42"
+def test_digest_keyboard_callback_data_opens_card():
+    rows = build_digest_keyboard([_kb_item()], has_more=True, today=date(2026, 6, 9))
+    assert rows[0][0].callback_data == "item:open:42"
     assert rows[1][0].callback_data == "show:all"
 
 
 def test_digest_keyboard_zh_button_labels():
-    rows = build_digest_keyboard([1], has_more=False, lang="zh")
-    labels = [b.text for b in rows[0]]
-    assert labels[0] == "吃掉"
-    assert labels[1] == "扔掉"
-    assert labels[2] == "提醒 +2天"
-    assert labels[3] == "❄️ 冷冻"
+    rows = build_digest_keyboard(
+        [_kb_item(name="Milk")],
+        has_more=False,
+        today=date(2026, 6, 9),
+        lang="zh",
+        names={"Milk": "牛奶"},
+    )
+    assert rows[0][0].text == "🟡 #42 牛奶"
 
 
 def test_digest_keyboard_zh_show_all():
-    rows = build_digest_keyboard([1], has_more=True, lang="zh")
+    rows = build_digest_keyboard(
+        [_kb_item()],
+        has_more=True,
+        today=date(2026, 6, 9),
+        lang="zh",
+    )
     assert rows[-1][0].text == "显示全部"
 
 

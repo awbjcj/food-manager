@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Literal, Optional, Sequence, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -7,6 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from app.i18n import LANGS
 from app.pantry_service import (
     ALLOWED_CATEGORIES,
+    NUDGE_CODES,
     ListFilter,
     SNOOZE_DAYS_DEFAULT,
     SNOOZE_DAYS_MAX,
@@ -246,3 +248,49 @@ def parse_callback(data: str) -> CallbackAction:
     except ValueError as exc:
         raise CommandError(f"bad item id {parts[2]!r}") from exc
     return CallbackAction(verb=verb, item_id=item_id)
+
+
+ItemKind = Literal["open", "list", "corr", "nudge", "ctext", "rm", "rmok"]
+
+
+@dataclass(frozen=True)
+class ItemAction:
+    kind: ItemKind
+    item_id: Optional[int] = None
+    nudge_code: Optional[str] = None
+
+
+def parse_item_callback(data: str) -> ItemAction:
+    parts = data.split(":")
+    if len(parts) < 2 or parts[0] != "item":
+        raise CommandError(f"not an item callback {data!r}")
+    kind = parts[1]
+    if kind == "list":
+        if len(parts) != 2:
+            raise CommandError(f"bad item callback {data!r}")
+        return ItemAction(kind="list")
+    if kind == "nudge":
+        if len(parts) != 4 or parts[3] not in NUDGE_CODES:
+            raise CommandError(f"bad item nudge {data!r}")
+        try:
+            return ItemAction(kind="nudge", item_id=int(parts[2]), nudge_code=parts[3])
+        except ValueError as exc:
+            raise CommandError(f"bad item id {parts[2]!r}") from exc
+    if kind in ("open", "corr", "ctext", "rm", "rmok"):
+        if len(parts) != 3:
+            raise CommandError(f"bad item callback {data!r}")
+        try:
+            return ItemAction(kind=cast(ItemKind, kind), item_id=int(parts[2]))
+        except ValueError as exc:
+            raise CommandError(f"bad item id {parts[2]!r}") from exc
+    raise CommandError(f"unknown item kind {kind!r}")
+
+
+_CORRECT_REPLY_MARKER = re.compile(r"\[correct:#(\d+)\]")
+
+
+def parse_correct_reply_marker(text: Optional[str]) -> Optional[int]:
+    if not text:
+        return None
+    match = _CORRECT_REPLY_MARKER.search(text)
+    return int(match.group(1)) if match else None

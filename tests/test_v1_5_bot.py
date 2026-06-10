@@ -41,6 +41,13 @@ def _msg(text: str):
     return msg
 
 
+def _reply_msg(text: str, *, reply_to_text: str):
+    msg = _msg(text)
+    msg.reply_to_message = MagicMock()
+    msg.reply_to_message.text = reply_to_text
+    return msg
+
+
 def _cb(data: str):
     cb = MagicMock()
     cb.from_user = MagicMock(id=1)
@@ -160,6 +167,61 @@ async def test_handle_correct_null_diff_does_not_create_pending(session_factory,
     )
 
     msg.answer.assert_awaited_with("no changes detected")
+    with session_factory() as db:
+        assert list(db.exec(select(PendingCorrection)).all()) == []
+
+
+@pytest.mark.asyncio
+async def test_correct_reply_routes_to_proposal(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    item_id = _item(session_factory)
+    fake = FakeTextLLMClient(canned_correct=(
+        CorrectionDiff(
+            name="Heavy Cream",
+            cache_action="move",
+            rationale="x",
+            confidence=0.9,
+        ),
+        150,
+    ))
+    msg = _reply_msg(
+        "actually heavy cream",
+        reply_to_text=f"Reply with the correction [correct:#{item_id}]",
+    )
+    msg.answer.return_value = MagicMock(message_id=4242)
+
+    await bot_mod.handle_correct_reply(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
+        text_llm=fake,
+    )
+
+    assert fake.correct_calls[0]["user_text"] == "actually heavy cream"
+    assert "Proposed correction" in msg.answer.await_args.args[0]
+    with session_factory() as db:
+        rows = list(db.exec(select(PendingCorrection)).all())
+        assert len(rows) == 1
+        assert rows[0].action_type == "correct"
+        assert rows[0].item_id == item_id
+        assert rows[0].message_id == 4242
+
+
+@pytest.mark.asyncio
+async def test_correct_reply_ignores_non_marked_reply(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    fake = FakeTextLLMClient()
+    msg = _reply_msg("actually heavy cream", reply_to_text="ordinary bot response")
+
+    await bot_mod.handle_correct_reply(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
+        text_llm=fake,
+    )
+
+    msg.answer.assert_not_awaited()
+    assert fake.correct_calls == []
     with session_factory() as db:
         assert list(db.exec(select(PendingCorrection)).all()) == []
 

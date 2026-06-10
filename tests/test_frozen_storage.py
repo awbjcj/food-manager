@@ -1,6 +1,7 @@
 import sqlite3
 import subprocess
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from sqlmodel import SQLModel, Session, create_engine
@@ -499,12 +500,17 @@ def test_parse_callback_freeze():
     assert action.item_id == 42
 
 
-def test_digest_keyboard_includes_freeze_button():
-    rows = build_digest_keyboard([7], has_more=False, lang="en")
-    labels = [button.text for button in rows[0]]
-    datas = [button.callback_data for button in rows[0]]
-    assert "❄️ Freeze" in labels
-    assert "act:freeze:7" in datas
+def test_digest_keyboard_opens_item_card():
+    item = SimpleNamespace(
+        id=7,
+        raw_name="frozen peas",
+        expires_on=date(2026, 6, 10),
+        storage="frozen",
+        qty=1,
+        unit=None,
+    )
+    rows = build_digest_keyboard([item], has_more=False, today=date(2026, 6, 9), lang="en")
+    assert rows[0][0].callback_data == "item:open:7"
 
 
 def test_render_item_line_frozen_badge(session):

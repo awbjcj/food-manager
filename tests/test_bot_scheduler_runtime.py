@@ -11,6 +11,7 @@ from app.bot import (
     authorize_and_get_user,
     build_dispatcher,
     handle_ate,
+    handle_item_callback,
     handle_callback,
     handle_help,
     handle_list,
@@ -67,6 +68,11 @@ def _cb(data: str, *, user_id=1):
     cb.message = MagicMock()
     cb.message.answer = AsyncMock()
     return cb
+
+
+def _edited_keyboard_datas(cb):
+    markup = cb.message.edit_text.await_args.kwargs["reply_markup"]
+    return [button.callback_data for row in markup.inline_keyboard for button in row]
 
 
 def _add_item(
@@ -260,7 +266,7 @@ async def test_act_callback_clears_digest_when_no_items_remain(session, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_act_callback_skips_edit_when_already_eaten(session, monkeypatch):
+async def test_act_callback_refreshes_digest_when_already_eaten(session, monkeypatch):
     monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     already_id = _add_item(session, name="Stale", days=2, status="eaten").id
@@ -271,7 +277,8 @@ async def test_act_callback_skips_edit_when_already_eaten(session, monkeypatch):
         session_factory=lambda: session,
         now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
     )
-    cb.message.edit_text.assert_not_awaited()
+    cb.message.edit_text.assert_awaited_once()
+    assert "clear" in cb.message.edit_text.await_args.args[0].lower()
 
 
 @pytest.mark.asyncio
@@ -298,19 +305,82 @@ async def test_act_freeze_callback_extends_expiry(session, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_show_all_callback_sends_due_items_followup(session, monkeypatch):
+async def test_show_all_callback_edits_due_items_in_place(session, monkeypatch):
     monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     for idx in range(25):
         _add_item(session, name=f"Item {idx}", days=2)
     cb = _cb("show:all")
+    cb.message.edit_text = AsyncMock()
     await handle_callback(
         cb,
         session_factory=lambda: session,
         now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
     )
-    cb.message.answer.assert_awaited_once()
-    assert "Item 24" in cb.message.answer.await_args.args[0]
+    cb.message.answer.assert_not_awaited()
+    cb.message.edit_text.assert_awaited_once()
+    assert "Item 24" in cb.message.edit_text.await_args.args[0]
+    datas = {
+        button.callback_data
+        for row in cb.message.edit_text.await_args.kwargs["reply_markup"].inline_keyboard
+        for button in row
+    }
+    assert any(data.startswith("item:open:") for data in datas)
+
+
+@pytest.mark.asyncio
+async def test_item_open_renders_card(session, monkeypatch):
+    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    today = date(2026, 5, 26)
+    item_id = _add_item(session, name="Milk", days=1).id
+    assert item_id is not None
+    cb = _cb(f"item:open:{item_id}")
+    cb.message.edit_text = AsyncMock()
+    await handle_item_callback(
+        cb,
+        session_factory=lambda: session,
+        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
+    )
+    datas = _edited_keyboard_datas(cb)
+    assert f"item:corr:{item_id}" in datas
+    assert f"item:rm:{item_id}" in datas
+
+
+@pytest.mark.asyncio
+async def test_item_nudge_extends_expiry(session, monkeypatch):
+    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    today = date(2026, 5, 26)
+    item = _add_item(session, name="Milk", days=7)
+    item_id = item.id
+    assert item_id is not None
+    cb = _cb(f"item:nudge:{item_id}:p7")
+    cb.message.edit_text = AsyncMock()
+    await handle_item_callback(
+        cb,
+        session_factory=lambda: session,
+        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
+    )
+    updated = session.get(PantryItem, item_id)
+    assert updated is not None
+    assert updated.shelf_life_days == 14
+
+
+@pytest.mark.asyncio
+async def test_item_rmok_removes_and_refreshes(session, monkeypatch):
+    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    today = date(2026, 5, 26)
+    item_id = _add_item(session, name="Milk", days=1).id
+    assert item_id is not None
+    cb = _cb(f"item:rmok:{item_id}")
+    cb.message.edit_text = AsyncMock()
+    await handle_item_callback(
+        cb,
+        session_factory=lambda: session,
+        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
+    )
+    removed = session.get(PantryItem, item_id)
+    assert removed is not None
+    assert removed.status == "removed"
 
 
 def test_build_dispatcher_imports_and_registers():

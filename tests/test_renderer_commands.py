@@ -1,12 +1,16 @@
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
 from app.commands import (
     CallbackAction,
     CommandError,
+    ItemAction,
     parse_callback,
+    parse_correct_reply_marker,
     parse_digest_at,
+    parse_item_callback,
     parse_item_id_arg,
     parse_llm_provider,
     parse_list_filter,
@@ -17,10 +21,16 @@ from app.ingest_service import IngestSummary
 from app.models import PantryItem
 from app.pantry_service import ListFilter, Stats
 from app.renderer import (
+    build_correct_menu_keyboard,
     build_digest_keyboard,
+    build_item_card_keyboard,
+    build_remove_confirm_keyboard,
+    render_correct_menu,
     render_digest,
     render_ingest_reply,
+    render_item_card,
     render_list,
+    render_remove_confirm,
     render_stats,
 )
 
@@ -55,6 +65,39 @@ def test_callback_parser():
     assert parse_callback("show:all") == CallbackAction(verb="show_all", item_id=None)
     with pytest.raises(CommandError):
         parse_callback("act:nope:1")
+
+
+def test_parse_item_callback_kinds():
+    assert parse_item_callback("item:open:3") == ItemAction(kind="open", item_id=3)
+    assert parse_item_callback("item:corr:3") == ItemAction(kind="corr", item_id=3)
+    assert parse_item_callback("item:ctext:3") == ItemAction(kind="ctext", item_id=3)
+    assert parse_item_callback("item:rm:3") == ItemAction(kind="rm", item_id=3)
+    assert parse_item_callback("item:rmok:3") == ItemAction(kind="rmok", item_id=3)
+    assert parse_item_callback("item:list") == ItemAction(kind="list", item_id=None)
+    assert parse_item_callback("item:nudge:3:p7") == ItemAction(
+        kind="nudge",
+        item_id=3,
+        nudge_code="p7",
+    )
+
+
+def test_parse_item_callback_rejects_bad():
+    for bad in (
+        "item:open:x",
+        "item:nudge:3:zz",
+        "item:nudge:3",
+        "item:bogus:3",
+        "act:ate:3",
+        "item:",
+    ):
+        with pytest.raises(CommandError):
+            parse_item_callback(bad)
+
+
+def test_parse_correct_reply_marker():
+    assert parse_correct_reply_marker("fix #3 spinach [correct:#3]") == 3
+    assert parse_correct_reply_marker("no marker here") is None
+    assert parse_correct_reply_marker(None) is None
 
 
 def _summary(**kwargs) -> IngestSummary:
@@ -130,6 +173,49 @@ def _pantry_item(name, expires_on, item_id):
     )
 
 
+def _digest_item(item_id, name, expires_on, storage="default"):
+    return SimpleNamespace(
+        id=item_id,
+        raw_name=name,
+        expires_on=expires_on,
+        storage=storage,
+        qty=1,
+        unit=None,
+    )
+
+
+def test_digest_keyboard_emits_labeled_open_buttons():
+    today = date(2026, 6, 9)
+    items = [
+        _digest_item(3, "spinach", date(2026, 6, 7)),
+        _digest_item(7, "milk", date(2026, 6, 8)),
+    ]
+    rows = build_digest_keyboard(items, has_more=False, today=today, lang="en")
+    assert rows[0][0].callback_data == "item:open:3"
+    assert rows[0][0].text == "🔴 #3 spinach"
+    assert rows[0][1].callback_data == "item:open:7"
+
+
+def test_digest_keyboard_show_all_when_more():
+    today = date(2026, 6, 9)
+    rows = build_digest_keyboard(
+        [_digest_item(1, "a", date(2026, 6, 10))],
+        has_more=True,
+        today=today,
+        lang="en",
+    )
+    assert rows[-1][0].callback_data == "show:all"
+
+
+def test_render_digest_cap_none_shows_all():
+    today = date(2026, 6, 9)
+    items = [_digest_item(i, f"x{i}", date(2026, 6, 10)) for i in range(15)]
+    capped = render_digest(items, today=today)
+    assert capped.has_more is True and len(capped.rendered_items) == 10
+    full = render_digest(items, today=today, cap=None)
+    assert full.has_more is False and len(full.rendered_items) == 15
+
+
 def test_render_digest_buckets_and_keyboard():
     today = date(2026, 5, 27)
     items = [
@@ -148,24 +234,82 @@ def test_render_digest_buckets_and_keyboard():
     assert "This week (1)" in rendered.text
     assert "🔴 #42 Whole Milk 1 gal - today" in rendered.text
     assert "🟡 #44 Sliced Bread - May 28 (1d)" in rendered.text
-    keyboard = build_digest_keyboard([42], has_more=False)
-    assert {button.callback_data for button in keyboard[0]} == {
-        "act:ate:42",
-        "act:toss:42",
-        "act:snooze2:42",
-        "act:freeze:42",
-    }
+    keyboard = build_digest_keyboard([items[1]], has_more=False, today=today)
+    assert keyboard[0][0].callback_data == "item:open:42"
+    assert keyboard[0][0].text == "🔴 #42 Whole Milk 1 gal"
 
 
-def test_render_digest_truncates_at_20():
+def test_render_digest_truncates_at_10():
     today = date(2026, 5, 27)
     rendered = render_digest(
         [_pantry_item(f"Item {i}", today, 100 + i) for i in range(25)],
         today=today,
     )
-    assert rendered.rendered_count == 20
-    assert "5 more" in rendered.text
-    assert len(build_digest_keyboard(rendered.rendered_item_ids, has_more=True)) == 21
+    assert rendered.rendered_count == 10
+    assert "15 more" in rendered.text
+    assert len(build_digest_keyboard(rendered.rendered_items, has_more=True, today=today)) == 6
+
+
+def _card_item(item_id=3, name="spinach", storage="default", days=7):
+    return SimpleNamespace(
+        id=item_id,
+        raw_name=name,
+        storage=storage,
+        qty=1,
+        unit=None,
+        shelf_life_days=days,
+        expires_on=date(2026, 6, 9),
+    )
+
+
+def test_card_keyboard_has_all_actions_when_not_frozen():
+    rows = build_item_card_keyboard(_card_item(), lang="en")
+    datas = [button.callback_data for row in rows for button in row]
+    assert "act:ate:3" in datas
+    assert "act:toss:3" in datas
+    assert "act:snooze2:3" in datas
+    assert "act:freeze:3" in datas
+    assert "item:corr:3" in datas
+    assert "item:rm:3" in datas
+    assert "item:list" in datas
+
+
+def test_card_keyboard_hides_freeze_when_frozen():
+    rows = build_item_card_keyboard(_card_item(storage="frozen"), lang="en")
+    datas = [button.callback_data for row in rows for button in row]
+    assert "act:freeze:3" not in datas
+    assert "act:ate:3" in datas
+
+
+def test_render_item_card_reuses_item_line_shape():
+    text = render_item_card(_card_item(), today=date(2026, 6, 9), lang="en")
+    assert text == "🔴 #3 spinach - today"
+
+
+def test_correct_menu_keyboard_and_header():
+    rows = build_correct_menu_keyboard(3, lang="en")
+    datas = [button.callback_data for row in rows for button in row]
+    assert datas[:4] == [
+        "item:nudge:3:p7",
+        "item:nudge:3:p3",
+        "item:nudge:3:m3",
+        "item:nudge:3:today",
+    ]
+    assert "item:ctext:3" in datas
+    assert "item:open:3" in datas
+    header = render_correct_menu(_card_item(days=7), today=date(2026, 6, 9), lang="en")
+    assert header.startswith("✏️ Correct #3 spinach")
+    assert "shelf life 7d" in header
+
+
+def test_remove_confirm():
+    rows = build_remove_confirm_keyboard(3, lang="en")
+    datas = [button.callback_data for row in rows for button in row]
+    assert "item:rmok:3" in datas
+    assert "item:open:3" in datas
+    assert render_remove_confirm(_card_item(), lang="en") == (
+        "Remove #3 spinach?\nThis can't be undone here."
+    )
 
 
 def test_render_list_and_stats():

@@ -217,6 +217,24 @@ def correct_item(
     return pantry_item
 
 
+NUDGE_CODES = frozenset({"p7", "p3", "m3", "today"})
+
+
+def compute_nudge_days(*, current_days: int, origin: date, today: date, code: str) -> int:
+    """Pure Shelf-Life nudge arithmetic for the digest card's Correct menu."""
+    if code == "p7":
+        days = current_days + 7
+    elif code == "p3":
+        days = current_days + 3
+    elif code == "m3":
+        days = current_days - 3
+    elif code == "today":
+        days = (today - origin).days
+    else:
+        raise ValueError(f"unknown nudge code {code!r}")
+    return max(SHELF_LIFE_DAYS_MIN, min(SHELF_LIFE_DAYS_MAX, days))
+
+
 @dataclass(frozen=True)
 class TextLLMCost:
     correction_proposal_count: int

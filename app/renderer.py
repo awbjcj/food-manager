@@ -136,21 +136,29 @@ class CallbackButton:
 @dataclass
 class DigestRender:
     text: str
+    rendered_items: list = field(default_factory=list)
     rendered_item_ids: list[int] = field(default_factory=list)
     rendered_count: int = 0
     total_count: int = 0
     has_more: bool = False
 
 
-DIGEST_CAP = 20
+DIGEST_CAP = 10
 
 
-def render_digest(items: list, *, today: date, lang: str = "en", names=None) -> DigestRender:
+def render_digest(
+    items: list,
+    *,
+    today: date,
+    lang: str = "en",
+    names=None,
+    cap: int | None = DIGEST_CAP,
+) -> DigestRender:
     total = len(items)
     if total == 0:
         return DigestRender(text="", rendered_count=0, total_count=0, has_more=False)
 
-    capped = items[:DIGEST_CAP]
+    capped = items if cap is None else items[:cap]
     buckets: dict[str, list] = {"expired": [], "today": [], "tomorrow": [], "this_week": []}
     for item in capped:
         if item.expires_on < today:
@@ -173,12 +181,14 @@ def render_digest(items: list, *, today: date, lang: str = "en", names=None) -> 
             lines.extend(line_for(item) for item in buckets[key])
             lines.append("")
 
-    has_more = total > DIGEST_CAP
+    has_more = cap is not None and total > cap
     if has_more:
-        lines.append(t("digest.more", lang, n=total - DIGEST_CAP))
+        assert cap is not None  # narrowed by has_more; keeps `total - cap` type-safe
+        lines.append(t("digest.more", lang, n=total - cap))
 
     return DigestRender(
         text="\n".join(lines).rstrip(),
+        rendered_items=list(capped),
         rendered_item_ids=[item.id for item in capped],
         rendered_count=len(capped),
         total_count=total,
@@ -187,19 +197,86 @@ def render_digest(items: list, *, today: date, lang: str = "en", names=None) -> 
 
 
 def build_digest_keyboard(
-    item_ids: list[int], *, has_more: bool, lang: str = "en"
+    items: list, *, has_more: bool, today: date, lang: str = "en", names=None
 ) -> list[list[CallbackButton]]:
-    rows: list[list[CallbackButton]] = []
-    for item_id in item_ids:
-        rows.append([
-            CallbackButton(text=t("btn.ate", lang), callback_data=f"act:ate:{item_id}"),
-            CallbackButton(text=t("btn.tossed", lang), callback_data=f"act:toss:{item_id}"),
-            CallbackButton(text=t("btn.snooze2", lang), callback_data=f"act:snooze2:{item_id}"),
-            CallbackButton(text=t("btn.freeze", lang), callback_data=f"act:freeze:{item_id}"),
-        ])
+    buttons = [
+        CallbackButton(
+            text=f"{_urgency_icon(item.expires_on, today=today)} #{item.id} {_name(names, item.raw_name)}",
+            callback_data=f"item:open:{item.id}",
+        )
+        for item in items
+    ]
+    rows: list[list[CallbackButton]] = [
+        buttons[i:i + 2] for i in range(0, len(buttons), 2)
+    ]
     if has_more:
         rows.append([CallbackButton(text=t("btn.show_all", lang), callback_data="show:all")])
     return rows
+
+
+def render_item_card(item, *, today: date, lang: str = "en", names=None) -> str:
+    return render_item_line(item, today=today, lang=lang, names=names)
+
+
+def render_correct_menu(item, *, today: date, lang: str = "en", names=None) -> str:
+    return t(
+        "correct.menu_header",
+        lang,
+        id=item.id,
+        name=_name(names, item.raw_name),
+        days=item.shelf_life_days,
+        date=_fmt_date(item.expires_on, today=today, lang=lang),
+    )
+
+
+def render_remove_confirm(item, *, lang: str = "en", names=None) -> str:
+    return t("remove.confirm", lang, id=item.id, name=_name(names, item.raw_name))
+
+
+def build_item_card_keyboard(item, *, lang: str = "en") -> list[list[CallbackButton]]:
+    item_id = item.id
+    rows: list[list[CallbackButton]] = [
+        [
+            CallbackButton(text=t("btn.ate", lang), callback_data=f"act:ate:{item_id}"),
+            CallbackButton(text=t("btn.tossed", lang), callback_data=f"act:toss:{item_id}"),
+        ]
+    ]
+    second = [
+        CallbackButton(text=t("btn.snooze2", lang), callback_data=f"act:snooze2:{item_id}")
+    ]
+    if getattr(item, "storage", "default") != "frozen":
+        second.append(
+            CallbackButton(text=t("btn.freeze", lang), callback_data=f"act:freeze:{item_id}")
+        )
+    rows.append(second)
+    rows.append([
+        CallbackButton(text=t("btn.correct", lang), callback_data=f"item:corr:{item_id}"),
+        CallbackButton(text=t("btn.remove", lang), callback_data=f"item:rm:{item_id}"),
+    ])
+    rows.append([CallbackButton(text=t("btn.back_to_list", lang), callback_data="item:list")])
+    return rows
+
+
+def build_correct_menu_keyboard(item_id: int, *, lang: str = "en") -> list[list[CallbackButton]]:
+    return [
+        [
+            CallbackButton(text=t("btn.nudge_plus_week", lang), callback_data=f"item:nudge:{item_id}:p7"),
+            CallbackButton(text=t("btn.nudge_plus_3d", lang), callback_data=f"item:nudge:{item_id}:p3"),
+        ],
+        [
+            CallbackButton(text=t("btn.nudge_minus_3d", lang), callback_data=f"item:nudge:{item_id}:m3"),
+            CallbackButton(text=t("btn.nudge_use_today", lang), callback_data=f"item:nudge:{item_id}:today"),
+        ],
+        [CallbackButton(text=t("btn.correct_other", lang), callback_data=f"item:ctext:{item_id}")],
+        [CallbackButton(text=t("btn.back", lang), callback_data=f"item:open:{item_id}")],
+    ]
+
+
+def build_remove_confirm_keyboard(item_id: int, *, lang: str = "en") -> list[list[CallbackButton]]:
+    return [[
+        CallbackButton(text=t("btn.remove_yes", lang), callback_data=f"item:rmok:{item_id}"),
+        CallbackButton(text=t("btn.cancel", lang), callback_data=f"item:open:{item_id}"),
+    ]]
 
 
 # TODO(user): tune correction/add diff wording and field order against the

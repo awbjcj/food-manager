@@ -67,7 +67,11 @@ async def send_digest_once(
             )
         rendered = render_digest(payload.items, today=today, lang=user.lang, names=names)
         keyboard = build_digest_keyboard(
-            rendered.rendered_item_ids, has_more=rendered.has_more, lang=user.lang
+            rendered.rendered_items,
+            has_more=rendered.has_more,
+            today=today,
+            lang=user.lang,
+            names=names,
         )
         await bot.send_message(
             chat_id=payload.user.chat_id,

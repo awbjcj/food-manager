@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -166,6 +167,49 @@ def _pantry_item(name, expires_on, item_id):
     )
 
 
+def _digest_item(item_id, name, expires_on, storage="default"):
+    return SimpleNamespace(
+        id=item_id,
+        raw_name=name,
+        expires_on=expires_on,
+        storage=storage,
+        qty=1,
+        unit=None,
+    )
+
+
+def test_digest_keyboard_emits_labeled_open_buttons():
+    today = date(2026, 6, 9)
+    items = [
+        _digest_item(3, "spinach", date(2026, 6, 7)),
+        _digest_item(7, "milk", date(2026, 6, 8)),
+    ]
+    rows = build_digest_keyboard(items, has_more=False, today=today, lang="en")
+    assert rows[0][0].callback_data == "item:open:3"
+    assert rows[0][0].text == "🔴 #3 spinach"
+    assert rows[0][1].callback_data == "item:open:7"
+
+
+def test_digest_keyboard_show_all_when_more():
+    today = date(2026, 6, 9)
+    rows = build_digest_keyboard(
+        [_digest_item(1, "a", date(2026, 6, 10))],
+        has_more=True,
+        today=today,
+        lang="en",
+    )
+    assert rows[-1][0].callback_data == "show:all"
+
+
+def test_render_digest_cap_none_shows_all():
+    today = date(2026, 6, 9)
+    items = [_digest_item(i, f"x{i}", date(2026, 6, 10)) for i in range(15)]
+    capped = render_digest(items, today=today)
+    assert capped.has_more is True and len(capped.rendered_items) == 10
+    full = render_digest(items, today=today, cap=None)
+    assert full.has_more is False and len(full.rendered_items) == 15
+
+
 def test_render_digest_buckets_and_keyboard():
     today = date(2026, 5, 27)
     items = [
@@ -184,24 +228,20 @@ def test_render_digest_buckets_and_keyboard():
     assert "This week (1)" in rendered.text
     assert "🔴 #42 Whole Milk 1 gal - today" in rendered.text
     assert "🟡 #44 Sliced Bread - May 28 (1d)" in rendered.text
-    keyboard = build_digest_keyboard([42], has_more=False)
-    assert {button.callback_data for button in keyboard[0]} == {
-        "act:ate:42",
-        "act:toss:42",
-        "act:snooze2:42",
-        "act:freeze:42",
-    }
+    keyboard = build_digest_keyboard([items[1]], has_more=False, today=today)
+    assert keyboard[0][0].callback_data == "item:open:42"
+    assert keyboard[0][0].text == "🔴 #42 Whole Milk 1 gal"
 
 
-def test_render_digest_truncates_at_20():
+def test_render_digest_truncates_at_10():
     today = date(2026, 5, 27)
     rendered = render_digest(
         [_pantry_item(f"Item {i}", today, 100 + i) for i in range(25)],
         today=today,
     )
-    assert rendered.rendered_count == 20
-    assert "5 more" in rendered.text
-    assert len(build_digest_keyboard(rendered.rendered_item_ids, has_more=True)) == 21
+    assert rendered.rendered_count == 10
+    assert "15 more" in rendered.text
+    assert len(build_digest_keyboard(rendered.rendered_items, has_more=True, today=today)) == 6
 
 
 def test_render_list_and_stats():

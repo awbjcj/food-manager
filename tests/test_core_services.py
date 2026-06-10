@@ -21,6 +21,7 @@ from app.pantry_service import (
     ALLOWED_CATEGORIES,
     ListFilter,
     NotOwnerOrMissing,
+    compute_nudge_days,
     compute_stats,
     correct_item,
     list_active,
@@ -297,6 +298,27 @@ def test_pantry_mutations_and_correction(session):
         correct_item(session, household_id=1, item_id=removed.id, days=5, today=today)
     with pytest.raises(NotOwnerOrMissing):
         mark_eaten(session, household_id=2, item_id=pantry_item.id, today=today)
+
+
+def test_compute_nudge_days_relative_and_clamps():
+    origin = date(2026, 6, 1)
+    today = date(2026, 6, 9)
+    assert compute_nudge_days(current_days=7, origin=origin, today=today, code="p7") == 14
+    assert compute_nudge_days(current_days=7, origin=origin, today=today, code="p3") == 10
+    assert compute_nudge_days(current_days=7, origin=origin, today=today, code="m3") == 4
+    assert compute_nudge_days(current_days=2, origin=origin, today=today, code="m3") == 1
+    assert compute_nudge_days(current_days=30, origin=origin, today=today, code="today") == 8
+    assert compute_nudge_days(current_days=30, origin=today, today=today, code="today") == 1
+
+
+def test_compute_nudge_days_rejects_unknown_code():
+    with pytest.raises(ValueError):
+        compute_nudge_days(
+            current_days=5,
+            origin=date(2026, 6, 1),
+            today=date(2026, 6, 9),
+            code="zz",
+        )
 
 
 def test_compute_stats(session):

@@ -160,6 +160,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     "btn.ate": {"en": "Ate", "zh": "吃掉", "fr": "Mangé", "es": "Comido"},
     "btn.tossed": {"en": "Tossed", "zh": "扔掉", "fr": "Jeté", "es": "Tirado"},
     "btn.snooze2": {"en": "Remind +2d", "zh": "提醒 +2天", "fr": "Rappel +2j", "es": "Recordar +2d"},
+    "btn.freeze": {"en": "❄️ Freeze", "zh": "❄️ 冷冻", "fr": "❄️ Congeler", "es": "❄️ Congelar"},
     "btn.show_all": {"en": "show all", "zh": "显示全部", "fr": "tout afficher", "es": "ver todo"},
     "btn.undo": {"en": "Undo", "zh": "撤销", "fr": "Annuler", "es": "Deshacer"},
     "btn.apply": {"en": "Apply", "zh": "应用", "fr": "Appliquer", "es": "Aplicar"},

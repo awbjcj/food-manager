@@ -153,6 +153,7 @@ def test_render_digest_buckets_and_keyboard():
         "act:ate:42",
         "act:toss:42",
         "act:snooze2:42",
+        "act:freeze:42",
     }
 
 

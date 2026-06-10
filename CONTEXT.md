@@ -33,8 +33,20 @@ A pantry item excluded because it was logged incorrectly or as a duplicate.
 _Avoid_: Tossed item
 
 **Shelf Life**:
-The number of days a pantry item is expected to keep from its purchase date.
+The number of days a pantry item is expected to keep from its shelf-life origin.
 _Avoid_: Days remaining, reminder offset
+
+**Shelf-Life Origin**:
+The date from which a pantry item's shelf life is counted.
+_Avoid_: Freshness date
+
+**Storage State**:
+How a pantry item is kept for shelf-life purposes.
+_Avoid_: Food category, pantry location
+
+**Frozen Date**:
+The date a pantry item entered frozen storage.
+_Avoid_: Purchase date, thaw date
 
 **Shelf-Life Correction**:
 A user correction that fixes one pantry item's expiry and teaches that user's future estimates for the same normalized food.
@@ -49,7 +61,11 @@ _Avoid_: One-off expiry edit
 - A **Pantry Item** is consumed, tossed, or snoozed as a whole in v1.
 - An **Active Pantry Item** may have reminders suppressed until a future date.
 - A **Snooze** does not change a pantry item's expiry date or shelf life.
-- A **Shelf Life** determines a pantry item's expiry date from its purchase date.
+- A **Pantry Item** has one **Storage State**.
+- A **Frozen Date** exists only for a pantry item in frozen **Storage State**.
+- A **Purchase Date** is the default **Shelf-Life Origin**.
+- A **Frozen Date** is the **Shelf-Life Origin** for a pantry item in frozen **Storage State**.
+- A **Shelf Life** determines a pantry item's expiry date from its **Shelf-Life Origin**.
 - A **Shelf-Life Correction** applies to one pantry item and that user's future pantry items with the same normalized food.
 - A **Tossed Pantry Item** counts as waste; a **Removed Pantry Item** does not.
 
@@ -79,6 +95,9 @@ _Avoid_: One-off expiry edit
 > **Dev:** "When you correct milk to 10 days, is that 10 days from today?"
 > **Domain expert:** "No - that is the **Shelf Life**, counted from when the milk was purchased."
 
+> **Dev:** "When you freeze chicken a week after buying it, is its freezer shelf life counted from the receipt?"
+> **Domain expert:** "No - the **Frozen Date** becomes the **Shelf-Life Origin**."
+
 > **Dev:** "If you correct strawberries once, should future strawberries use that value too?"
 > **Domain expert:** "Yes - a **Shelf-Life Correction** teaches the estimate for that normalized food."
 
@@ -91,6 +110,6 @@ _Avoid_: One-off expiry edit
 - Receipt accounting and receipt-line archival are out of scope; only **Pantry-Relevant Receipt Items** are tracked.
 - Snoozing does not create a separate pantry item state; it temporarily suppresses reminders for an **Active Pantry Item**.
 - A **Snooze** does not extend **Shelf Life**.
-- Corrections use **Shelf Life**, not days remaining.
+- Corrections use **Shelf Life** from the **Shelf-Life Origin**, not days remaining.
 - A **Shelf-Life Correction** is intentionally broader than a one-off expiry edit in v1.
 - **Tossed Pantry Item** is reserved for food waste; import cleanup uses **Removed Pantry Item**.

@@ -2,13 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
-from typing import Literal, Optional
+from typing import TYPE_CHECKING, Literal, Optional
 
 from sqlmodel import Session, col, select
 
 from app.cache import write_user_correction
+from app.frozen_shelf_life import resolve_frozen_days, storage_cache_key
 from app.models import PantryItem, PendingCorrection, Receipt
 from app.pending_service import expire_for_item
+
+if TYPE_CHECKING:
+    from app.refine_service import ShelfLifeSearchClient
 
 
 ALLOWED_CATEGORIES = frozenset({
@@ -146,6 +150,40 @@ def snooze_item(
     return MutationResult(applied=True, was_already=False)
 
 
+async def freeze_item(
+    session: Session,
+    *,
+    household_id: int,
+    item_id: int,
+    today: date,
+    search: Optional["ShelfLifeSearchClient"] = None,
+) -> MutationResult:
+    pantry_item = _load_owned(session, household_id=household_id, item_id=item_id)
+    if pantry_item.status != "active" or pantry_item.storage == "frozen":
+        return MutationResult(applied=False, was_already=True)
+    decision = await resolve_frozen_days(
+        session,
+        household_id=household_id,
+        normalized_name=pantry_item.normalized_name,
+        food_name=pantry_item.raw_name,
+        search=search,
+    )
+    pantry_item.storage = "frozen"
+    pantry_item.frozen_on = today
+    pantry_item.shelf_life_days = decision.days
+    pantry_item.shelf_life_source = (
+        "cache" if decision.cache_was_hit else decision.source
+    )
+    pantry_item.snoozed_until = None
+    pantry_item.expires_on = today + timedelta(days=decision.days)
+    assert pantry_item.id is not None
+    expire_for_item(session, household_id=household_id, item_id=pantry_item.id)
+    session.add(pantry_item)
+    session.commit()
+    session.refresh(pantry_item)
+    return MutationResult(applied=True, was_already=False)
+
+
 SHELF_LIFE_DAYS_MIN = 1
 SHELF_LIFE_DAYS_MAX = 730
 
@@ -160,14 +198,16 @@ def correct_item(
         raise ValueError("cannot correct a removed item")
     pantry_item.shelf_life_days = days
     pantry_item.shelf_life_source = "user_correction"
-    pantry_item.expires_on = pantry_item.purchased_on + timedelta(days=days)
+    pantry_item.expires_on = (
+        pantry_item.frozen_on or pantry_item.purchased_on
+    ) + timedelta(days=days)
     assert pantry_item.id is not None
     expire_for_item(session, household_id=pantry_item.household_id, item_id=pantry_item.id)
     session.add(pantry_item)
     write_user_correction(
         session,
         household_id,
-        pantry_item.normalized_name,
+        storage_cache_key(pantry_item.normalized_name, pantry_item.storage),
         days=days,
         category=pantry_item.category,
         commit=False,

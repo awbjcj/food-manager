@@ -89,6 +89,7 @@ from app.pantry_service import (
     NotOwnerOrMissing,
     active_pantry_names,
     compute_stats,
+    freeze_item,
     list_active,
     list_digest_due,
     mark_eaten,
@@ -1243,6 +1244,7 @@ async def handle_photo(
                 photo_file_id=file_id,
                 image_bytes=await photo_downloader(file_id),
                 today=today,
+                search=search,
             )
         except LLMProviderNotConfigured:
             await msg.answer(
@@ -1656,7 +1658,7 @@ async def run_cook_and_render(
 
 
 async def handle_callback(
-    cb, *, session_factory, now_provider, translation_llm=None
+    cb, *, session_factory, now_provider, translation_llm=None, search=None
 ) -> None:
     try:
         action = parse_callback(cb.data)
@@ -1886,6 +1888,14 @@ async def handle_callback(
                     item_id=item_id,
                     today=today,
                     days=2,
+                )
+            elif action.verb == "freeze":
+                result = await freeze_item(
+                    session,
+                    household_id=user.household_id,
+                    item_id=item_id,
+                    today=today,
+                    search=search,
                 )
             else:
                 await cb.answer("unrecognized action")
@@ -2344,6 +2354,7 @@ def build_dispatcher(
             session_factory=session_factory,
             now_provider=now_provider,
             translation_llm=translation_llm,
+            search=search,
         )
 
     dispatcher.message.register(on_start, Command("start"))

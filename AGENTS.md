@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Commands
 
@@ -26,7 +26,7 @@ uv run python bin/run.py
 
 ## Architecture
 
-Single-user Telegram bot: user sends grocery receipt photos → Claude parses them → pantry items are tracked with expiry dates → daily digest message is sent each morning.
+Single-user Telegram bot: user sends grocery receipt photos → Codex parses them → pantry items are tracked with expiry dates → daily digest message is sent each morning.
 
 ### Data flow
 

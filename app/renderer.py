@@ -44,6 +44,7 @@ def _qty_prefix(qty: float, unit: str | None) -> str:
 
 def render_item_line(item, *, today: date, lang: str = "en", names=None) -> str:
     icon = _urgency_icon(item.expires_on, today=today)
+    badge = "❄️ " if getattr(item, "storage", "default") == "frozen" else ""
     qty = _qty_prefix(item.qty, item.unit)
     name = _name(names, item.raw_name)
     delta = (item.expires_on - today).days
@@ -53,7 +54,7 @@ def render_item_line(item, *, today: date, lang: str = "en", names=None) -> str:
         tail = t("item.tail.today", lang)
     else:
         tail = f"{_fmt_date(item.expires_on, today=today, lang=lang)} {t('item.tail.days', lang, n=delta)}"
-    return f"{icon} #{item.id} {qty}{name} - {tail}"
+    return f"{icon} {badge}#{item.id} {qty}{name} - {tail}"
 
 
 def _fmt_cost(micros: int | None, *, lang: str = "en") -> str:
@@ -194,6 +195,7 @@ def build_digest_keyboard(
             CallbackButton(text=t("btn.ate", lang), callback_data=f"act:ate:{item_id}"),
             CallbackButton(text=t("btn.tossed", lang), callback_data=f"act:toss:{item_id}"),
             CallbackButton(text=t("btn.snooze2", lang), callback_data=f"act:snooze2:{item_id}"),
+            CallbackButton(text=t("btn.freeze", lang), callback_data=f"act:freeze:{item_id}"),
         ])
     if has_more:
         rows.append([CallbackButton(text=t("btn.show_all", lang), callback_data="show:all")])

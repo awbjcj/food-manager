@@ -8,9 +8,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.cache import get_cached, put_cached
+from app.frozen_shelf_life import resolve_frozen_days
 from app.llm import LLMClient, ParsedItem
 from app.models import PantryItem, Receipt
 from app.normalization import normalize
+from app.refine_service import ShelfLifeSearchClient
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,7 @@ async def ingest_photo(
     photo_file_id: str,
     image_bytes: bytes,
     today: date,
+    search: Optional[ShelfLifeSearchClient] = None,
 ) -> IngestSummary:
     existing = session.exec(
         select(Receipt).where(
@@ -145,12 +148,33 @@ async def ingest_photo(
         session.flush()
 
         for parsed_item, is_low_confidence in to_insert:
-            decision = compute_shelf_life(
-                session,
-                household_id=household_id,
-                parsed=parsed_item,
-            )
             normalized_name = normalize(parsed_item.name)
+            if parsed_item.frozen:
+                frozen = await resolve_frozen_days(
+                    session,
+                    household_id=household_id,
+                    normalized_name=normalized_name,
+                    food_name=parsed_item.name,
+                    search=search,
+                )
+                shelf_life_days = frozen.days
+                shelf_life_source = "cache" if frozen.cache_was_hit else frozen.source
+                ingest_source = "cache" if frozen.cache_was_hit else "llm"
+                storage = "frozen"
+                frozen_on = purchase_date
+                track_uncached = False
+            else:
+                decision = compute_shelf_life(
+                    session,
+                    household_id=household_id,
+                    parsed=parsed_item,
+                )
+                shelf_life_days = decision.days
+                shelf_life_source = "cache" if decision.cache_was_hit else "llm"
+                ingest_source = shelf_life_source
+                storage = "default"
+                frozen_on = None
+                track_uncached = not decision.cache_was_hit
             pantry_item = PantryItem(
                 household_id=household_id,
                 raw_name=parsed_item.name,
@@ -159,12 +183,15 @@ async def ingest_photo(
                 qty=parsed_item.qty,
                 unit=parsed_item.unit,
                 purchased_on=purchase_date,
-                shelf_life_days=decision.days,
-                shelf_life_source="cache" if decision.cache_was_hit else "llm",
-                ingest_shelf_life_source="cache" if decision.cache_was_hit else "llm",
-                expires_on=purchase_date + timedelta(days=decision.days),
+                shelf_life_days=shelf_life_days,
+                shelf_life_source=shelf_life_source,
+                ingest_shelf_life_source=ingest_source,
+                expires_on=(frozen_on or purchase_date)
+                + timedelta(days=shelf_life_days),
                 status="active",
                 created_via="receipt",
+                storage=storage,
+                frozen_on=frozen_on,
                 source_receipt_id=receipt.id,
                 created_at=datetime.now(timezone.utc),
             )
@@ -177,7 +204,7 @@ async def ingest_photo(
             summary.inserted_item_shelf_life_days.append(pantry_item.shelf_life_days)
             if is_low_confidence:
                 summary.low_confidence_inserted_ids.append(pantry_item.id)
-            if not decision.cache_was_hit:
+            if track_uncached:
                 summary.uncached_item_ids.append(pantry_item.id)
             summary.inserted_food_count += 1
         session.commit()

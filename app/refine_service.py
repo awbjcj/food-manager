@@ -63,6 +63,8 @@ async def refine_receipt_items(
         item = session.get(PantryItem, item_id)
         if item is None or item.household_id != household_id or not is_untouched(item):
             continue
+        if item.storage == "frozen":
+            continue
         result = await search.lookup_shelf_life(name=item.raw_name, category=item.category)
         if result.cost_micros_usd is not None:
             total_cost += result.cost_micros_usd

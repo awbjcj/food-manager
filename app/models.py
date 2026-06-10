@@ -148,6 +148,8 @@ class CookSession(SQLModel, table=True):
     selected_item_ids: str = "[]"
     candidates_json: Optional[str] = None
     chosen_index: Optional[int] = None
+    purpose: Optional[str] = None
+    search_offset: int = 0
     chat_id: int
     message_id: Optional[int] = None
     llm_cost_micros_usd: Optional[int] = None

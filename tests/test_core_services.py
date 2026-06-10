@@ -15,7 +15,7 @@ from app.ingest_service import (
     ingest_photo,
 )
 from app.llm import AnthropicLLMClient, LLMResult, ParseResult, ParsedItem
-from app.models import Household, PantryItem, Receipt, ShelfLifeCache, User
+from app.models import CookSession, Household, PantryItem, Receipt, ShelfLifeCache, User
 from app.normalization import ALIASES, normalize
 from app.pantry_service import (
     ALLOWED_CATEGORIES,
@@ -85,6 +85,28 @@ def test_recipe_api_keys_optional(monkeypatch):
     assert settings.spoonacular_api_key is None
     monkeypatch.setenv("SPOONACULAR_API_KEY", "spk")
     assert Settings().spoonacular_api_key == "spk"  # type: ignore[call-arg]
+
+
+def test_cook_session_has_purpose_and_offset(session):
+    now = datetime.now(timezone.utc)
+    cook = CookSession(
+        household_id=1,
+        chat_id=1,
+        status="collecting",
+        created_at=now,
+        expires_at=now + timedelta(minutes=10),
+    )
+    session.add(cook)
+    session.commit()
+    session.refresh(cook)
+    assert cook.purpose is None
+    assert cook.search_offset == 0
+    cook.purpose = "quick"
+    cook.search_offset = 6
+    session.add(cook)
+    session.commit()
+    session.refresh(cook)
+    assert (cook.purpose, cook.search_offset) == ("quick", 6)
 
 
 def test_make_engine_and_session_factory(tmp_path):

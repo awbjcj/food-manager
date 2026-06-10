@@ -16,6 +16,7 @@ from sqlmodel import Session
 from app.commands import (
     CommandError,
     parse_callback,
+    parse_correct_reply_marker,
     parse_digest_at,
     parse_invite_mode,
     parse_invite_token,
@@ -925,6 +926,86 @@ async def handle_snooze(
             await msg.answer(f"#{item_id} is not active")
 
 
+async def _propose_and_send_correction(
+    msg,
+    *,
+    session: Session,
+    user: User,
+    item: PantryItem,
+    user_text: str,
+    today,
+    text_llm: TextLLMClient,
+) -> None:
+    assert item.id is not None
+    item_id = item.id
+    try:
+        selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
+        payload, cost = await propose_correct(
+            session,
+            llm=selected_text_llm,
+            household_id=user.household_id,
+            item=item,
+            user_text=user_text,
+            today=today,
+        )
+    except LLMProviderNotConfigured:
+        await msg.answer(
+            f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
+        )
+        return
+    except NullDiff:
+        await msg.answer("no changes detected")
+        return
+    except ProposeCorrectError as exc:
+        await msg.answer(str(exc))
+        return
+    except Exception as exc:
+        log.warning(
+            "correction_propose_failed",
+            extra={
+                "user_id": user.telegram_id,
+                "item_id": item_id,
+                "error_class": type(exc).__name__,
+            },
+        )
+        await msg.answer("couldn't parse that correction - try simpler wording")
+        return
+
+    pending = create_pending(
+        session,
+        household_id=user.household_id,
+        action_type="correct",
+        item_id=item_id,
+        proposed_json=correct_payload_to_json(payload),
+        snapshot_json=item_snapshot_to_json(item),
+        cost_micros_usd=cost,
+        chat_id=msg.chat.id,
+        now=datetime.now(timezone.utc),
+    )
+    assert pending.id is not None
+    text = render_correction_diff(
+        pending_id=pending.id,
+        payload=payload,
+        item_id=item_id,
+        item_raw_name=item.raw_name,
+        lang=user.lang,
+    )
+    keyboard = to_aiogram_keyboard(
+        build_apply_cancel_keyboard(pending_id=pending.id, lang=user.lang)
+    )
+    try:
+        sent = await msg.answer(text, reply_markup=keyboard)
+    except Exception as exc:
+        log.warning(
+            "correct_send_failed",
+            extra={"pending_id": pending.id, "error_class": type(exc).__name__},
+        )
+        mark_cancelled(session, pending=pending)
+        session.commit()
+        return
+    set_message_id(session, pending=pending, message_id=sent.message_id)
+
+
 async def handle_correct(
     msg,
     *,
@@ -954,72 +1035,54 @@ async def handle_correct(
             await msg.answer(f"#{item_id} is {item.status}; cannot correct")
             return
         today = now_provider(user.tz).date()
-        try:
-            selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
-            payload, cost = await propose_correct(
-                session,
-                llm=selected_text_llm,
-                household_id=user.household_id,
-                item=item,
-                user_text=parts[2].strip(),
-                today=today,
-            )
-        except LLMProviderNotConfigured:
-            await msg.answer(
-                f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
-            )
-            return
-        except NullDiff:
-            await msg.answer("no changes detected")
-            return
-        except ProposeCorrectError as exc:
-            await msg.answer(str(exc))
-            return
-        except Exception as exc:
-            log.warning(
-                "correction_propose_failed",
-                extra={
-                    "user_id": user.telegram_id,
-                    "item_id": item_id,
-                    "error_class": type(exc).__name__,
-                },
-            )
-            await msg.answer("couldn't parse that correction - try simpler wording")
-            return
+        await _propose_and_send_correction(
+            msg,
+            session=session,
+            user=user,
+            item=item,
+            user_text=parts[2].strip(),
+            today=today,
+            text_llm=text_llm,
+        )
 
-        pending = create_pending(
-            session,
-            household_id=user.household_id,
-            action_type="correct",
-            item_id=item_id,
-            proposed_json=correct_payload_to_json(payload),
-            snapshot_json=item_snapshot_to_json(item),
-            cost_micros_usd=cost,
-            chat_id=msg.chat.id,
-            now=datetime.now(timezone.utc),
-        )
-        assert pending.id is not None
-        text = render_correction_diff(
-            pending_id=pending.id,
-            payload=payload,
-            item_id=item_id,
-            item_raw_name=item.raw_name,
-            lang=user.lang,
-        )
-        keyboard = to_aiogram_keyboard(
-            build_apply_cancel_keyboard(pending_id=pending.id, lang=user.lang)
-        )
-        try:
-            sent = await msg.answer(text, reply_markup=keyboard)
-        except Exception as exc:
-            log.warning(
-                "correct_send_failed",
-                extra={"pending_id": pending.id, "error_class": type(exc).__name__},
-            )
-            mark_cancelled(session, pending=pending)
-            session.commit()
+
+async def handle_correct_reply(
+    msg,
+    *,
+    session_factory,
+    now_provider,
+    text_llm: TextLLMClient,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+):
+    marker_text = getattr(getattr(msg, "reply_to_message", None), "text", None)
+    item_id = parse_correct_reply_marker(marker_text)
+    if item_id is None:
+        return
+
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
             return
-        set_message_id(session, pending=pending, message_id=sent.message_id)
+        item = session.get(PantryItem, item_id)
+        if item is None or item.household_id != user.household_id:
+            await msg.answer(f"no item #{item_id}")
+            return
+        if item.status != "active":
+            await msg.answer(f"#{item_id} is {item.status}; cannot correct")
+            return
+        user_text = (msg.text or "").strip()
+        if not user_text:
+            await msg.answer("reply with the correction text")
+            return
+        await _propose_and_send_correction(
+            msg,
+            session=session,
+            user=user,
+            item=item,
+            user_text=user_text,
+            today=now_provider(user.tz).date(),
+            text_llm=text_llm,
+        )
 
 
 async def handle_stats(
@@ -2439,6 +2502,15 @@ def build_dispatcher(
             on_user_created=on_user_created,
         )
 
+    async def on_correct_reply(message):
+        await handle_correct_reply(
+            message,
+            session_factory=session_factory,
+            now_provider=now_provider,
+            text_llm=text_llm,
+            on_user_created=on_user_created,
+        )
+
     async def on_stats(message):
         await handle_stats(
             message,
@@ -2568,6 +2640,7 @@ def build_dispatcher(
     dispatcher.message.register(on_llm, Command("llm"))
     dispatcher.message.register(on_prefs, Command("prefs"))
     dispatcher.message.register(on_help, Command("help"))
+    dispatcher.message.register(on_correct_reply, F.text & F.reply_to_message)
     dispatcher.message.register(on_photo, F.photo)
     dispatcher.callback_query.register(on_callback)
     return dispatcher

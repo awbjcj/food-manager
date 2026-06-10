@@ -7,7 +7,8 @@ __pycache__/
 *.egg-info/
 .ruff_cache/
 .remember/
-
+.codex/
+.agents/
 # Secrets & local state
 .env
 food.db

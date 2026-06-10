@@ -8,9 +8,11 @@ from app.cook_models import (
     RecipeCandidates,
     RecipeCriteria,
     RecipeIngredient,
+    SourcedRecipe,
 )
 from app.profile_service import FoodProfile
 from app.recipe_source import (
+    ChainedRecipeSource,
     LlmRecipeSource,
     MEAL_TYPE_TO_SPOON,
     SpoonacularSource,
@@ -217,6 +219,19 @@ class _FakeNutritionLLM:
         ), 500
 
 
+class _StubSource:
+    def __init__(self, recipes, cost=0, ok=True):
+        self._recipes = recipes
+        self._cost = cost
+        self._ok = ok
+
+    def available(self):
+        return self._ok
+
+    async def search(self, criteria):
+        return list(self._recipes), self._cost
+
+
 @pytest.mark.asyncio
 async def test_spoonacular_source_search_maps_and_counts():
     source = SpoonacularSource(http=_FakeHttp(_FakeResp(_CANNED)), api_key="K")
@@ -286,3 +301,47 @@ async def test_llm_recipe_source_pairs_recipe_and_nutrition():
     assert recipes[0].recipe.title == "LLM Stew"
     assert recipes[0].nutrition.health_score == 55
     assert cost == 1500
+
+
+@pytest.mark.asyncio
+async def test_chain_uses_first_nonempty():
+    first = _StubSource([], 0)
+    second = _StubSource(
+        [
+            SourcedRecipe(
+                recipe=RecipeCandidate(
+                    title="B",
+                    cuisine="x",
+                    ingredients=[RecipeIngredient(name="y")],
+                    method_gist="z",
+                ),
+                nutrition=NutritionScore(
+                    health_score=1,
+                    effort="easy",
+                    est_minutes=1,
+                    rationale="r",
+                ),
+            )
+        ],
+        7,
+    )
+    chain = ChainedRecipeSource([first, second])
+    recipes, cost = await chain.search(
+        RecipeCriteria(include_ingredients=["y"], purpose=Purpose.SURPRISE)
+    )
+    assert len(recipes) == 1
+    assert recipes[0].recipe.title == "B"
+    assert cost == 7
+
+
+@pytest.mark.asyncio
+async def test_chain_skips_unavailable():
+    chain = ChainedRecipeSource([
+        _StubSource([], ok=False),
+        _StubSource([], ok=True),
+    ])
+    recipes, cost = await chain.search(
+        RecipeCriteria(include_ingredients=["y"], purpose=Purpose.SURPRISE)
+    )
+    assert recipes == []
+    assert cost is None

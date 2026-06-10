@@ -367,3 +367,22 @@ class LlmRecipeSource:
         for candidate, score in zip(candidates, nutrition.scores):
             out.append(SourcedRecipe(recipe=candidate, nutrition=score, external_id=None))
         return out, total
+
+
+class ChainedRecipeSource:
+    def __init__(self, sources: list):
+        self._sources = sources
+
+    def available(self) -> bool:
+        return any(source.available() for source in self._sources)
+
+    async def search(
+        self, criteria: RecipeCriteria
+    ) -> tuple[list[SourcedRecipe], Optional[int]]:
+        for source in self._sources:
+            if not source.available():
+                continue
+            recipes, cost = await source.search(criteria)
+            if recipes:
+                return recipes, cost
+        return [], None

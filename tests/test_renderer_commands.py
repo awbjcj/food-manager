@@ -21,10 +21,16 @@ from app.ingest_service import IngestSummary
 from app.models import PantryItem
 from app.pantry_service import ListFilter, Stats
 from app.renderer import (
+    build_correct_menu_keyboard,
     build_digest_keyboard,
+    build_item_card_keyboard,
+    build_remove_confirm_keyboard,
+    render_correct_menu,
     render_digest,
     render_ingest_reply,
+    render_item_card,
     render_list,
+    render_remove_confirm,
     render_stats,
 )
 
@@ -242,6 +248,68 @@ def test_render_digest_truncates_at_10():
     assert rendered.rendered_count == 10
     assert "15 more" in rendered.text
     assert len(build_digest_keyboard(rendered.rendered_items, has_more=True, today=today)) == 6
+
+
+def _card_item(item_id=3, name="spinach", storage="default", days=7):
+    return SimpleNamespace(
+        id=item_id,
+        raw_name=name,
+        storage=storage,
+        qty=1,
+        unit=None,
+        shelf_life_days=days,
+        expires_on=date(2026, 6, 9),
+    )
+
+
+def test_card_keyboard_has_all_actions_when_not_frozen():
+    rows = build_item_card_keyboard(_card_item(), lang="en")
+    datas = [button.callback_data for row in rows for button in row]
+    assert "act:ate:3" in datas
+    assert "act:toss:3" in datas
+    assert "act:snooze2:3" in datas
+    assert "act:freeze:3" in datas
+    assert "item:corr:3" in datas
+    assert "item:rm:3" in datas
+    assert "item:list" in datas
+
+
+def test_card_keyboard_hides_freeze_when_frozen():
+    rows = build_item_card_keyboard(_card_item(storage="frozen"), lang="en")
+    datas = [button.callback_data for row in rows for button in row]
+    assert "act:freeze:3" not in datas
+    assert "act:ate:3" in datas
+
+
+def test_render_item_card_reuses_item_line_shape():
+    text = render_item_card(_card_item(), today=date(2026, 6, 9), lang="en")
+    assert text == "🔴 #3 spinach - today"
+
+
+def test_correct_menu_keyboard_and_header():
+    rows = build_correct_menu_keyboard(3, lang="en")
+    datas = [button.callback_data for row in rows for button in row]
+    assert datas[:4] == [
+        "item:nudge:3:p7",
+        "item:nudge:3:p3",
+        "item:nudge:3:m3",
+        "item:nudge:3:today",
+    ]
+    assert "item:ctext:3" in datas
+    assert "item:open:3" in datas
+    header = render_correct_menu(_card_item(days=7), today=date(2026, 6, 9), lang="en")
+    assert header.startswith("✏️ Correct #3 spinach")
+    assert "shelf life 7d" in header
+
+
+def test_remove_confirm():
+    rows = build_remove_confirm_keyboard(3, lang="en")
+    datas = [button.callback_data for row in rows for button in row]
+    assert "item:rmok:3" in datas
+    assert "item:open:3" in datas
+    assert render_remove_confirm(_card_item(), lang="en") == (
+        "Remove #3 spinach?\nThis can't be undone here."
+    )
 
 
 def test_render_list_and_stats():

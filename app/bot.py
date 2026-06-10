@@ -2077,7 +2077,11 @@ async def _refresh_digest_message(
         rendered = render_digest(remaining, today=today, lang=lang, names=names)
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
-                rendered.rendered_item_ids, has_more=rendered.has_more, lang=lang
+                rendered.rendered_items,
+                has_more=rendered.has_more,
+                today=today,
+                lang=lang,
+                names=names,
             )
         )
         try:

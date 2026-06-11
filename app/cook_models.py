@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -42,9 +44,38 @@ class NutritionScores(BaseModel):
     scores: list[NutritionScore]
 
 
+class Purpose(str, Enum):
+    USE_IT_UP = "use_it_up"
+    QUICK = "quick"
+    HEALTHY = "healthy"
+    COMFORT = "comfort"
+    SURPRISE = "surprise"
+
+
+@dataclass(frozen=True)
+class RecipeCriteria:
+    include_ingredients: list[str]
+    purpose: Purpose
+    meal_type: Optional[str] = None
+    cuisine: Optional[str] = None
+    diet: Optional[str] = None
+    intolerances: list[str] = field(default_factory=list)
+    exclude_ingredients: list[str] = field(default_factory=list)
+    max_ready_minutes: Optional[int] = None
+    number: int = 6
+    offset: int = 0
+
+
+class SourcedRecipe(BaseModel):
+    recipe: RecipeCandidate
+    nutrition: NutritionScore
+    external_id: Optional[str] = None
+
+
 class ScoredCandidate(BaseModel):
     recipe: RecipeCandidate
     nutrition: NutritionScore
     expiry_use: float = Field(ge=0.0, le=1.0)
     final_score: float
+    external_id: Optional[str] = None
     shopping_list: list[str] = Field(default_factory=list)

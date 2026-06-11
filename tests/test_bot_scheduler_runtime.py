@@ -278,6 +278,7 @@ async def test_act_callback_refreshes_digest_when_already_eaten(session, monkeyp
         now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
     )
     cb.message.edit_text.assert_awaited_once()
+    assert cb.message.edit_text.await_args is not None
     assert "clear" in cb.message.edit_text.await_args.args[0].lower()
 
 
@@ -319,6 +320,7 @@ async def test_show_all_callback_edits_due_items_in_place(session, monkeypatch):
     )
     cb.message.answer.assert_not_awaited()
     cb.message.edit_text.assert_awaited_once()
+    assert cb.message.edit_text.await_args is not None
     assert "Item 24" in cb.message.edit_text.await_args.args[0]
     datas = {
         button.callback_data

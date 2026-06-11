@@ -6,6 +6,7 @@ from typing import Optional, Protocol
 
 from app.cook_logic import violates_exclusions
 from app.cook_models import (
+    Effort,
     NutritionScore,
     Purpose,
     RecipeCandidate,
@@ -92,7 +93,7 @@ def spoonacular_params(criteria: RecipeCriteria, *, api_key: str) -> dict:
 _SPOON_URL = "https://api.spoonacular.com/recipes/complexSearch"
 
 
-def _effort_for(minutes: Optional[int]) -> str:
+def _effort_for(minutes: Optional[int]) -> Effort:
     if minutes is None:
         return "medium"
     if minutes <= 20:
@@ -104,7 +105,12 @@ def _effort_for(minutes: Optional[int]) -> str:
 
 def _nutrition_rationale(raw: dict) -> str:
     nutrients = (raw.get("nutrition") or {}).get("nutrients") or []
-    wanted = {"Calories": None, "Protein": None, "Fat": None, "Carbohydrates": None}
+    wanted: dict[str, Optional[str]] = {
+        "Calories": None,
+        "Protein": None,
+        "Fat": None,
+        "Carbohydrates": None,
+    }
     for nutrient in nutrients:
         if nutrient.get("name") in wanted:
             wanted[nutrient["name"]] = (

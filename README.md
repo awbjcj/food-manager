@@ -104,7 +104,10 @@ The container runs `bin/run.py` which backs up the database, runs Alembic migrat
 | `DATABASE_PATH` | No | `./food.db` | Path to the SQLite database file |
 | `ANTHROPIC_MODEL` | No | `claude-sonnet-4-6` | Claude model to use for receipt parsing |
 | `ANTHROPIC_TEXT_MODEL` | No | `claude-haiku-4-5-20251001` | Claude model to use for `/correct` and `/add` proposals |
+| `ANTHROPIC_SEARCH_MODEL` | No | `claude-sonnet-4-6` | Claude model used for `/cook` recipe search — **requires web search enabled on the Anthropic workspace** |
 | `OPENAI_MODEL` | No | `gpt-5.4` | OpenAI model to use for receipt parsing |
 | `OPENAI_TEXT_MODEL` | No | `gpt-5.4-mini` | OpenAI model to use for `/correct` and `/add` proposals |
+| `SPOONACULAR_API_KEY` | No | — | Optional Spoonacular key for the `/cook` recipe source chain (degrades gracefully if unset) |
+| `COOK_COST_CEILING_MICROS` | No | `100000` | Per-`/cook` LLM spend ceiling in micro-USD ($0.10); raise if recipes come back empty |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
 | `ENV` | No | `dev` | Set to `prod` for JSON-structured logs |

@@ -1,6 +1,6 @@
 import pytest
 
-from app.cook_models import (
+from app.cook.models import (
     NutritionScore,
     NutritionScores,
     Purpose,
@@ -11,7 +11,7 @@ from app.cook_models import (
     SourcedRecipe,
 )
 from app.profile_service import FoodProfile
-from app.recipe_source import (
+from app.cook.recipe_source import (
     ChainedRecipeSource,
     LlmRecipeSource,
     MEAL_TYPE_TO_SPOON,

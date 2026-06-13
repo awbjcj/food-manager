@@ -4,8 +4,8 @@ import json as _json
 import logging
 from typing import Optional, Protocol
 
-from app.cook_logic import violates_exclusions
-from app.cook_models import (
+from app.cook.logic import violates_exclusions
+from app.cook.models import (
     Effort,
     NutritionScore,
     Purpose,

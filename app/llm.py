@@ -9,6 +9,7 @@ from typing import Any, Literal, Optional, Protocol
 
 from pydantic import BaseModel, Field
 
+from app.llm_transport import with_transport_retry
 from app.profile_service import FoodProfile
 
 Category = Literal[
@@ -365,8 +366,8 @@ class ProfileLLMProviderSelector(ProfileUpdateLLMClient):
 
 
 # The cook-pipeline selectors are duck-typed rather than subclassing the cook
-# Protocols (which live in app.cook_llm and import from this module), so that
-# app.llm has no import dependency on app.cook_llm.
+# Protocols (which live in app.cook.llm and import from this module), so that
+# app.llm has no import dependency on app.cook.llm.
 class SelectionLLMProviderSelector:
     def __init__(self, clients: dict, default_provider: LLMProviderName):
         if default_provider not in clients:
@@ -449,29 +450,18 @@ class AnthropicLLMClient(LLMClient):
         self._sleep = sleep
 
     async def _create_message(self, user_content):
-        for attempt in range(3):
-            try:
-                return await self._sdk.messages.create(
-                    model=self._model,
-                    max_tokens=2048,
-                    system=SYSTEM_PROMPT,
-                    tools=[_PARSE_RECEIPT_TOOL],
-                    tool_choice={"type": "tool", "name": "parse_receipt"},
-                    messages=[{"role": "user", "content": user_content}],
-                )
-            except Exception as exc:
-                if attempt == 2:
-                    log.warning(
-                        "llm_transport_failed_final",
-                        extra={"error_class": type(exc).__name__},
-                    )
-                    raise
-                log.warning(
-                    "llm_transport_failed_retrying",
-                    extra={"error_class": type(exc).__name__},
-                )
-                await self._sleep(2**attempt)
-        raise RuntimeError("unreachable")
+        return await with_transport_retry(
+            lambda: self._sdk.messages.create(
+                model=self._model,
+                max_tokens=2048,
+                system=SYSTEM_PROMPT,
+                tools=[_PARSE_RECEIPT_TOOL],
+                tool_choice={"type": "tool", "name": "parse_receipt"},
+                messages=[{"role": "user", "content": user_content}],
+            ),
+            log_event="llm_transport_failed",
+            sleep=self._sleep,
+        )
 
     async def extract_items_from_image(
         self,
@@ -517,32 +507,21 @@ class OpenAILLMClient(LLMClient):
         self._sleep = sleep
 
     async def _create_response(self, user_content):
-        for attempt in range(3):
-            try:
-                return await self._sdk.responses.parse(
-                    model=self._model,
-                    input=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": user_content},
-                    ],
-                    tools=[_OPENAI_WEB_SEARCH_TOOL],
-                    reasoning=_OPENAI_REASONING,
-                    text_format=ParseResult,
-                    max_output_tokens=2048,
-                )
-            except Exception as exc:
-                if attempt == 2:
-                    log.warning(
-                        "llm_transport_failed_final",
-                        extra={"error_class": type(exc).__name__},
-                    )
-                    raise
-                log.warning(
-                    "llm_transport_failed_retrying",
-                    extra={"error_class": type(exc).__name__},
-                )
-                await self._sleep(2**attempt)
-        raise RuntimeError("unreachable")
+        return await with_transport_retry(
+            lambda: self._sdk.responses.parse(
+                model=self._model,
+                input=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                tools=[_OPENAI_WEB_SEARCH_TOOL],
+                reasoning=_OPENAI_REASONING,
+                text_format=ParseResult,
+                max_output_tokens=2048,
+            ),
+            log_event="llm_transport_failed",
+            sleep=self._sleep,
+        )
 
     async def extract_items_from_image(
         self,
@@ -594,7 +573,7 @@ Output schema (all keys required; use null for unchanged fields):
 
 You receive (in the user message):
   - item_snapshot: {id, raw_name, normalized_name, category, qty, unit,
-                    purchased_on, storage, frozen_on, shelf_life_days,
+                    purchased_on, storage, stored_on, shelf_life_days,
                     expires_on, status}
   - cache_snapshot: null OR {normalized_name, days, category,
                               source, confidence, learned_at}
@@ -713,27 +692,16 @@ class AnthropicTextLLMClient(TextLLMClient):
         self._sleep = sleep
 
     async def _create_message(self, system: str, user_content):
-        for attempt in range(3):
-            try:
-                return await self._sdk.messages.create(
-                    model=self._model,
-                    max_tokens=1024,
-                    system=system,
-                    messages=[{"role": "user", "content": user_content}],
-                )
-            except Exception as exc:
-                if attempt == 2:
-                    log.warning(
-                        "text_llm_transport_failed_final",
-                        extra={"error_class": type(exc).__name__},
-                    )
-                    raise
-                log.warning(
-                    "text_llm_transport_failed_retrying",
-                    extra={"error_class": type(exc).__name__},
-                )
-                await self._sleep(2**attempt)
-        raise RuntimeError("unreachable")
+        return await with_transport_retry(
+            lambda: self._sdk.messages.create(
+                model=self._model,
+                max_tokens=1024,
+                system=system,
+                messages=[{"role": "user", "content": user_content}],
+            ),
+            log_event="text_llm_transport_failed",
+            sleep=self._sleep,
+        )
 
     async def _call_with_schema(self, system: str, user_text: str, parse_fn):
         user_content = [{"type": "text", "text": user_text}]
@@ -822,35 +790,24 @@ class OpenAITextLLMClient(TextLLMClient):
         self._sleep = sleep
 
     async def _create_response(self, system: str, user_text: str, text_format):
-        for attempt in range(3):
-            try:
-                return await self._sdk.responses.parse(
-                    model=self._model,
-                    input=[
-                        {"role": "system", "content": system},
-                        {
-                            "role": "user",
-                            "content": [{"type": "input_text", "text": user_text}],
-                        },
-                    ],
-                    tools=[_OPENAI_WEB_SEARCH_TOOL],
-                    reasoning=_OPENAI_REASONING,
-                    text_format=text_format,
-                    max_output_tokens=1024,
-                )
-            except Exception as exc:
-                if attempt == 2:
-                    log.warning(
-                        "text_llm_transport_failed_final",
-                        extra={"error_class": type(exc).__name__},
-                    )
-                    raise
-                log.warning(
-                    "text_llm_transport_failed_retrying",
-                    extra={"error_class": type(exc).__name__},
-                )
-                await self._sleep(2**attempt)
-        raise RuntimeError("unreachable")
+        return await with_transport_retry(
+            lambda: self._sdk.responses.parse(
+                model=self._model,
+                input=[
+                    {"role": "system", "content": system},
+                    {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": user_text}],
+                    },
+                ],
+                tools=[_OPENAI_WEB_SEARCH_TOOL],
+                reasoning=_OPENAI_REASONING,
+                text_format=text_format,
+                max_output_tokens=1024,
+            ),
+            log_event="text_llm_transport_failed",
+            sleep=self._sleep,
+        )
 
     async def parse_correct(
         self,

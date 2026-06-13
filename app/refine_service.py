@@ -1,43 +1,28 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Optional, Protocol
+from typing import Optional
 
 from sqlmodel import Session
 
 from app.cache import put_cached
 from app.models import PantryItem, Receipt
 
-
-SEARCH_MIN_CONFIDENCE = 0.7
-SHELF_LIFE_DAYS_MIN = 1
-SHELF_LIFE_DAYS_MAX = 730
-
-
-@dataclass(frozen=True)
-class ShelfLifeSearchResult:
-    days: Optional[int]
-    confidence: float
-    cost_micros_usd: Optional[int]
-
-
-class ShelfLifeSearchClient(Protocol):
-    async def lookup_shelf_life(
-        self, *, name: str, category: Optional[str]
-    ) -> ShelfLifeSearchResult: ...
-
-
-def resolve_search_days(result: ShelfLifeSearchResult) -> Optional[int]:
-    if result.confidence < SEARCH_MIN_CONFIDENCE:
-        return None
-    if result.days is None:
-        return None
-    if not (SHELF_LIFE_DAYS_MIN <= result.days <= SHELF_LIFE_DAYS_MAX):
-        return None
-    return result.days
+# The shelf-life search contract now lives in its own module. Re-exported here so
+# existing `from app.refine_service import ShelfLifeSearchResult, ...` callers and
+# tests keep working; new code should import from app.shelf_life_search.
+from app.shelf_life_search import (  # noqa: F401
+    SEARCH_MIN_CONFIDENCE,
+    SHELF_LIFE_DAYS_MAX,
+    SHELF_LIFE_DAYS_MIN,
+    ShelfLifeSearchClient,
+    ShelfLifeSearchResult,
+    resolve_search_days,
+)
 
 
 @dataclass(frozen=True)
@@ -56,21 +41,48 @@ async def refine_receipt_items(
 ) -> RefineResult:
     from app.pantry_service import is_untouched  # local import to avoid circular at module level
 
-    updated: list[int] = []
-    total_cost = 0
-    saw_cost = False
+    # Snapshot phase: pick the items eligible at the start and capture the plain
+    # values the search needs, so the concurrent phase never touches the Session
+    # (SQLAlchemy sessions are not safe to use across concurrent coroutines).
+    # Items already touched here are skipped before any search is fired, so they
+    # cost nothing.
+    snapshots: list[tuple[int, str, Optional[str]]] = []
     for item_id in item_ids:
         item = session.get(PantryItem, item_id)
         if item is None or item.household_id != household_id or not is_untouched(item):
             continue
         if item.storage == "frozen":
             continue
-        result = await search.lookup_shelf_life(name=item.raw_name, category=item.category)
+        snapshots.append((item_id, item.raw_name, item.category))
+
+    if not snapshots:
+        session.commit()
+        return RefineResult([], None)
+
+    # Fan-out phase: one shelf-life lookup per eligible item, concurrently, so a
+    # multi-item receipt costs ~one round-trip of latency instead of N.
+    results = await asyncio.gather(
+        *(
+            search.lookup_shelf_life(name=name, category=category)
+            for _item_id, name, category in snapshots
+        )
+    )
+
+    # Apply phase: sequential and single-session. Re-check is_untouched so a user
+    # edit committed during the search is never clobbered; accrue search cost even
+    # when the write is skipped, matching the pre-concurrency behaviour.
+    updated: list[int] = []
+    total_cost = 0
+    saw_cost = False
+    for (item_id, _name, _category), result in zip(snapshots, results):
         if result.cost_micros_usd is not None:
             total_cost += result.cost_micros_usd
             saw_cost = True
         days = resolve_search_days(result)
         if days is None:
+            continue
+        item = session.get(PantryItem, item_id)
+        if item is None:
             continue
         session.refresh(item)            # pick up any change committed during the await
         if not is_untouched(item):       # user acted on it mid-search -> don't clobber

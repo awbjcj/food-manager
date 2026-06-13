@@ -6,7 +6,7 @@ from sqlmodel import SQLModel, Session, create_engine
 
 import app.bot as bot_mod
 from app.bot import handle_cook, handle_cook_callback, run_cook_and_render
-from app.cook_models import (
+from app.cook.models import (
     NutritionScore,
     NutritionScores,
     RecipeCandidate,

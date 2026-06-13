@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.cook_feedback import feedback_signal, set_feedback
-from app.cook_models import (
+from app.cook.feedback import feedback_signal, set_feedback
+from app.cook.models import (
     NutritionScore,
     RecipeCandidate,
     RecipeIngredient,

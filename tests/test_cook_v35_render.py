@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from app.cook_models import RecipeCandidate, RecipeIngredient
+from app.cook.models import RecipeCandidate, RecipeIngredient
 from app.models import SavedRecipe, ShoppingList
 from app.renderer import (
     build_cook_result_keyboard,

@@ -7,7 +7,7 @@ import pytest
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.models import CookSession, Household, PantryItem, User
-from app.cook_models import (
+from app.cook.models import (
     NutritionScore,
     NutritionScores,
     RecipeCandidate,
@@ -15,14 +15,14 @@ from app.cook_models import (
     RecipeIngredient,
     SelectedItems,
 )
-from app.cook_logic import (
+from app.cook.logic import (
     BLEND_WEIGHTS,
     blended_score,
     expiry_utilization,
     shopping_list,
     violates_exclusions,
 )
-from app.cook_llm import (
+from app.cook.llm import (
     AnthropicNutritionLLM,
     AnthropicRecipeLLM,
     AnthropicSelectionLLM,
@@ -31,7 +31,7 @@ from app.cook_llm import (
     OpenAISelectionLLM,
     SCHEMA_REPAIR_INSTRUCTION,
 )
-from app.cook_service import (
+from app.cook.service import (
     COOK_COST_CEILING_MICROS,
     MIN_USABLE_ITEMS,
     NotEnoughItems,

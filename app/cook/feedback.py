@@ -7,7 +7,7 @@ from typing import Optional
 from pydantic import BaseModel
 from sqlmodel import Session
 
-from app.cook_models import ScoredCandidate
+from app.cook.models import ScoredCandidate
 from app.models import CookSession
 from app.pending_service import utc_naive
 

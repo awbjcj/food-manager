@@ -2,8 +2,8 @@ from datetime import date, datetime, timezone
 
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.cook_models import RecipeCandidate, RecipeIngredient
-from app.favorites_service import (
+from app.cook.models import RecipeCandidate, RecipeIngredient
+from app.cook.favorites_service import (
     list_saved,
     load_saved,
     recipe_from_saved,

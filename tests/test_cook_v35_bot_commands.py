@@ -6,8 +6,8 @@ from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
 from app.bot import handle_favorites, handle_shopping
-from app.cook_models import RecipeCandidate, RecipeIngredient
-from app.favorites_service import save_candidate
+from app.cook.models import RecipeCandidate, RecipeIngredient
+from app.cook.favorites_service import save_candidate
 from app.models import Household, User
 from app.shopping_service import add_missing
 

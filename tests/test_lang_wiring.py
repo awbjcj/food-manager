@@ -13,7 +13,7 @@ from app.bot import (
     handle_shopping,
     run_cook_and_render,
 )
-from app.cook_models import (
+from app.cook.models import (
     NutritionScore,
     NutritionScores,
     RecipeCandidate,
@@ -21,7 +21,7 @@ from app.cook_models import (
     RecipeIngredient,
     SelectedItems,
 )
-from app.favorites_service import save_candidate
+from app.cook.favorites_service import save_candidate
 from app.llm import LLMResult, ParsedItem, ParseResult
 from app.models import CookSession, Household, PantryItem, User
 from app.shopping_service import add_missing

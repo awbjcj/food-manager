@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Optional, Protocol
 
-from app.cook_models import NutritionScores, RecipeCandidates, SelectedItems
+from app.cook.models import NutritionScores, RecipeCandidates, SelectedItems
 from app.llm import (
     _OPENAI_REASONING,
     _OPENAI_WEB_SEARCH_TOOL,
@@ -13,6 +13,7 @@ from app.llm import (
     _extract_json_text,
     _extract_openai_parsed,
 )
+from app.llm_transport import is_retryable_transport_error, with_transport_retry
 
 log = logging.getLogger(__name__)
 
@@ -40,23 +41,6 @@ SCHEMA_REPAIR_INSTRUCTION = (
     "Your last response did not match the schema. Return ONLY valid JSON matching "
     "the schema."
 )
-
-
-def _is_retryable_transport_error(exc: Exception) -> bool:
-    name = type(exc).__name__.lower()
-    return isinstance(exc, (TimeoutError, ConnectionError)) or any(
-        token in name
-        for token in (
-            "timeout",
-            "connection",
-            "rate_limit",
-            "ratelimit",
-            "apistatus",
-            "internalserver",
-            "servererror",
-            "serviceunavailable",
-        )
-    )
 
 
 class SelectionLLMClient(Protocol):
@@ -87,28 +71,17 @@ class _AnthropicJSONClient:
         self._sleep = sleep
 
     async def _create_message(self, system: str, user_content, tools):
-        for attempt in range(3):
-            try:
-                return await self._sdk.messages.create(
-                    model=self._model,
-                    max_tokens=2048,
-                    system=system,
-                    tools=tools,
-                    messages=[{"role": "user", "content": user_content}],
-                )
-            except Exception as exc:
-                if attempt == 2:
-                    log.warning(
-                        "cook_llm_failed_final",
-                        extra={"error_class": type(exc).__name__},
-                    )
-                    raise
-                log.warning(
-                    "cook_llm_failed_retrying",
-                    extra={"error_class": type(exc).__name__},
-                )
-                await self._sleep(2**attempt)
-        raise RuntimeError("unreachable")
+        return await with_transport_retry(
+            lambda: self._sdk.messages.create(
+                model=self._model,
+                max_tokens=2048,
+                system=system,
+                tools=tools,
+                messages=[{"role": "user", "content": user_content}],
+            ),
+            log_event="cook_llm_failed",
+            sleep=self._sleep,
+        )
 
     async def _call(self, system: str, user_text: str, model_cls):
         tools = (
@@ -200,24 +173,12 @@ class _OpenAIJSONClient:
         if self._web_search:
             kwargs["max_tool_calls"] = 3
 
-        for attempt in range(3):
-            try:
-                return await self._sdk.responses.parse(**kwargs)
-            except Exception as exc:
-                if not _is_retryable_transport_error(exc):
-                    raise
-                if attempt == 2:
-                    log.warning(
-                        "cook_llm_failed_final",
-                        extra={"error_class": type(exc).__name__},
-                    )
-                    raise
-                log.warning(
-                    "cook_llm_failed_retrying",
-                    extra={"error_class": type(exc).__name__},
-                )
-                await self._sleep(2**attempt)
-        raise RuntimeError("unreachable")
+        return await with_transport_retry(
+            lambda: self._sdk.responses.parse(**kwargs),
+            log_event="cook_llm_failed",
+            sleep=self._sleep,
+            classify=is_retryable_transport_error,
+        )
 
     async def _call(self, system, user_text, model_cls):
         tools = [_OPENAI_WEB_SEARCH_TOOL] if self._web_search else []

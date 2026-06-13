@@ -7,8 +7,8 @@ from typing import Optional
 
 from sqlmodel import Session, select
 
-from app.cook_logic import shopping_list
-from app.cook_models import RecipeCandidate, RecipeIngredient
+from app.cook.logic import shopping_list
+from app.cook.models import RecipeCandidate, RecipeIngredient
 from app.models import SavedRecipe
 from app.pantry_service import active_pantry_names
 from app.pending_service import utc_naive

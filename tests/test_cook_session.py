@@ -8,7 +8,7 @@ import pytest
 import sqlalchemy as sa
 from sqlmodel import SQLModel, Session, create_engine
 
-from app.cook_session_service import (
+from app.cook.session_service import (
     COOK_TTL_MINUTES,
     accrue_cost,
     create_cook_session,

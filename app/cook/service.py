@@ -6,15 +6,15 @@ from datetime import date
 
 from sqlmodel import Session
 
-from app.cook_logic import (
+from app.cook.logic import (
     blended_score,
     expiry_utilization,
     shopping_list,
     violates_exclusions,
 )
-from app.cook_llm import NutritionLLMClient, RecipeLLMClient, SelectionLLMClient
-from app.cook_models import RecipeCandidate, ScoredCandidate
-from app.cook_session_service import accrue_cost
+from app.cook.llm import NutritionLLMClient, RecipeLLMClient, SelectionLLMClient
+from app.cook.models import RecipeCandidate, ScoredCandidate
+from app.cook.session_service import accrue_cost
 from app.models import CookSession, PantryItem
 from app.pantry_service import ListFilter, list_active
 from app.profile_service import FoodProfile

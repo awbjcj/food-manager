@@ -7,7 +7,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.bot as bot_mod
 from app.bot import handle_callback, run_cook_and_render
-from app.cook_models import (
+from app.cook.models import (
     NutritionScore,
     NutritionScores,
     RecipeCandidate,
@@ -16,7 +16,7 @@ from app.cook_models import (
     ScoredCandidate,
     SelectedItems,
 )
-from app.favorites_service import list_saved
+from app.cook.favorites_service import list_saved
 from app.models import CookSession, Household, PantryItem, SavedRecipe, ShoppingList, User
 from app.shopping_service import list_pending
 from tests.fakes import FakeNutritionLLM, FakeRecipeLLM, FakeSelectionLLM

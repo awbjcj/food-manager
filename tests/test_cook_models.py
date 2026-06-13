@@ -1,4 +1,4 @@
-from app.cook_models import (
+from app.cook.models import (
     NutritionScore,
     Purpose,
     RecipeCandidate,

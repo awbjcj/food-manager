@@ -41,12 +41,16 @@ The date from which a pantry item's shelf life is counted.
 _Avoid_: Freshness date
 
 **Storage State**:
-How a pantry item is kept for shelf-life purposes.
+How a pantry item is kept for shelf-life purposes: `default` (counter/pantry), `fridge` (chilled), or `frozen`. Transitions are one-way forward (`default` → `fridge` → `frozen`); `frozen` is terminal.
 _Avoid_: Food category, pantry location
 
-**Frozen Date**:
-The date a pantry item entered frozen storage.
-_Avoid_: Purchase date, thaw date
+**Chilled Pantry Item**:
+A pantry item moved into the fridge to extend its durability, drawing its shelf life from refrigerator-storage times rather than the counter/pantry default.
+_Avoid_: Frozen item, snoozed item
+
+**Storage Date**:
+The date a pantry item entered its current non-default **Storage State** (`fridge` or `frozen`). Generalizes the former frozen-only date so every state shares one **Shelf-Life Origin** rule.
+_Avoid_: Purchase date, thaw date, freshness date
 
 **Shelf-Life Correction**:
 A user correction that fixes one pantry item's expiry and teaches that user's future estimates for the same normalized food.
@@ -62,9 +66,10 @@ _Avoid_: One-off expiry edit
 - An **Active Pantry Item** may have reminders suppressed until a future date.
 - A **Snooze** does not change a pantry item's expiry date or shelf life.
 - A **Pantry Item** has one **Storage State**.
-- A **Frozen Date** exists only for a pantry item in frozen **Storage State**.
+- A **Storage Date** exists only for a pantry item in a non-default **Storage State** (`fridge` or `frozen`).
 - A **Purchase Date** is the default **Shelf-Life Origin**.
-- A **Frozen Date** is the **Shelf-Life Origin** for a pantry item in frozen **Storage State**.
+- A **Storage Date** is the **Shelf-Life Origin** for a pantry item in `fridge` or `frozen` **Storage State**.
+- A **Chilled Pantry Item** may still be moved to `frozen`; the move resets its **Storage Date** and **Shelf Life**.
 - A **Shelf Life** determines a pantry item's expiry date from its **Shelf-Life Origin**.
 - A **Shelf-Life Correction** applies to one pantry item and that user's future pantry items with the same normalized food.
 - A **Tossed Pantry Item** counts as waste; a **Removed Pantry Item** does not.

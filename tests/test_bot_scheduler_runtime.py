@@ -301,8 +301,30 @@ async def test_act_freeze_callback_extends_expiry(session, monkeypatch):
     frozen = session.get(PantryItem, item.id)
     assert frozen is not None
     assert frozen.storage == "frozen"
-    assert frozen.frozen_on == today
+    assert frozen.stored_on == today
     assert frozen.expires_on == today + timedelta(days=270)
+
+
+@pytest.mark.asyncio
+async def test_act_fridge_callback_chills_and_extends_expiry(session, monkeypatch):
+    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    today = date(2026, 5, 26)
+    item = _add_item(session, name="Chicken", days=2)
+    cb = _cb(f"act:fridge:{item.id}")
+    cb.message.edit_text = AsyncMock()
+    await handle_callback(
+        cb,
+        session_factory=lambda: session,
+        now_provider=lambda tz: datetime.combine(
+            today, datetime.min.time(), timezone.utc
+        ),
+    )
+    chilled = session.get(PantryItem, item.id)
+    assert chilled is not None
+    assert chilled.storage == "fridge"
+    assert chilled.stored_on == today
+    # Acknowledged the tap (answer-first) so the button never appears stuck.
+    cb.answer.assert_awaited()
 
 
 @pytest.mark.asyncio

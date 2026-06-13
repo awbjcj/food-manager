@@ -208,7 +208,7 @@ def register_sweep_expired_pendings(
 
 
 def _cook_sweep_job(session_factory: SessionFactory) -> None:
-    from app.cook_session_service import sweep_expired_cooks
+    from app.cook import sweep_expired_cooks
 
     try:
         with session_factory() as session:

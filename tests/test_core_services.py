@@ -81,10 +81,11 @@ def test_recipe_api_keys_optional(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "t")
     monkeypatch.setenv("ALLOWED_TELEGRAM_USER_ID", "1")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
-    settings = Settings()  # type: ignore[call-arg]
+    monkeypatch.delenv("SPOONACULAR_API_KEY", raising=False)
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.spoonacular_api_key is None
     monkeypatch.setenv("SPOONACULAR_API_KEY", "spk")
-    assert Settings().spoonacular_api_key == "spk"  # type: ignore[call-arg]
+    assert Settings(_env_file=None).spoonacular_api_key == "spk"  # type: ignore[call-arg]
 
 
 def test_cook_session_has_purpose_and_offset(session):

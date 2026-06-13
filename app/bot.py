@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import logging
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Awaitable, Callable, Optional, cast
+from datetime import date, datetime, timezone
+from typing import AsyncIterator, Awaitable, Callable, Optional, cast
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -43,22 +44,21 @@ from app.correction_service import (
     propose_add,
     propose_correct,
 )
-from app.cook_feedback import set_feedback
-from app.cook_logic import missing_ingredients
-from app.cook_models import ScoredCandidate
-from app.cook_service import NotEnoughItems, run_cook
-from app.cook_session_service import (
+from app.cook import (
+    NotEnoughItems,
+    ScoredCandidate,
     create_cook_session,
-    load_cook_session,
-    mark_status,
-    set_message_id as set_cook_message_id,
-)
-from app.favorites_service import (
     list_saved,
+    load_cook_session,
     load_saved,
+    mark_status,
+    missing_ingredients,
     recipe_from_saved,
     recook_shopping_list,
+    run_cook,
     save_candidate,
+    set_feedback,
+    set_message_id as set_cook_message_id,
 )
 from app.shopping_service import add_missing, check_off, list_pending
 from app.ingest_service import DuplicateReceipt, ingest_photo
@@ -87,13 +87,15 @@ from app.invite_service import (
 )
 from app.models import CookSession, Household, PantryItem, User
 from app.refine_service import run_receipt_refine
+from app.storage_state import shelf_life_origin
+from app.callback_dispatch import answer as dispatch_answer, edit_or_resend
 from app.pantry_service import (
     NotOwnerOrMissing,
     active_pantry_names,
     compute_nudge_days,
     compute_stats,
     correct_item,
-    freeze_item,
+    move_to_storage,
     list_active,
     list_digest_due,
     mark_eaten,
@@ -255,6 +257,11 @@ def _require_user(user: User | None) -> User:
     return user
 
 
+def _require_today(today: date | None) -> date:
+    assert today is not None
+    return today
+
+
 def _available_llm_providers(
     llm: LLMClient, text_llm: TextLLMClient
 ) -> tuple[str, ...]:
@@ -349,6 +356,43 @@ async def _guard(
     if decision.created:
         on_user_created(user)
     return user
+
+
+@dataclass
+class _RequestContext:
+    """What every authorized command needs before it does domain work.
+
+    ``today`` is the sender's local date, resolved once here; it is ``None`` only
+    for handlers that do not need it (those open the request without a clock).
+    """
+
+    session: Session
+    user: User
+    today: Optional[date]
+
+
+@asynccontextmanager
+async def _request(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+    now_provider: Optional[NowProvider] = None,
+) -> AsyncIterator[Optional["_RequestContext"]]:
+    """Open a session, authorize the sender, and resolve today in one place.
+
+    Yields a ``_RequestContext`` for an authorized member, or ``None`` when the
+    sender was rejected (the handler should just return). This is the one home for
+    the per-request preamble every command used to repeat: the session lifetime,
+    the single auth gate (``_guard``), and the timezone->today rule.
+    """
+    with session_factory() as session:
+        user = await _guard(msg, session, on_user_created=on_user_created)
+        if user is None:
+            yield None
+            return
+        today = now_provider(user.tz).date() if now_provider is not None else None
+        yield _RequestContext(session=session, user=user, today=today)
 
 
 def _start_token(text: str | None) -> Optional[str]:
@@ -475,10 +519,14 @@ async def handle_invite(
     bot: Bot,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         try:
             max_uses = parse_invite_mode(list((msg.text or "").split()[1:]))
         except CommandError as exc:
@@ -523,10 +571,14 @@ async def handle_household(
     session_factory: _SessionFactory,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         members = list_members(session, household_id=user.household_id)
         lines = [t("household.title", user.lang, n=len(members))]
         for member in members:
@@ -547,10 +599,14 @@ async def handle_leave(
     unschedule: Callable[[int], None],
     on_user_created: Callable[[User], None] = _noop_user_created,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         # Capture before leave_household deletes the row — `user` is detached
         # after the delete+commit, so reading user.* below would raise.
         lang = user.lang
@@ -571,10 +627,14 @@ async def handle_remove(
     unschedule: Callable[[int], None],
     on_user_created: Callable[[User], None] = _noop_user_created,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         lang = user.lang
         try:
             target_id = parse_member_id(list((msg.text or "").split()[1:]))
@@ -604,10 +664,14 @@ async def handle_remove(
 async def handle_tz(
     msg, *, session_factory: _SessionFactory, reschedule: Callable[[User], None]
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=reschedule)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=reschedule,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2:
             await msg.answer("usage: /tz <IANA timezone>")
@@ -630,10 +694,14 @@ async def handle_lang(
     session_factory: _SessionFactory,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         try:
             lang = parse_lang(list((msg.text or "").split()[1:]))
         except CommandError as exc:
@@ -653,10 +721,14 @@ async def handle_lang(
 async def handle_digest_at(
     msg, *, session_factory: _SessionFactory, reschedule: Callable[[User], None]
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=reschedule)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=reschedule,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2:
             await msg.answer("usage: /digest_at <hour 0..23>")
@@ -681,16 +753,20 @@ async def handle_list(
     on_user_created: Callable[[User], None] = _noop_user_created,
     translation_llm=None,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+        now_provider=now_provider,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         try:
             list_filter = parse_list_filter(list((msg.text or "").split()[1:]))
         except CommandError as exc:
             await msg.answer(str(exc))
             return
-        today = now_provider(user.tz).date()
         items = list_active(
             session, household_id=user.household_id, f=list_filter, today=today
         )
@@ -712,15 +788,19 @@ async def handle_add(
     on_user_created: Callable[[User], None] = _noop_user_created,
     search=None,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+        now_provider=now_provider,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2 or not parts[1].strip():
             await msg.answer("usage: /add <free text - name, category, expiry>")
             return
-        today = now_provider(user.tz).date()
         try:
             selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
             proposals, _ = await propose_add(
@@ -792,10 +872,15 @@ async def _terminal_cmd(
     action_word,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+        now_provider=now_provider,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2:
             await msg.answer(f"usage: /{action_word} <item_id>")
@@ -811,7 +896,7 @@ async def _terminal_cmd(
                 session,
                 household_id=user.household_id,
                 item_id=item_id,
-                today=now_provider(user.tz).date(),
+                today=today,
             )
         except NotOwnerOrMissing:
             await msg.answer(f"no item #{item_id}")
@@ -888,10 +973,15 @@ async def handle_snooze(
     now_provider,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+        now_provider=now_provider,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         item_id: int
         try:
             item_id, days = parse_snooze_args(list((msg.text or "").split()[1:]))
@@ -903,7 +993,7 @@ async def handle_snooze(
                 session,
                 household_id=user.household_id,
                 item_id=item_id,
-                today=now_provider(user.tz).date(),
+                today=today,
                 days=days,
             )
         except NotOwnerOrMissing:
@@ -933,7 +1023,7 @@ async def _propose_and_send_correction(
     user: User,
     item: PantryItem,
     user_text: str,
-    today,
+    today: date,
     text_llm: TextLLMClient,
 ) -> None:
     assert item.id is not None
@@ -1014,10 +1104,15 @@ async def handle_correct(
     text_llm: TextLLMClient,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+        now_provider=now_provider,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         parts = (msg.text or "").split(maxsplit=2)
         if len(parts) < 3 or not parts[2].strip():
             await msg.answer("usage: /correct <item_id> <free text>")
@@ -1034,7 +1129,6 @@ async def handle_correct(
         if item.status != "active":
             await msg.answer(f"#{item_id} is {item.status}; cannot correct")
             return
-        today = now_provider(user.tz).date()
         await _propose_and_send_correction(
             msg,
             session=session,
@@ -1059,10 +1153,15 @@ async def handle_correct_reply(
     if item_id is None:
         return
 
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+        now_provider=now_provider,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         item = session.get(PantryItem, item_id)
         if item is None or item.household_id != user.household_id:
             await msg.answer(f"no item #{item_id}")
@@ -1080,7 +1179,7 @@ async def handle_correct_reply(
             user=user,
             item=item,
             user_text=user_text,
-            today=now_provider(user.tz).date(),
+            today=today,
             text_llm=text_llm,
         )
 
@@ -1092,10 +1191,14 @@ async def handle_stats(
     now_provider,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         now = now_provider(user.tz)
         stats = compute_stats(
             session,
@@ -1113,10 +1216,14 @@ async def handle_shopping(
     on_user_created: Callable[[User], None] = _noop_user_created,
     translation_llm=None,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         items = list_pending(session, household_id=user.household_id)
         names = await _translate_for_render(
             session,
@@ -1141,10 +1248,14 @@ async def handle_favorites(
     on_user_created: Callable[[User], None] = _noop_user_created,
     translation_llm=None,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         recipes = list_saved(session, household_id=user.household_id)
         names = await _translate_for_render(
             session,
@@ -1171,10 +1282,14 @@ async def handle_cook(
     now_provider: NowProvider,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         now = now_provider(user.tz)
         cook = create_cook_session(
             session,
@@ -1198,10 +1313,14 @@ async def handle_llm(
     text_llm: TextLLMClient,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         try:
             provider = parse_llm_provider((msg.text or "").split()[1:])
         except CommandError as exc:
@@ -1230,10 +1349,14 @@ async def handle_prefs(
     profile_llm: ProfileUpdateLLMClient,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
         household = session.get(Household, user.household_id)
         if household is None:
             await msg.answer("couldn't load your household profile")
@@ -1274,10 +1397,14 @@ async def handle_help(
     session_factory,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user = ctx.session, ctx.user
     await msg.answer(t("help.body", user.lang))
 
 
@@ -1294,15 +1421,19 @@ async def handle_photo(
     bot=None,
     translation_llm=None,
 ) -> None:
-    with session_factory() as session:
-        user = await _guard(msg, session, on_user_created=on_user_created)
-        if user is None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+        now_provider=now_provider,
+    ) as ctx:
+        if ctx is None:
             return
+        session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         if not msg.photo:
             await msg.answer("send a photo of a receipt")
             return
         file_id = msg.photo[-1].file_id
-        today = now_provider(user.tz).date()
         log.info(
             "receipt_ingest_started",
             extra={"user_id": user.telegram_id, "photo_file_id": file_id},
@@ -1732,140 +1863,89 @@ async def run_cook_and_render(
 async def handle_item_callback(
     cb, *, session_factory, now_provider, translation_llm=None
 ) -> None:
+    # Acknowledge first, render after: every branch answers the callback before
+    # any translation or edit so the button never appears to "do nothing", and
+    # all rendering goes through edit_or_resend so a failed in-place edit falls
+    # back to a fresh message instead of being silently swallowed.
     try:
         action = parse_item_callback(cb.data)
     except CommandError:
-        await cb.answer("unrecognized action")
+        await dispatch_answer(cb, "unrecognized action")
         return
 
     with session_factory() as session:
         user = _authorized_callback_user(session, cb.from_user.id)
         if user is None:
-            await cb.answer("not authorized", show_alert=False)
+            await dispatch_answer(cb, "not authorized")
             return
         today = now_provider(user.tz).date()
 
-        if action.kind == "list":
+        async def refresh() -> None:
             await _refresh_digest_message(
-                cb,
-                session,
-                user.household_id,
-                today,
-                lang=user.lang,
+                cb, session, user.household_id, today,
+                lang=user.lang, translation_llm=translation_llm,
+            )
+
+        async def item_names(item) -> dict:
+            return await _translate_for_render(
+                session, lang=user.lang, texts=[item.raw_name],
                 translation_llm=translation_llm,
             )
-            await cb.answer()
+
+        if action.kind == "list":
+            await dispatch_answer(cb)
+            await refresh()
             return
 
         item_id = action.item_id
         assert item_id is not None
         item = session.get(PantryItem, item_id)
         if item is None or item.household_id != user.household_id:
-            await cb.answer("item not found")
-            await _refresh_digest_message(
-                cb,
-                session,
-                user.household_id,
-                today,
-                lang=user.lang,
-                translation_llm=translation_llm,
-            )
+            await dispatch_answer(cb, "item not found")
+            await refresh()
             return
         if item.status != "active":
-            await cb.answer(f"#{item_id} already updated")
-            await _refresh_digest_message(
-                cb,
-                session,
-                user.household_id,
-                today,
-                lang=user.lang,
-                translation_llm=translation_llm,
-            )
-            return
-
-        names = await _translate_for_render(
-            session,
-            lang=user.lang,
-            texts=[item.raw_name],
-            translation_llm=translation_llm,
-        )
-
-        if action.kind == "open":
-            await _safe_edit_cb(
-                cb,
-                render_item_card(item, today=today, lang=user.lang, names=names),
-                to_aiogram_keyboard(build_item_card_keyboard(item, lang=user.lang)),
-            )
-            await cb.answer()
-            return
-
-        if action.kind == "corr":
-            await _safe_edit_cb(
-                cb,
-                render_correct_menu(item, today=today, lang=user.lang, names=names),
-                to_aiogram_keyboard(build_correct_menu_keyboard(item_id, lang=user.lang)),
-            )
-            await cb.answer()
+            await dispatch_answer(cb, f"#{item_id} already updated")
+            await refresh()
             return
 
         if action.kind == "nudge":
             assert action.nudge_code is not None
-            origin = item.frozen_on or item.purchased_on
             new_days = compute_nudge_days(
                 current_days=item.shelf_life_days,
-                origin=origin,
+                origin=shelf_life_origin(item),
                 today=today,
                 code=action.nudge_code,
             )
             item = correct_item(
-                session,
-                household_id=user.household_id,
-                item_id=item_id,
-                days=new_days,
-                today=today,
+                session, household_id=user.household_id,
+                item_id=item_id, days=new_days, today=today,
             )
-            await _safe_edit_cb(
+            await dispatch_answer(cb, "updated")
+            names = await item_names(item)
+            await edit_or_resend(
                 cb,
                 render_correct_menu(item, today=today, lang=user.lang, names=names),
                 to_aiogram_keyboard(build_correct_menu_keyboard(item_id, lang=user.lang)),
             )
-            await cb.answer("updated")
-            return
-
-        if action.kind == "rm":
-            await _safe_edit_cb(
-                cb,
-                render_remove_confirm(item, lang=user.lang, names=names),
-                to_aiogram_keyboard(build_remove_confirm_keyboard(item_id, lang=user.lang)),
-            )
-            await cb.answer()
             return
 
         if action.kind == "rmok":
             mark_removed(
-                session,
-                household_id=user.household_id,
-                item_id=item_id,
-                today=today,
+                session, household_id=user.household_id,
+                item_id=item_id, today=today,
             )
-            await _refresh_digest_message(
-                cb,
-                session,
-                user.household_id,
-                today,
-                lang=user.lang,
-                translation_llm=translation_llm,
-            )
-            await cb.answer("removed")
+            await dispatch_answer(cb, "removed")
+            await refresh()
             return
 
         if action.kind == "ctext":
+            await dispatch_answer(cb)
+            names = await item_names(item)
             display_name = names.get(item.raw_name, item.raw_name)
             prompt = t(
-                "correct.freetext_prompt",
-                user.lang,
-                id=item_id,
-                name=display_name,
+                "correct.freetext_prompt", user.lang,
+                id=item_id, name=display_name,
             )
             try:
                 await cb.message.answer(prompt, reply_markup=ForceReply())
@@ -1874,8 +1954,29 @@ async def handle_item_callback(
                     "correct_prompt_failed",
                     extra={"error_class": type(exc).__name__},
                 )
-            await cb.answer()
             return
+
+        # Pure view changes: acknowledge, then render the requested screen.
+        await dispatch_answer(cb)
+        names = await item_names(item)
+        if action.kind == "open":
+            await edit_or_resend(
+                cb,
+                render_item_card(item, today=today, lang=user.lang, names=names),
+                to_aiogram_keyboard(build_item_card_keyboard(item, lang=user.lang)),
+            )
+        elif action.kind == "corr":
+            await edit_or_resend(
+                cb,
+                render_correct_menu(item, today=today, lang=user.lang, names=names),
+                to_aiogram_keyboard(build_correct_menu_keyboard(item_id, lang=user.lang)),
+            )
+        elif action.kind == "rm":
+            await edit_or_resend(
+                cb,
+                render_remove_confirm(item, lang=user.lang, names=names),
+                to_aiogram_keyboard(build_remove_confirm_keyboard(item_id, lang=user.lang)),
+            )
 
 
 async def handle_callback(
@@ -2120,19 +2221,20 @@ async def handle_callback(
                     today=today,
                     days=2,
                 )
-            elif action.verb == "freeze":
-                result = await freeze_item(
+            elif action.verb in ("freeze", "fridge"):
+                result = await move_to_storage(
                     session,
                     household_id=user.household_id,
                     item_id=item_id,
+                    state="frozen" if action.verb == "freeze" else "fridge",
                     today=today,
                     search=search,
                 )
             else:
-                await cb.answer("unrecognized action")
+                await dispatch_answer(cb, "unrecognized action")
                 return
         except NotOwnerOrMissing:
-            await cb.answer("item not found")
+            await dispatch_answer(cb, "item not found")
             await _refresh_digest_message(
                 cb,
                 session,
@@ -2151,6 +2253,13 @@ async def handle_callback(
                     "action": action.verb,
                 },
             )
+        # Acknowledge before the (slow) translate+render in the refresh.
+        await dispatch_answer(
+            cb,
+            f"#{item_id} -> {action.verb}"
+            if result.applied
+            else f"#{item_id} already updated",
+        )
         await _refresh_digest_message(
             cb,
             session,
@@ -2159,18 +2268,13 @@ async def handle_callback(
             lang=user.lang,
             translation_llm=translation_llm,
         )
-        await cb.answer(
-            f"#{item_id} -> {action.verb}"
-            if result.applied
-            else f"#{item_id} already updated"
-        )
 
 
 async def _handle_pending_callback(
     cb,
     *,
     session: Session,
-    today,
+    today: date,
     household_id: int,
     pending_id: int,
     verb: str,
@@ -2303,7 +2407,7 @@ async def _handle_pending_callback(
 
 
 async def _refresh_digest_message(
-    cb, session, household_id: int, today, *, lang: str = "en", translation_llm=None
+    cb, session, household_id: int, today: date, *, lang: str = "en", translation_llm=None
 ) -> None:
     remaining = list_digest_due(session, household_id=household_id, today=today)
     if remaining:
@@ -2323,21 +2427,9 @@ async def _refresh_digest_message(
                 names=names,
             )
         )
-        try:
-            await cb.message.edit_text(rendered.text, reply_markup=keyboard)
-        except Exception as exc:
-            log.warning(
-                "digest_edit_failed",
-                extra={"error_class": type(exc).__name__},
-            )
+        await edit_or_resend(cb, rendered.text, keyboard)
         return
-    try:
-        await cb.message.edit_text(t("digest.pantry_clear", lang))
-    except Exception as exc:
-        log.warning(
-            "digest_edit_failed",
-            extra={"error_class": type(exc).__name__},
-        )
+    await edit_or_resend(cb, t("digest.pantry_clear", lang))
 
 
 def to_aiogram_keyboard(rows: list[list[CallbackButton]]) -> InlineKeyboardMarkup:
@@ -2352,6 +2444,39 @@ def to_aiogram_keyboard(rows: list[list[CallbackButton]]) -> InlineKeyboardMarku
             for row in rows
         ]
     )
+
+
+# The command roster: each row is (command name, handler, the injected deps the
+# handler needs). `build_dispatcher` binds the live deps and registers each row,
+# so adding a command is one line here instead of a forwarding closure plus a
+# separate `register` call. The two non-command message routes (correction reply,
+# photo) and the callback router are wired explicitly below because their triggers
+# and dispatch differ.
+_MESSAGE_COMMANDS: tuple[tuple[str, Callable[..., Awaitable[None]], tuple[str, ...]], ...] = (
+    ("start", handle_start, ("session_factory", "on_user_created", "bot")),
+    ("invite", handle_invite, ("session_factory", "bot", "on_user_created")),
+    ("join", handle_join, ("session_factory", "on_user_created", "bot")),
+    ("household", handle_household, ("session_factory", "on_user_created")),
+    ("leave", handle_leave, ("session_factory", "unschedule", "on_user_created")),
+    ("remove", handle_remove, ("session_factory", "unschedule", "on_user_created")),
+    ("tz", handle_tz, ("session_factory", "reschedule")),
+    ("lang", handle_lang, ("session_factory", "on_user_created")),
+    ("digest_at", handle_digest_at, ("session_factory", "reschedule")),
+    ("list", handle_list, ("session_factory", "now_provider", "on_user_created", "translation_llm")),
+    ("add", handle_add, ("session_factory", "now_provider", "text_llm", "on_user_created", "search")),
+    ("ate", handle_ate, ("session_factory", "now_provider", "on_user_created")),
+    ("toss", handle_toss, ("session_factory", "now_provider", "on_user_created")),
+    ("delete", handle_delete, ("session_factory", "now_provider", "on_user_created")),
+    ("snooze", handle_snooze, ("session_factory", "now_provider", "on_user_created")),
+    ("correct", handle_correct, ("session_factory", "now_provider", "text_llm", "on_user_created")),
+    ("stats", handle_stats, ("session_factory", "now_provider", "on_user_created")),
+    ("cook", handle_cook, ("session_factory", "now_provider", "on_user_created")),
+    ("shopping", handle_shopping, ("session_factory", "now_provider", "on_user_created", "translation_llm")),
+    ("favorites", handle_favorites, ("session_factory", "on_user_created", "translation_llm")),
+    ("llm", handle_llm, ("session_factory", "llm", "text_llm", "on_user_created")),
+    ("prefs", handle_prefs, ("session_factory", "profile_llm", "on_user_created")),
+    ("help", handle_help, ("session_factory", "on_user_created")),
+)
 
 
 def build_dispatcher(
@@ -2382,205 +2507,58 @@ def build_dispatcher(
             raise RuntimeError("telegram download returned no file object")
         return downloaded.read()
 
-    async def on_start(message):
-        await handle_start(
-            message,
-            session_factory=session_factory,
-            on_user_created=on_user_created,
-            bot=bot,
-        )
+    deps = {
+        "session_factory": session_factory,
+        "now_provider": now_provider,
+        "on_user_created": on_user_created,
+        "reschedule": reschedule,
+        "unschedule": unschedule,
+        "llm": llm,
+        "text_llm": text_llm,
+        "profile_llm": profile_llm,
+        "search": search,
+        "translation_llm": translation_llm,
+        "bot": bot,
+        "photo_downloader": downloader,
+        "spawn": asyncio.create_task,
+    }
 
-    async def on_invite(message):
-        await handle_invite(
-            message,
-            session_factory=session_factory,
-            bot=bot,
-            on_user_created=on_user_created,
-        )
+    def _bind(handler, *dep_names):
+        kwargs = {name: deps[name] for name in dep_names}
 
-    async def on_join(message):
-        await handle_join(
-            message,
-            session_factory=session_factory,
-            on_user_created=on_user_created,
-            bot=bot,
-        )
+        async def _registered(event):
+            await handler(event, **kwargs)
 
-    async def on_household(message):
-        await handle_household(
-            message,
-            session_factory=session_factory,
-            on_user_created=on_user_created,
-        )
+        return _registered
 
-    async def on_leave(message):
-        await handle_leave(
-            message,
-            session_factory=session_factory,
-            unschedule=unschedule,
-            on_user_created=on_user_created,
-        )
+    for _name, _handler, _dep_names in _MESSAGE_COMMANDS:
+        dispatcher.message.register(_bind(_handler, *_dep_names), Command(_name))
 
-    async def on_remove(message):
-        await handle_remove(
-            message,
-            session_factory=session_factory,
-            unschedule=unschedule,
-            on_user_created=on_user_created,
-        )
-
-    async def on_tz(message):
-        await handle_tz(message, session_factory=session_factory, reschedule=reschedule)
-
-    async def on_lang(message):
-        await handle_lang(
-            message, session_factory=session_factory, on_user_created=on_user_created
-        )
-
-    async def on_digest_at(message):
-        await handle_digest_at(
-            message, session_factory=session_factory, reschedule=reschedule
-        )
-
-    async def on_list(message):
-        await handle_list(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            on_user_created=on_user_created,
-            translation_llm=translation_llm,
-        )
-
-    async def on_add(message):
-        await handle_add(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            text_llm=text_llm,
-            on_user_created=on_user_created,
-            search=search,
-        )
-
-    async def on_ate(message):
-        await handle_ate(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            on_user_created=on_user_created,
-        )
-
-    async def on_toss(message):
-        await handle_toss(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            on_user_created=on_user_created,
-        )
-
-    async def on_delete(message):
-        await handle_delete(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            on_user_created=on_user_created,
-        )
-
-    async def on_snooze(message):
-        await handle_snooze(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            on_user_created=on_user_created,
-        )
-
-    async def on_correct(message):
-        await handle_correct(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            text_llm=text_llm,
-            on_user_created=on_user_created,
-        )
-
-    async def on_correct_reply(message):
-        await handle_correct_reply(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            text_llm=text_llm,
-            on_user_created=on_user_created,
-        )
-
-    async def on_stats(message):
-        await handle_stats(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            on_user_created=on_user_created,
-        )
-
-    async def on_cook(message):
-        await handle_cook(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            on_user_created=on_user_created,
-        )
-
-    async def on_shopping(message):
-        await handle_shopping(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            on_user_created=on_user_created,
-            translation_llm=translation_llm,
-        )
-
-    async def on_favorites(message):
-        await handle_favorites(
-            message,
-            session_factory=session_factory,
-            on_user_created=on_user_created,
-            translation_llm=translation_llm,
-        )
-
-    async def on_llm(message):
-        await handle_llm(
-            message,
-            session_factory=session_factory,
-            llm=llm,
-            text_llm=text_llm,
-            on_user_created=on_user_created,
-        )
-
-    async def on_prefs(message):
-        await handle_prefs(
-            message,
-            session_factory=session_factory,
-            profile_llm=profile_llm,
-            on_user_created=on_user_created,
-        )
-
-    async def on_help(message):
-        await handle_help(
-            message,
-            session_factory=session_factory,
-            on_user_created=on_user_created,
-        )
-
-    async def on_photo(message):
-        await handle_photo(
-            message,
-            session_factory=session_factory,
-            now_provider=now_provider,
-            llm=llm,
-            photo_downloader=downloader,
-            on_user_created=on_user_created,
-            search=search,
-            spawn=asyncio.create_task,
-            bot=bot,
-            translation_llm=translation_llm,
-        )
+    dispatcher.message.register(
+        _bind(
+            handle_correct_reply,
+            "session_factory",
+            "now_provider",
+            "text_llm",
+            "on_user_created",
+        ),
+        F.text & F.reply_to_message,
+    )
+    dispatcher.message.register(
+        _bind(
+            handle_photo,
+            "session_factory",
+            "now_provider",
+            "llm",
+            "photo_downloader",
+            "on_user_created",
+            "search",
+            "spawn",
+            "bot",
+            "translation_llm",
+        ),
+        F.photo,
+    )
 
     async def on_callback(callback):
         if (callback.data or "").startswith(("cookpick:", "cookalt:")):
@@ -2617,30 +2595,5 @@ def build_dispatcher(
             search=search,
         )
 
-    dispatcher.message.register(on_start, Command("start"))
-    dispatcher.message.register(on_invite, Command("invite"))
-    dispatcher.message.register(on_join, Command("join"))
-    dispatcher.message.register(on_household, Command("household"))
-    dispatcher.message.register(on_leave, Command("leave"))
-    dispatcher.message.register(on_remove, Command("remove"))
-    dispatcher.message.register(on_tz, Command("tz"))
-    dispatcher.message.register(on_lang, Command("lang"))
-    dispatcher.message.register(on_digest_at, Command("digest_at"))
-    dispatcher.message.register(on_list, Command("list"))
-    dispatcher.message.register(on_add, Command("add"))
-    dispatcher.message.register(on_ate, Command("ate"))
-    dispatcher.message.register(on_toss, Command("toss"))
-    dispatcher.message.register(on_delete, Command("delete"))
-    dispatcher.message.register(on_snooze, Command("snooze"))
-    dispatcher.message.register(on_correct, Command("correct"))
-    dispatcher.message.register(on_stats, Command("stats"))
-    dispatcher.message.register(on_cook, Command("cook"))
-    dispatcher.message.register(on_shopping, Command("shopping"))
-    dispatcher.message.register(on_favorites, Command("favorites"))
-    dispatcher.message.register(on_llm, Command("llm"))
-    dispatcher.message.register(on_prefs, Command("prefs"))
-    dispatcher.message.register(on_help, Command("help"))
-    dispatcher.message.register(on_correct_reply, F.text & F.reply_to_message)
-    dispatcher.message.register(on_photo, F.photo)
     dispatcher.callback_query.register(on_callback)
     return dispatcher

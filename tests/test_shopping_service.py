@@ -2,8 +2,8 @@ from datetime import datetime, timezone
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.cook_logic import missing_ingredients
-from app.cook_models import RecipeIngredient
+from app.cook.logic import missing_ingredients
+from app.cook.models import RecipeIngredient
 from app.models import Household, ShoppingList, User
 from app.shopping_service import add_missing, check_off, list_pending
 

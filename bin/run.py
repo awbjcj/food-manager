@@ -27,10 +27,10 @@ from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import app.bot as bot_mod
-import app.cook_service as cook_service_mod
+import app.cook.service as cook_service_mod
 from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
-from app.cook_llm import (
+from app.cook.llm import (
     AnthropicNutritionLLM,
     AnthropicRecipeLLM,
     AnthropicSelectionLLM,

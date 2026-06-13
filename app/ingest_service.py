@@ -12,7 +12,7 @@ from app.frozen_shelf_life import resolve_frozen_days
 from app.llm import LLMClient, ParsedItem
 from app.models import PantryItem, Receipt
 from app.normalization import normalize
-from app.refine_service import ShelfLifeSearchClient
+from app.shelf_life_search import ShelfLifeSearchClient
 
 
 @dataclass(frozen=True)
@@ -161,7 +161,7 @@ async def ingest_photo(
                 shelf_life_source = "cache" if frozen.cache_was_hit else frozen.source
                 ingest_source = "cache" if frozen.cache_was_hit else "llm"
                 storage = "frozen"
-                frozen_on = purchase_date
+                stored_on = purchase_date
                 track_uncached = False
             else:
                 decision = compute_shelf_life(
@@ -173,7 +173,7 @@ async def ingest_photo(
                 shelf_life_source = "cache" if decision.cache_was_hit else "llm"
                 ingest_source = shelf_life_source
                 storage = "default"
-                frozen_on = None
+                stored_on = None
                 track_uncached = not decision.cache_was_hit
             pantry_item = PantryItem(
                 household_id=household_id,
@@ -186,12 +186,12 @@ async def ingest_photo(
                 shelf_life_days=shelf_life_days,
                 shelf_life_source=shelf_life_source,
                 ingest_shelf_life_source=ingest_source,
-                expires_on=(frozen_on or purchase_date)
+                expires_on=(stored_on or purchase_date)
                 + timedelta(days=shelf_life_days),
                 status="active",
                 created_via="receipt",
                 storage=storage,
-                frozen_on=frozen_on,
+                stored_on=stored_on,
                 source_receipt_id=receipt.id,
                 created_at=datetime.now(timezone.utc),
             )

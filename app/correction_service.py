@@ -11,9 +11,10 @@ from sqlmodel import Session
 from app.cache import get_cached, put_cached, write_user_correction
 from app.frozen_shelf_life import storage_cache_key
 from app.llm import TextLLMClient
-from app.refine_service import ShelfLifeSearchClient, resolve_search_days
+from app.shelf_life_search import ShelfLifeSearchClient, resolve_search_days
 from app.models import PantryItem, ShelfLifeCache
 from app.normalization import normalize
+from app.storage_state import shelf_life_origin
 from app.shelf_life_defaults import lookup_default
 
 
@@ -61,7 +62,7 @@ CONSERVATIVE_FALLBACK_DAYS = 3
 
 
 def _expiry_origin(item: PantryItem) -> date:
-    return item.frozen_on or item.purchased_on
+    return shelf_life_origin(item)
 
 
 def _cache_key_for_item(item: PantryItem) -> str:
@@ -100,7 +101,7 @@ def _snapshot(item: PantryItem) -> dict[str, Any]:
         "unit": item.unit,
         "purchased_on": item.purchased_on.isoformat(),
         "storage": item.storage,
-        "frozen_on": item.frozen_on.isoformat() if item.frozen_on else None,
+        "stored_on": item.stored_on.isoformat() if item.stored_on else None,
         "shelf_life_days": item.shelf_life_days,
         "expires_on": item.expires_on.isoformat(),
         "status": item.status,

@@ -59,10 +59,10 @@ def test_pantryitem_storage_defaults(session):
     session.commit()
     session.refresh(item)
     assert item.storage == "default"
-    assert item.frozen_on is None
+    assert item.stored_on is None
 
 
-def test_migration_0012_adds_frozen_columns(tmp_path, monkeypatch):
+def test_migration_unifies_stored_on(tmp_path, monkeypatch):
     db = tmp_path / "m.db"
     monkeypatch.setenv("DATABASE_PATH", str(db))
     result = subprocess.run(
@@ -75,7 +75,9 @@ def test_migration_0012_adds_frozen_columns(tmp_path, monkeypatch):
     cols = {row[1] for row in con.execute("PRAGMA table_info('pantryitem')").fetchall()}
     con.close()
     assert "storage" in cols
-    assert "frozen_on" in cols
+    assert "stored_on" in cols
+    # 0014 unified the frozen-only column into stored_on.
+    assert "frozen_on" not in cols
 
 
 @pytest.mark.asyncio
@@ -226,7 +228,7 @@ async def test_ingest_marks_frozen_item_with_long_expiry(session):
     item = session.get(PantryItem, summary.inserted_item_ids[0])
     assert item is not None
     assert item.storage == "frozen"
-    assert item.frozen_on == today
+    assert item.stored_on == today
     assert item.shelf_life_days == 60
     assert item.expires_on == today + timedelta(days=60)
     assert item.shelf_life_source == "frozen_foodkeeper"
@@ -302,7 +304,7 @@ async def test_freeze_item_recomputes_expiry_from_today(session):
     assert result.applied is True
     session.refresh(item)
     assert item.storage == "frozen"
-    assert item.frozen_on == today
+    assert item.stored_on == today
     assert item.shelf_life_days == 270
     assert item.expires_on == today + timedelta(days=270)
     assert item.shelf_life_source == "frozen_foodkeeper"
@@ -350,7 +352,7 @@ def test_correct_item_uses_frozen_on_origin(session):
     freeze_day = date(2026, 6, 8)
     item = _fresh_item(session, today=purchase)
     item.storage = "frozen"
-    item.frozen_on = freeze_day
+    item.stored_on = freeze_day
     session.add(item)
     session.commit()
     assert item.id is not None
@@ -369,7 +371,7 @@ def test_correct_item_updates_frozen_cache_key(session):
     freeze_day = date(2026, 6, 8)
     item = _fresh_item(session, today=purchase)
     item.storage = "frozen"
-    item.frozen_on = freeze_day
+    item.stored_on = freeze_day
     session.add(item)
     session.commit()
     assert item.id is not None
@@ -391,7 +393,7 @@ async def test_propose_correct_uses_frozen_on_origin(session):
     freeze_day = date(2026, 6, 8)
     item = _fresh_item(session, today=purchase)
     item.storage = "frozen"
-    item.frozen_on = freeze_day
+    item.stored_on = freeze_day
     session.add(item)
     session.commit()
     put_cached(
@@ -433,7 +435,7 @@ def test_apply_correct_moves_frozen_cache_key(session):
     freeze_day = date(2026, 6, 8)
     item = _fresh_item(session, today=purchase)
     item.storage = "frozen"
-    item.frozen_on = freeze_day
+    item.stored_on = freeze_day
     session.add(item)
     put_cached(
         session,
@@ -469,7 +471,7 @@ async def test_refine_receipt_items_skips_frozen_items(session):
     freeze_day = date(2026, 6, 8)
     item = _fresh_item(session, today=purchase)
     item.storage = "frozen"
-    item.frozen_on = freeze_day
+    item.stored_on = freeze_day
     original_expires = item.expires_on
     session.add(item)
     session.commit()
@@ -517,7 +519,7 @@ def test_render_item_line_frozen_badge(session):
     today = date(2026, 6, 8)
     item = _fresh_item(session, name="Chicken", today=today)
     item.storage = "frozen"
-    item.frozen_on = today
+    item.stored_on = today
     line = render_item_line(item, today=today, lang="en")
     assert "❄️" in line
 

@@ -5,12 +5,13 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from app.correction_service import AddPayload, CorrectPayload
-from app.cook_models import RecipeCandidate, ScoredCandidate
+from app.cook import RecipeCandidate, ScoredCandidate
 from app.models import SavedRecipe, ShoppingList
 from app.ingest_service import IngestSummary
 from app.i18n import t, format_date, weekday_abbr
 from app.pantry_service import Stats
 from app.profile_service import FoodProfile
+from app.storage_state import next_storage_options
 
 
 def _name(names: Mapping[str, str] | None, text: str) -> str:
@@ -42,9 +43,16 @@ def _qty_prefix(qty: float, unit: str | None) -> str:
     return ""
 
 
+_STORAGE_BADGES = {"frozen": "❄️ ", "fridge": "🧊 "}
+
+
+def _storage_badge(item) -> str:
+    return _STORAGE_BADGES.get(getattr(item, "storage", "default"), "")
+
+
 def render_item_line(item, *, today: date, lang: str = "en", names=None) -> str:
     icon = _urgency_icon(item.expires_on, today=today)
-    badge = "❄️ " if getattr(item, "storage", "default") == "frozen" else ""
+    badge = _storage_badge(item)
     qty = _qty_prefix(item.qty, item.unit)
     name = _name(names, item.raw_name)
     delta = (item.expires_on - today).days
@@ -244,10 +252,14 @@ def build_item_card_keyboard(item, *, lang: str = "en") -> list[list[CallbackBut
     second = [
         CallbackButton(text=t("btn.snooze2", lang), callback_data=f"act:snooze2:{item_id}")
     ]
-    if getattr(item, "storage", "default") != "frozen":
-        second.append(
-            CallbackButton(text=t("btn.freeze", lang), callback_data=f"act:freeze:{item_id}")
-        )
+    # Forward-only storage moves (default -> fridge -> frozen).
+    _STORAGE_BUTTONS = {
+        "fridge": ("btn.fridge", f"act:fridge:{item_id}"),
+        "frozen": ("btn.freeze", f"act:freeze:{item_id}"),
+    }
+    for target in next_storage_options(getattr(item, "storage", "default")):
+        key, data = _STORAGE_BUTTONS[target]
+        second.append(CallbackButton(text=t(key, lang), callback_data=data))
     rows.append(second)
     rows.append([
         CallbackButton(text=t("btn.correct", lang), callback_data=f"item:corr:{item_id}"),

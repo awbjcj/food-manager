@@ -7,12 +7,13 @@ from typing import TYPE_CHECKING, Literal, Optional
 from sqlmodel import Session, col, select
 
 from app.cache import write_user_correction
-from app.frozen_shelf_life import resolve_frozen_days, storage_cache_key
+from app.frozen_shelf_life import resolve_storage_days, storage_cache_key
 from app.models import PantryItem, PendingCorrection, Receipt
 from app.pending_service import expire_for_item
+from app.storage_state import can_move_to, compute_expiry
 
 if TYPE_CHECKING:
-    from app.refine_service import ShelfLifeSearchClient
+    from app.shelf_life_search import ShelfLifeSearchClient
 
 
 ALLOWED_CATEGORIES = frozenset({
@@ -150,6 +151,45 @@ def snooze_item(
     return MutationResult(applied=True, was_already=False)
 
 
+async def move_to_storage(
+    session: Session,
+    *,
+    household_id: int,
+    item_id: int,
+    state: Literal["fridge", "frozen"],
+    today: date,
+    search: Optional["ShelfLifeSearchClient"] = None,
+) -> MutationResult:
+    """Move an active item to a forward Storage State, resolving the state's
+    shelf life and resetting its Storage Date (the new Shelf-Life Origin).
+    """
+    pantry_item = _load_owned(session, household_id=household_id, item_id=item_id)
+    if pantry_item.status != "active" or not can_move_to(pantry_item.storage, state):
+        return MutationResult(applied=False, was_already=True)
+    decision = await resolve_storage_days(
+        session,
+        household_id=household_id,
+        state=state,
+        normalized_name=pantry_item.normalized_name,
+        food_name=pantry_item.raw_name,
+        search=search,
+    )
+    pantry_item.storage = state
+    pantry_item.stored_on = today
+    pantry_item.shelf_life_days = decision.days
+    pantry_item.shelf_life_source = (
+        "cache" if decision.cache_was_hit else decision.source
+    )
+    pantry_item.snoozed_until = None
+    pantry_item.expires_on = compute_expiry(pantry_item)
+    assert pantry_item.id is not None
+    expire_for_item(session, household_id=household_id, item_id=pantry_item.id)
+    session.add(pantry_item)
+    session.commit()
+    session.refresh(pantry_item)
+    return MutationResult(applied=True, was_already=False)
+
+
 async def freeze_item(
     session: Session,
     *,
@@ -158,30 +198,10 @@ async def freeze_item(
     today: date,
     search: Optional["ShelfLifeSearchClient"] = None,
 ) -> MutationResult:
-    pantry_item = _load_owned(session, household_id=household_id, item_id=item_id)
-    if pantry_item.status != "active" or pantry_item.storage == "frozen":
-        return MutationResult(applied=False, was_already=True)
-    decision = await resolve_frozen_days(
-        session,
-        household_id=household_id,
-        normalized_name=pantry_item.normalized_name,
-        food_name=pantry_item.raw_name,
-        search=search,
+    return await move_to_storage(
+        session, household_id=household_id, item_id=item_id,
+        state="frozen", today=today, search=search,
     )
-    pantry_item.storage = "frozen"
-    pantry_item.frozen_on = today
-    pantry_item.shelf_life_days = decision.days
-    pantry_item.shelf_life_source = (
-        "cache" if decision.cache_was_hit else decision.source
-    )
-    pantry_item.snoozed_until = None
-    pantry_item.expires_on = today + timedelta(days=decision.days)
-    assert pantry_item.id is not None
-    expire_for_item(session, household_id=household_id, item_id=pantry_item.id)
-    session.add(pantry_item)
-    session.commit()
-    session.refresh(pantry_item)
-    return MutationResult(applied=True, was_already=False)
 
 
 SHELF_LIFE_DAYS_MIN = 1
@@ -198,9 +218,7 @@ def correct_item(
         raise ValueError("cannot correct a removed item")
     pantry_item.shelf_life_days = days
     pantry_item.shelf_life_source = "user_correction"
-    pantry_item.expires_on = (
-        pantry_item.frozen_on or pantry_item.purchased_on
-    ) + timedelta(days=days)
+    pantry_item.expires_on = compute_expiry(pantry_item)
     assert pantry_item.id is not None
     expire_for_item(session, household_id=pantry_item.household_id, item_id=pantry_item.id)
     session.add(pantry_item)

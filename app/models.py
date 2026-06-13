@@ -13,7 +13,7 @@ Category = Literal[
 ]
 
 Status = Literal["active", "eaten", "tossed", "removed"]
-Storage = Literal["default", "frozen"]
+Storage = Literal["default", "fridge", "frozen"]
 ShelfLifeSource = Literal[
     "cache",
     "llm",
@@ -23,6 +23,9 @@ ShelfLifeSource = Literal[
     "frozen_foodkeeper",
     "frozen_llm",
     "frozen_default",
+    "fridge_foodkeeper",
+    "fridge_llm",
+    "fridge_default",
 ]
 IngestShelfLifeSource = Literal["cache", "llm", "manual_fallback", "manual_user_hint"]
 CreatedVia = Literal["receipt", "manual"]
@@ -99,7 +102,9 @@ class PantryItem(SQLModel, table=True):
     status: str = "active"
     snoozed_until: Optional[date] = None
     storage: str = "default"
-    frozen_on: Optional[date] = None
+    # Date the item entered its current non-default Storage State (fridge/frozen).
+    # Unified Shelf-Life Origin for every state; None for "default".
+    stored_on: Optional[date] = None
     created_via: str
     source_receipt_id: Optional[int] = Field(default=None, foreign_key="receipt.id")
     created_at: datetime

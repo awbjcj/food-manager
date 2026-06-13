@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Optional
 
-from app.cook_models import NutritionScores, RecipeCandidates, SelectedItems
+from app.cook.models import NutritionScores, RecipeCandidates, SelectedItems
 from app.llm import CorrectionDiff, LLMClient, LLMResult, ProposedAddItem
 from app.profile_service import FoodProfile
 from app.refine_service import ShelfLifeSearchClient, ShelfLifeSearchResult

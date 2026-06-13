@@ -140,6 +140,7 @@ Verb = Literal[
     "toss",
     "snooze2",
     "freeze",
+    "fridge",
     "show_all",
     "apply",
     "cancel",
@@ -241,7 +242,7 @@ def parse_callback(data: str) -> CallbackAction:
     if len(parts) != 3 or parts[0] != "act":
         raise CommandError(f"unrecognized callback data {data!r}")
     verb = parts[1]
-    if verb not in ("ate", "toss", "snooze2", "freeze"):
+    if verb not in ("ate", "toss", "snooze2", "freeze", "fridge"):
         raise CommandError(f"unknown verb {verb!r}")
     try:
         item_id = int(parts[2])

@@ -205,12 +205,17 @@ def render_digest(
 
 
 def build_digest_keyboard(
-    items: list, *, has_more: bool, today: date, lang: str = "en", names=None
+    items: list, *, has_more: bool, today: date, lang: str = "en", names=None, back_to: str = "digest"
 ) -> list[list[CallbackButton]]:
+    def _open_data(item_id: int) -> str:
+        if back_to == "all":
+            return f"item:open:{item_id}:all"
+        return f"item:open:{item_id}"
+
     buttons = [
         CallbackButton(
             text=f"{_urgency_icon(item.expires_on, today=today)} #{item.id} {_name(names, item.raw_name)}",
-            callback_data=f"item:open:{item.id}",
+            callback_data=_open_data(item.id),
         )
         for item in items
     ]
@@ -241,8 +246,9 @@ def render_remove_confirm(item, *, lang: str = "en", names=None) -> str:
     return t("remove.confirm", lang, id=item.id, name=_name(names, item.raw_name))
 
 
-def build_item_card_keyboard(item, *, lang: str = "en") -> list[list[CallbackButton]]:
+def build_item_card_keyboard(item, *, lang: str = "en", back_to: str = "digest") -> list[list[CallbackButton]]:
     item_id = item.id
+    back_data = "item:list:all" if back_to == "all" else "item:list"
     rows: list[list[CallbackButton]] = [
         [
             CallbackButton(text=t("btn.ate", lang), callback_data=f"act:ate:{item_id}"),
@@ -265,7 +271,7 @@ def build_item_card_keyboard(item, *, lang: str = "en") -> list[list[CallbackBut
         CallbackButton(text=t("btn.correct", lang), callback_data=f"item:corr:{item_id}"),
         CallbackButton(text=t("btn.remove", lang), callback_data=f"item:rm:{item_id}"),
     ])
-    rows.append([CallbackButton(text=t("btn.back_to_list", lang), callback_data="item:list")])
+    rows.append([CallbackButton(text=t("btn.back_to_list", lang), callback_data=back_data)])
     return rows
 
 

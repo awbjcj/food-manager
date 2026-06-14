@@ -101,7 +101,7 @@ mode = parse_pantry_arg(args)
 
 | mode       | Data source       | Keyboard                                  |
 |------------|-------------------|-------------------------------------------|
-| `"all"`    | `list_active`     | `build_digest_keyboard(back_to="all")`    |
+| `"all"`    | `list_active(..., f=ListFilter.default())` | `build_digest_keyboard(back_to="all")`    |
 | `"digest"` | `list_digest_due` | `build_digest_keyboard(back_to="digest")` |
 | `int`      | `session.get`     | `build_item_card_keyboard(back_to="all")` |
 
@@ -112,7 +112,7 @@ active, shows `"#N is {status}; cannot manage"`.
 
 Mirror of `_refresh_digest_message` for the full-pantry context:
 
-- Data: `list_active(session, household_id, today=today)`
+- Data: `list_active(session, household_id=household_id, f=ListFilter.default(), today=today)`
 - Keyboard: `build_digest_keyboard(..., back_to="all")`
 - Empty fallback: `t("pantry.all_clear", lang)`
 

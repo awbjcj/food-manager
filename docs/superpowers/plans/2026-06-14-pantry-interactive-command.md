@@ -541,7 +541,12 @@ Add this function directly after the existing `_refresh_digest_message` function
 async def _refresh_pantry_message(
     cb, session, household_id: int, today: date, *, lang: str = "en", translation_llm=None
 ) -> None:
-    remaining = list_active(session, household_id=household_id, today=today)
+    remaining = list_active(
+        session,
+        household_id=household_id,
+        f=ListFilter.default(),
+        today=today,
+    )
     if remaining:
         names = await _translate_for_render(
             session,
@@ -642,7 +647,8 @@ def _msg(text: str):
 
 @pytest.mark.asyncio
 async def test_pantry_all_mode_sends_interactive_message(session_factory):
-    _active_item(session_factory)
+    # Long-dated item proves full pantry uses list_active, not the digest window.
+    _active_item(session_factory, expires_in_days=30)
     msg = _msg("/pantry")
 
     await bot_mod.handle_pantry(
@@ -790,6 +796,9 @@ from app.commands import (
 )
 ```
 
+Also add `ListFilter` to the `from app.pantry_service import (` block; `list_active`
+requires an explicit filter argument in the current codebase.
+
 - [ ] **Step 4: Add `handle_pantry` to `app/bot.py`**
 
 Add this function after `handle_list` (around line 779):
@@ -844,7 +853,12 @@ async def handle_pantry(
             items = list_digest_due(session, household_id=user.household_id, today=today)
             back_to = "digest"
         else:
-            items = list_active(session, household_id=user.household_id, today=today)
+            items = list_active(
+                session,
+                household_id=user.household_id,
+                f=ListFilter.default(),
+                today=today,
+            )
             back_to = "all"
 
         names = await _translate_for_render(

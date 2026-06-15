@@ -14,6 +14,7 @@ from app.commands import (
     parse_item_id_arg,
     parse_llm_provider,
     parse_list_filter,
+    parse_pantry_arg,
     parse_snooze_args,
     parse_tz,
 )
@@ -79,6 +80,33 @@ def test_parse_item_callback_kinds():
         item_id=3,
         nudge_code="p7",
     )
+
+
+def test_parse_item_callback_back_to_origin():
+    assert parse_item_callback("item:list").back_to == "digest"
+    assert parse_item_callback("item:list:all") == ItemAction(kind="list", back_to="all")
+    assert parse_item_callback("item:open:5").back_to == "digest"
+    assert parse_item_callback("item:open:5:all") == ItemAction(
+        kind="open",
+        item_id=5,
+        back_to="all",
+    )
+
+
+def test_parse_item_callback_rejects_bad_back_to_origin():
+    for bad in ("item:list:unknown", "item:open:5:unknown", "item:corr:5:all"):
+        with pytest.raises(CommandError):
+            parse_item_callback(bad)
+
+
+def test_parse_pantry_arg():
+    assert parse_pantry_arg([]) == "all"
+    assert parse_pantry_arg(["digest"]) == "digest"
+    assert parse_pantry_arg(["5"]) == 5
+    assert parse_pantry_arg(["#42"]) == 42
+    for bad in (["unknown"], ["digest", "extra"]):
+        with pytest.raises(CommandError):
+            parse_pantry_arg(bad)
 
 
 def test_parse_item_callback_rejects_bad():
@@ -196,6 +224,17 @@ def test_digest_keyboard_emits_labeled_open_buttons():
     assert rows[0][1].callback_data == "item:open:7"
 
 
+def test_digest_keyboard_can_return_to_full_pantry():
+    today = date(2026, 6, 9)
+    rows = build_digest_keyboard(
+        [_digest_item(5, "milk", date(2026, 6, 10))],
+        has_more=False,
+        today=today,
+        back_to="all",
+    )
+    assert rows[0][0].callback_data == "item:open:5:all"
+
+
 def test_digest_keyboard_show_all_when_more():
     today = date(2026, 6, 9)
     rows = build_digest_keyboard(
@@ -272,6 +311,11 @@ def test_card_keyboard_has_all_actions_when_not_frozen():
     assert "item:corr:3" in datas
     assert "item:rm:3" in datas
     assert "item:list" in datas
+
+
+def test_card_keyboard_can_return_to_full_pantry():
+    rows = build_item_card_keyboard(_card_item(item_id=5), lang="en", back_to="all")
+    assert rows[-1][0].callback_data == "item:list:all"
 
 
 def test_card_keyboard_hides_freeze_when_frozen():

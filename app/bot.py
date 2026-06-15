@@ -27,6 +27,7 @@ from app.commands import (
     parse_llm_provider,
     parse_list_filter,
     parse_member_id,
+    parse_pantry_arg,
     parse_snooze_args,
     parse_tz,
 )
@@ -90,6 +91,7 @@ from app.refine_service import run_receipt_refine
 from app.storage_state import shelf_life_origin
 from app.callback_dispatch import answer as dispatch_answer, edit_or_resend
 from app.pantry_service import (
+    ListFilter,
     NotOwnerOrMissing,
     active_pantry_names,
     compute_nudge_days,
@@ -779,6 +781,92 @@ async def handle_list(
         await msg.answer(render_list(items, today=today, lang=user.lang, names=names))
 
 
+async def handle_pantry(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    now_provider: NowProvider,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+    translation_llm=None,
+) -> None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+        now_provider=now_provider,
+    ) as ctx:
+        if ctx is None:
+            return
+        session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
+        parts = (msg.text or "").split(maxsplit=1)
+        args = parts[1].split() if len(parts) == 2 else []
+        try:
+            mode = parse_pantry_arg(args)
+        except CommandError as exc:
+            await msg.answer(str(exc))
+            return
+
+        if isinstance(mode, int):
+            item = session.get(PantryItem, mode)
+            if item is None or item.household_id != user.household_id:
+                await msg.answer(f"no item #{mode}")
+                return
+            if item.status != "active":
+                await msg.answer(f"#{mode} is {item.status}; cannot manage")
+                return
+            names = await _translate_for_render(
+                session,
+                lang=user.lang,
+                texts=[item.raw_name],
+                translation_llm=translation_llm,
+            )
+            await msg.answer(
+                render_item_card(item, today=today, lang=user.lang, names=names),
+                reply_markup=to_aiogram_keyboard(
+                    build_item_card_keyboard(item, lang=user.lang, back_to="all")
+                ),
+            )
+            return
+
+        if mode == "digest":
+            items = list_digest_due(session, household_id=user.household_id, today=today)
+            back_to = "digest"
+            cap = 10
+            empty_key = "digest.pantry_clear"
+        else:
+            items = list_active(
+                session,
+                household_id=user.household_id,
+                f=ListFilter.default(),
+                today=today,
+            )
+            back_to = "all"
+            cap = None
+            empty_key = "pantry.all_clear"
+
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=[i.raw_name for i in items],
+            translation_llm=translation_llm,
+        )
+        rendered = render_digest(items, today=today, lang=user.lang, names=names, cap=cap)
+        if not rendered.text:
+            await msg.answer(t(empty_key, user.lang))
+            return
+        keyboard = to_aiogram_keyboard(
+            build_digest_keyboard(
+                rendered.rendered_items,
+                has_more=rendered.has_more,
+                today=today,
+                lang=user.lang,
+                names=names,
+                back_to=back_to,
+            )
+        )
+        await msg.answer(rendered.text, reply_markup=keyboard)
+
+
 async def handle_add(
     msg,
     *,
@@ -1404,7 +1492,7 @@ async def handle_help(
     ) as ctx:
         if ctx is None:
             return
-        session, user = ctx.session, ctx.user
+        user = ctx.user
     await msg.answer(t("help.body", user.lang))
 
 
@@ -1886,6 +1974,15 @@ async def handle_item_callback(
                 lang=user.lang, translation_llm=translation_llm,
             )
 
+        async def refresh_for_origin() -> None:
+            if action.back_to == "all":
+                await _refresh_pantry_message(
+                    cb, session, user.household_id, today,
+                    lang=user.lang, translation_llm=translation_llm,
+                )
+                return
+            await refresh()
+
         async def item_names(item) -> dict:
             return await _translate_for_render(
                 session, lang=user.lang, texts=[item.raw_name],
@@ -1894,7 +1991,7 @@ async def handle_item_callback(
 
         if action.kind == "list":
             await dispatch_answer(cb)
-            await refresh()
+            await refresh_for_origin()
             return
 
         item_id = action.item_id
@@ -1902,11 +1999,11 @@ async def handle_item_callback(
         item = session.get(PantryItem, item_id)
         if item is None or item.household_id != user.household_id:
             await dispatch_answer(cb, "item not found")
-            await refresh()
+            await refresh_for_origin()
             return
         if item.status != "active":
             await dispatch_answer(cb, f"#{item_id} already updated")
-            await refresh()
+            await refresh_for_origin()
             return
 
         if action.kind == "nudge":
@@ -1963,7 +2060,13 @@ async def handle_item_callback(
             await edit_or_resend(
                 cb,
                 render_item_card(item, today=today, lang=user.lang, names=names),
-                to_aiogram_keyboard(build_item_card_keyboard(item, lang=user.lang)),
+                to_aiogram_keyboard(
+                    build_item_card_keyboard(
+                        item,
+                        lang=user.lang,
+                        back_to=action.back_to,
+                    )
+                ),
             )
         elif action.kind == "corr":
             await edit_or_resend(
@@ -2432,6 +2535,38 @@ async def _refresh_digest_message(
     await edit_or_resend(cb, t("digest.pantry_clear", lang))
 
 
+async def _refresh_pantry_message(
+    cb, session, household_id: int, today: date, *, lang: str = "en", translation_llm=None
+) -> None:
+    remaining = list_active(
+        session,
+        household_id=household_id,
+        f=ListFilter.default(),
+        today=today,
+    )
+    if remaining:
+        names = await _translate_for_render(
+            session,
+            lang=lang,
+            texts=[i.raw_name for i in remaining],
+            translation_llm=translation_llm,
+        )
+        rendered = render_digest(remaining, today=today, lang=lang, names=names, cap=None)
+        keyboard = to_aiogram_keyboard(
+            build_digest_keyboard(
+                rendered.rendered_items,
+                has_more=False,
+                today=today,
+                lang=lang,
+                names=names,
+                back_to="all",
+            )
+        )
+        await edit_or_resend(cb, rendered.text, keyboard)
+        return
+    await edit_or_resend(cb, t("pantry.all_clear", lang))
+
+
 def to_aiogram_keyboard(rows: list[list[CallbackButton]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -2463,6 +2598,7 @@ _MESSAGE_COMMANDS: tuple[tuple[str, Callable[..., Awaitable[None]], tuple[str, .
     ("lang", handle_lang, ("session_factory", "on_user_created")),
     ("digest_at", handle_digest_at, ("session_factory", "reschedule")),
     ("list", handle_list, ("session_factory", "now_provider", "on_user_created", "translation_llm")),
+    ("pantry", handle_pantry, ("session_factory", "now_provider", "on_user_created", "translation_llm")),
     ("add", handle_add, ("session_factory", "now_provider", "text_llm", "on_user_created", "search")),
     ("ate", handle_ate, ("session_factory", "now_provider", "on_user_created")),
     ("toss", handle_toss, ("session_factory", "now_provider", "on_user_created")),

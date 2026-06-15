@@ -684,6 +684,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "Le garde-manger est vide pour les 7 prochains jours.",
         "es": "La despensa está despejada para los próximos 7 días.",
     },
+    "pantry.all_clear": {
+        "en": "Your pantry is clear.",
+        "zh": "您的食品储藏室已清空。",
+        "fr": "Votre garde-manger est vide.",
+        "es": "Tu despensa está vacía.",
+    },
     # -----------------------------------------------------------------------
     # Household invites & membership (v4.2)
     # -----------------------------------------------------------------------

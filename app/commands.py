@@ -259,6 +259,7 @@ class ItemAction:
     kind: ItemKind
     item_id: Optional[int] = None
     nudge_code: Optional[str] = None
+    back_to: str = "digest"
 
 
 def parse_item_callback(data: str) -> ItemAction:
@@ -267,9 +268,11 @@ def parse_item_callback(data: str) -> ItemAction:
         raise CommandError(f"not an item callback {data!r}")
     kind = parts[1]
     if kind == "list":
-        if len(parts) != 2:
-            raise CommandError(f"bad item callback {data!r}")
-        return ItemAction(kind="list")
+        if len(parts) == 2:
+            return ItemAction(kind="list", back_to="digest")
+        if len(parts) == 3 and parts[2] == "all":
+            return ItemAction(kind="list", back_to="all")
+        raise CommandError(f"bad item callback {data!r}")
     if kind == "nudge":
         if len(parts) != 4 or parts[3] not in NUDGE_CODES:
             raise CommandError(f"bad item nudge {data!r}")
@@ -278,13 +281,32 @@ def parse_item_callback(data: str) -> ItemAction:
         except ValueError as exc:
             raise CommandError(f"bad item id {parts[2]!r}") from exc
     if kind in ("open", "corr", "ctext", "rm", "rmok"):
-        if len(parts) != 3:
-            raise CommandError(f"bad item callback {data!r}")
-        try:
-            return ItemAction(kind=cast(ItemKind, kind), item_id=int(parts[2]))
-        except ValueError as exc:
-            raise CommandError(f"bad item id {parts[2]!r}") from exc
+        if len(parts) == 3:
+            try:
+                return ItemAction(kind=cast(ItemKind, kind), item_id=int(parts[2]))
+            except ValueError as exc:
+                raise CommandError(f"bad item id {parts[2]!r}") from exc
+        if kind == "open" and len(parts) == 4 and parts[3] == "all":
+            try:
+                return ItemAction(kind="open", item_id=int(parts[2]), back_to="all")
+            except ValueError as exc:
+                raise CommandError(f"bad item id {parts[2]!r}") from exc
+        raise CommandError(f"bad item callback {data!r}")
     raise CommandError(f"unknown item kind {kind!r}")
+
+
+def parse_pantry_arg(args: Sequence[str]) -> Literal["all", "digest"] | int:
+    if not args:
+        return "all"
+    if len(args) > 1:
+        raise CommandError("usage: /pantry [digest|<item_id>]")
+    token = args[0].strip()
+    if token == "digest":
+        return "digest"
+    try:
+        return parse_item_id_arg(token)
+    except CommandError as exc:
+        raise CommandError("usage: /pantry [digest|<item_id>]") from exc
 
 
 _CORRECT_REPLY_MARKER = re.compile(r"\[correct:#(\d+)\]")

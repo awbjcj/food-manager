@@ -63,9 +63,15 @@ def test_callback_parser():
     assert parse_callback("act:ate:42") == CallbackAction(verb="ate", item_id=42)
     assert parse_callback("act:toss:5") == CallbackAction(verb="toss", item_id=5)
     assert parse_callback("act:snooze2:9") == CallbackAction(verb="snooze2", item_id=9)
+    assert parse_callback("act:ate:42:all") == CallbackAction(
+        verb="ate",
+        item_id=42,
+        back_to="all",
+    )
     assert parse_callback("show:all") == CallbackAction(verb="show_all", item_id=None)
-    with pytest.raises(CommandError):
-        parse_callback("act:nope:1")
+    for bad in ("act:nope:1", "act:ate:42:unknown"):
+        with pytest.raises(CommandError):
+            parse_callback(bad)
 
 
 def test_parse_item_callback_kinds():
@@ -315,6 +321,11 @@ def test_card_keyboard_has_all_actions_when_not_frozen():
 
 def test_card_keyboard_can_return_to_full_pantry():
     rows = build_item_card_keyboard(_card_item(item_id=5), lang="en", back_to="all")
+    datas = [button.callback_data for row in rows for button in row]
+    assert "act:ate:5:all" in datas
+    assert "act:toss:5:all" in datas
+    assert "act:snooze2:5:all" in datas
+    assert "act:freeze:5:all" in datas
     assert rows[-1][0].callback_data == "item:list:all"
 
 

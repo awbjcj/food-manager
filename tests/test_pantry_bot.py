@@ -139,6 +139,25 @@ async def test_item_open_all_renders_card_with_full_pantry_back_button(session_f
 
 
 @pytest.mark.asyncio
+async def test_full_pantry_item_action_refreshes_full_pantry(session_factory):
+    item_id = _active_item(session_factory, expires_in_days=30)
+    cb = _cb(f"act:ate:{item_id}:all")
+
+    with (
+        patch.object(bot_mod, "_refresh_pantry_message", new_callable=AsyncMock) as pantry_refresh,
+        patch.object(bot_mod, "_refresh_digest_message", new_callable=AsyncMock) as digest_refresh,
+    ):
+        await bot_mod.handle_callback(
+            cb,
+            session_factory=session_factory,
+            now_provider=_now,
+        )
+
+    pantry_refresh.assert_awaited_once()
+    digest_refresh.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_pantry_all_mode_sends_interactive_full_pantry(session_factory):
     _active_item(session_factory, expires_in_days=30)
     msg = _msg("/pantry")

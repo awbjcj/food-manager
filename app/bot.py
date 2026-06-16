@@ -2102,6 +2102,26 @@ async def handle_callback(
             return
         today = now_provider(user.tz).date()
 
+        async def refresh_items_for_origin() -> None:
+            if action.back_to == "all":
+                await _refresh_pantry_message(
+                    cb,
+                    session,
+                    user.household_id,
+                    today,
+                    lang=user.lang,
+                    translation_llm=translation_llm,
+                )
+                return
+            await _refresh_digest_message(
+                cb,
+                session,
+                user.household_id,
+                today,
+                lang=user.lang,
+                translation_llm=translation_llm,
+            )
+
         if action.verb in ("cook_like", "cook_dislike"):
             cook_id = action.item_id
             assert cook_id is not None
@@ -2338,14 +2358,7 @@ async def handle_callback(
                 return
         except NotOwnerOrMissing:
             await dispatch_answer(cb, "item not found")
-            await _refresh_digest_message(
-                cb,
-                session,
-                user.household_id,
-                today,
-                lang=user.lang,
-                translation_llm=translation_llm,
-            )
+            await refresh_items_for_origin()
             return
         if result.applied:
             log.info(
@@ -2363,14 +2376,7 @@ async def handle_callback(
             if result.applied
             else f"#{item_id} already updated",
         )
-        await _refresh_digest_message(
-            cb,
-            session,
-            user.household_id,
-            today,
-            lang=user.lang,
-            translation_llm=translation_llm,
-        )
+        await refresh_items_for_origin()
 
 
 async def _handle_pending_callback(

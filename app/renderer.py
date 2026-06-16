@@ -249,19 +249,20 @@ def render_remove_confirm(item, *, lang: str = "en", names=None) -> str:
 def build_item_card_keyboard(item, *, lang: str = "en", back_to: str = "digest") -> list[list[CallbackButton]]:
     item_id = item.id
     back_data = "item:list:all" if back_to == "all" else "item:list"
+    act_suffix = ":all" if back_to == "all" else ""
     rows: list[list[CallbackButton]] = [
         [
-            CallbackButton(text=t("btn.ate", lang), callback_data=f"act:ate:{item_id}"),
-            CallbackButton(text=t("btn.tossed", lang), callback_data=f"act:toss:{item_id}"),
+            CallbackButton(text=t("btn.ate", lang), callback_data=f"act:ate:{item_id}{act_suffix}"),
+            CallbackButton(text=t("btn.tossed", lang), callback_data=f"act:toss:{item_id}{act_suffix}"),
         ]
     ]
     second = [
-        CallbackButton(text=t("btn.snooze2", lang), callback_data=f"act:snooze2:{item_id}")
+        CallbackButton(text=t("btn.snooze2", lang), callback_data=f"act:snooze2:{item_id}{act_suffix}")
     ]
     # Forward-only storage moves (default -> fridge -> frozen).
     _STORAGE_BUTTONS = {
-        "fridge": ("btn.fridge", f"act:fridge:{item_id}"),
-        "frozen": ("btn.freeze", f"act:freeze:{item_id}"),
+        "fridge": ("btn.fridge", f"act:fridge:{item_id}{act_suffix}"),
+        "frozen": ("btn.freeze", f"act:freeze:{item_id}{act_suffix}"),
     }
     for target in next_storage_options(getattr(item, "storage", "default")):
         key, data = _STORAGE_BUTTONS[target]

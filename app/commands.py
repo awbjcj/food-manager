@@ -163,6 +163,7 @@ class CallbackAction:
     item_id: Optional[int]
     option_index: Optional[int] = None
     round_name: Optional[str] = None
+    back_to: str = "digest"
 
 
 def parse_callback(data: str) -> CallbackAction:
@@ -239,16 +240,21 @@ def parse_callback(data: str) -> CallbackAction:
         except ValueError as exc:
             raise CommandError(f"bad cookpick data {data!r}") from exc
     parts = data.split(":")
-    if len(parts) != 3 or parts[0] != "act":
+    if len(parts) not in (3, 4) or parts[0] != "act":
         raise CommandError(f"unrecognized callback data {data!r}")
     verb = parts[1]
     if verb not in ("ate", "toss", "snooze2", "freeze", "fridge"):
         raise CommandError(f"unknown verb {verb!r}")
+    back_to = "digest"
+    if len(parts) == 4:
+        if parts[3] != "all":
+            raise CommandError(f"bad action origin {parts[3]!r}")
+        back_to = "all"
     try:
         item_id = int(parts[2])
     except ValueError as exc:
         raise CommandError(f"bad item id {parts[2]!r}") from exc
-    return CallbackAction(verb=verb, item_id=item_id)
+    return CallbackAction(verb=verb, item_id=item_id, back_to=back_to)
 
 
 ItemKind = Literal["open", "list", "corr", "nudge", "ctext", "rm", "rmok"]

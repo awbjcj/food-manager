@@ -76,6 +76,16 @@ def test_translation_placeholders_match_english():
             assert _placeholders(template) == en_ph, f"{key}/{lang} placeholder mismatch"
 
 
+def test_help_mentions_every_registered_command_in_each_language():
+    from app.bot import _MESSAGE_COMMANDS
+
+    commands = [name for name, *_ in _MESSAGE_COMMANDS]
+    for lang in LANGS:
+        text = t("help.body", lang)
+        missing = [f"/{name}" for name in commands if f"/{name}" not in text]
+        assert missing == [], f"{lang} help missing commands: {missing}"
+
+
 def test_v48_card_keys_present_en():
     assert t("btn.correct", "en") == "✏️ Correct"
     assert t("btn.remove", "en") == "❌ Remove"

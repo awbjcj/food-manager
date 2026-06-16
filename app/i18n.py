@@ -522,6 +522,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - set your language\n"
             "  /digest_at <0..23> - set digest hour\n"
             "  /list [category|week|expired] - show pantry\n"
+            "  /pantry [digest|<id>] - interactive pantry controls\n"
             "  /add <free text> - propose new items in natural language.\n"
             "      Replies with a diff per item; tap Apply or Cancel.\n"
             "      Proposals expire after 10 min.\n"
@@ -553,6 +554,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - 设置语言\n"
             "  /digest_at <0..23> - 设置每日摘要时间\n"
             "  /list [category|week|expired] - 显示食品储藏\n"
+            "  /pantry [digest|<id>] - 交互式食品储藏管理\n"
             "  /add <自然语言> - 以自然语言提议添加食品。\n"
             "      每项显示差异；点击应用或取消。\n"
             "      提议10分钟后过期。\n"
@@ -584,6 +586,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - définir votre langue\n"
             "  /digest_at <0..23> - heure du résumé quotidien\n"
             "  /list [category|week|expired] - afficher le garde-manger\n"
+            "  /pantry [digest|<id>] - contrôles interactifs du garde-manger\n"
             "  /add <texte libre> - proposer de nouveaux articles en langage naturel.\n"
             "      Répond avec un diff par article ; appuyez sur Appliquer ou Annuler.\n"
             "      Les propositions expirent après 10 min.\n"
@@ -615,6 +618,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - establecer tu idioma\n"
             "  /digest_at <0..23> - hora del resumen diario\n"
             "  /list [category|week|expired] - mostrar despensa\n"
+            "  /pantry [digest|<id>] - controles interactivos de despensa\n"
             "  /add <texto libre> - proponer nuevos artículos en lenguaje natural.\n"
             "      Responde con un diff por artículo; toca Aplicar o Cancelar.\n"
             "      Las propuestas expiran después de 10 min.\n"
@@ -689,6 +693,24 @@ MESSAGES: dict[str, dict[str, str]] = {
         "zh": "您的食品储藏室已清空。",
         "fr": "Votre garde-manger est vide.",
         "es": "Tu despensa está vacía.",
+    },
+    "pantry.usage": {
+        "en": "usage: /pantry [digest|<id>]",
+        "zh": "用法：/pantry [digest|<id>]",
+        "fr": "usage : /pantry [digest|<id>]",
+        "es": "uso: /pantry [digest|<id>]",
+    },
+    "pantry.no_item": {
+        "en": "no item #{id}",
+        "zh": "未找到项目 #{id}",
+        "fr": "aucun article #{id}",
+        "es": "no hay artículo #{id}",
+    },
+    "pantry.item_inactive": {
+        "en": "#{id} is {status}; cannot manage",
+        "zh": "#{id} 状态为 {status}；无法管理",
+        "fr": "#{id} est {status} ; impossible de le gérer",
+        "es": "#{id} está {status}; no se puede gestionar",
     },
     # -----------------------------------------------------------------------
     # Household invites & membership (v4.2)

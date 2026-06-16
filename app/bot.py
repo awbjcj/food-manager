@@ -802,17 +802,19 @@ async def handle_pantry(
         args = parts[1].split() if len(parts) == 2 else []
         try:
             mode = parse_pantry_arg(args)
-        except CommandError as exc:
-            await msg.answer(str(exc))
+        except CommandError:
+            await msg.answer(t("pantry.usage", user.lang))
             return
 
         if isinstance(mode, int):
             item = session.get(PantryItem, mode)
             if item is None or item.household_id != user.household_id:
-                await msg.answer(f"no item #{mode}")
+                await msg.answer(t("pantry.no_item", user.lang, id=mode))
                 return
             if item.status != "active":
-                await msg.answer(f"#{mode} is {item.status}; cannot manage")
+                await msg.answer(
+                    t("pantry.item_inactive", user.lang, id=mode, status=item.status)
+                )
                 return
             names = await _translate_for_render(
                 session,

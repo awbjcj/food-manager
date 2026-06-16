@@ -223,6 +223,28 @@ async def test_pantry_invalid_arg_replies_with_usage(session_factory):
 
 
 @pytest.mark.asyncio
+async def test_pantry_invalid_arg_uses_user_language(session_factory):
+    with session_factory() as db:
+        user = db.get(User, 1)
+        assert user is not None
+        user.lang = "zh"
+        db.add(user)
+        db.commit()
+    msg = _msg("/pantry nonsense")
+
+    await bot_mod.handle_pantry(
+        msg,
+        session_factory=session_factory,
+        now_provider=_now,
+    )
+
+    msg.answer.assert_awaited_once()
+    text = msg.answer.await_args.args[0]
+    assert "用法" in text
+    assert "/pantry" in text
+
+
+@pytest.mark.asyncio
 async def test_pantry_missing_item_id_replies_no_item(session_factory):
     msg = _msg("/pantry 9999")
 

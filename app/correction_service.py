@@ -12,15 +12,18 @@ from app.cache import get_cached, put_cached, write_user_correction
 from app.frozen_shelf_life import storage_cache_key
 from app.llm import TextLLMClient
 from app.shelf_life_search import ShelfLifeSearchClient, resolve_search_days
+from app.i18n import LANGS
 from app.models import PantryItem, ShelfLifeCache
 from app.normalization import normalize
 from app.storage_state import shelf_life_origin
 from app.shelf_life_defaults import lookup_default
+from app.translation_service import upsert_name_translations
 
 
 class CorrectPayload(BaseModel):
     kind: Literal["correct"] = "correct"
     diff: dict[str, Optional[dict[str, Any]]]
+    name_translations: dict[str, str] = Field(default_factory=dict)
     cache_action: Literal["move", "add_new", "leave"]
     rationale: str
     confidence: float
@@ -125,6 +128,23 @@ def _cache_snapshot(row: ShelfLifeCache | None) -> Optional[dict[str, Any]]:
     }
 
 
+def _clean_name_translations(
+    translations: dict[str, str],
+    *,
+    canonical_name: str,
+) -> dict[str, str]:
+    supported = set(LANGS)
+    cleaned: dict[str, str] = {}
+    for lang, value in translations.items():
+        if lang not in supported:
+            continue
+        value = value.strip()
+        if value:
+            cleaned[lang] = value
+    cleaned["en"] = canonical_name
+    return cleaned
+
+
 async def propose_correct(
     session: Session,
     *,
@@ -150,6 +170,25 @@ async def propose_correct(
     ):
         raise NullDiff()
 
+    raw_new_name = diff.name.strip() if diff.name is not None else None
+    if raw_new_name == "":
+        raise ProposeCorrectError("name cannot be empty")
+    corrected_name = (
+        diff.name_translations.get("en", "").strip()
+        if raw_new_name is not None
+        else None
+    )
+    if raw_new_name is not None and not corrected_name:
+        corrected_name = raw_new_name
+    name_translations = (
+        _clean_name_translations(
+            diff.name_translations,
+            canonical_name=corrected_name,
+        )
+        if corrected_name is not None and corrected_name != item.raw_name
+        else {}
+    )
+
     new_expires = diff.expires_on
     new_days = diff.shelf_life_days
     back_computed = False
@@ -168,8 +207,8 @@ async def propose_correct(
 
     payload_diff: dict[str, Optional[dict[str, Any]]] = {
         "name": (
-            {"old": item.raw_name, "new": diff.name}
-            if diff.name is not None and diff.name != item.raw_name
+            {"old": item.raw_name, "new": corrected_name}
+            if corrected_name is not None and corrected_name != item.raw_name
             else None
         ),
         "category": (
@@ -195,6 +234,7 @@ async def propose_correct(
     return (
         CorrectPayload(
             diff=payload_diff,
+            name_translations=name_translations,
             cache_action=diff.cache_action,
             rationale=diff.rationale,
             confidence=diff.confidence,
@@ -233,6 +273,12 @@ def apply_correct(
         item.expires_on = _expiry_origin(item) + timedelta(days=new_days)
     if expires_change is not None:
         item.expires_on = date.fromisoformat(expires_change["new"])
+    if name_change is not None and payload.name_translations:
+        upsert_name_translations(
+            session,
+            source_text=item.raw_name,
+            translations=payload.name_translations,
+        )
     session.add(item)
 
     new_normalized = item.normalized_name

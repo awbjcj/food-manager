@@ -1,14 +1,47 @@
 from __future__ import annotations
 
 import logging
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from sqlmodel import Session
 
+from app.i18n import LANGS
 from app.models import NameTranslation
 from app.translation_llm import TranslationLLMClient
 
 log = logging.getLogger(__name__)
+
+
+def upsert_name_translations(
+    session: Session,
+    *,
+    source_text: str,
+    translations: Mapping[str, str],
+) -> None:
+    """Update cached display translations for one canonical English name.
+
+    The caller controls the transaction. English is an identity render path, so
+    only non-English supported languages are stored.
+    """
+    supported = set(LANGS)
+    for lang, translated_text in translations.items():
+        if lang == "en" or lang not in supported:
+            continue
+        translated_text = translated_text.strip()
+        if not translated_text:
+            continue
+        row = session.get(NameTranslation, (lang, source_text))
+        if row is None:
+            session.add(
+                NameTranslation(
+                    lang=lang,
+                    source_text=source_text,
+                    translated_text=translated_text,
+                )
+            )
+        else:
+            row.translated_text = translated_text
+            session.add(row)
 
 
 async def translate_texts(

@@ -13,12 +13,14 @@ from app.correction_service import (
     add_payload_to_json,
     apply_add,
     apply_correct,
+    correct_payload_from_json,
+    correct_payload_to_json,
     item_snapshot_to_json,
     propose_add,
     propose_correct,
 )
 from app.llm import CorrectionDiff, ProposedAddItem
-from app.models import Household, PantryItem, User
+from app.models import Household, NameTranslation, PantryItem, User
 from app.pantry_service import compute_stats, mark_eaten
 from app.pending_service import (
     PENDING_TTL_MINUTES,
@@ -172,6 +174,48 @@ async def test_propose_correct_back_computes_days_and_snapshot(session):
 
 
 @pytest.mark.asyncio
+async def test_propose_correct_localized_name_carries_all_translations_and_expiry(session):
+    item = _item(session)
+    fake = FakeTextLLMClient(canned_correct=(
+        CorrectionDiff(
+            name="豆奶",
+            name_translations={
+                "en": "Soy Milk",
+                "zh": "豆奶",
+                "fr": "lait de soja",
+                "es": "leche de soja",
+            },
+            expires_on=date(2026, 6, 10),
+            cache_action="move",
+            rationale="localized name and date",
+            confidence=0.9,
+        ),
+        150,
+    ))
+
+    payload, cost = await propose_correct(
+        session,
+        llm=fake,
+        household_id=1,
+        item=item,
+        user_text="这是豆奶，6月10日过期",
+        today=date(2026, 5, 27),
+    )
+
+    assert payload.diff["name"] == {"old": "Milk", "new": "Soy Milk"}
+    assert payload.diff["expires_on"] == {"old": "2026-06-02", "new": "2026-06-10"}
+    assert payload.diff["shelf_life_days"]["new"] == 15
+    assert payload.name_translations == {
+        "en": "Soy Milk",
+        "zh": "豆奶",
+        "fr": "lait de soja",
+        "es": "leche de soja",
+    }
+    assert correct_payload_from_json(correct_payload_to_json(payload)).name_translations == payload.name_translations
+    assert cost == 150
+
+
+@pytest.mark.asyncio
 async def test_propose_correct_rejects_null_and_out_of_range(session):
     item = _item(session)
     null_fake = FakeTextLLMClient(canned_correct=(
@@ -250,6 +294,43 @@ def test_apply_correct_cache_actions(session):
     updated_cache = get_cached(session, 1, "heavy cream")
     assert updated_cache is not None
     assert updated_cache.category == "beverage"
+
+
+def test_apply_correct_upserts_name_translations(session):
+    item = _item(session)
+    session.add(
+        NameTranslation(
+            lang="zh",
+            source_text="Soy Milk",
+            translated_text="旧豆奶",
+        )
+    )
+    session.commit()
+    payload = CorrectPayload(
+        diff={
+            "name": {"old": "Milk", "new": "Soy Milk"},
+            "category": None,
+            "expires_on": None,
+            "shelf_life_days": None,
+        },
+        name_translations={
+            "en": "Soy Milk",
+            "zh": "豆奶",
+            "fr": "lait de soja",
+            "es": "leche de soja",
+        },
+        cache_action="move",
+        rationale="localized name",
+        confidence=0.9,
+    )
+
+    apply_correct(session, household_id=1, item=item, payload=payload)
+    session.commit()
+
+    assert session.get(NameTranslation, ("en", "Soy Milk")) is None
+    assert session.get(NameTranslation, ("zh", "Soy Milk")).translated_text == "豆奶"
+    assert session.get(NameTranslation, ("fr", "Soy Milk")).translated_text == "lait de soja"
+    assert session.get(NameTranslation, ("es", "Soy Milk")).translated_text == "leche de soja"
 
 
 @pytest.mark.asyncio

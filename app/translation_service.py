@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Iterable, Mapping
 
-from sqlmodel import Session
+from sqlmodel import Session, col, select
 
 from app.i18n import LANGS
 from app.models import NameTranslation
@@ -44,6 +44,30 @@ def upsert_name_translations(
             session.add(row)
 
 
+def cached_name_translations(
+    session: Session,
+    texts: Iterable[str],
+    *,
+    lang: str,
+) -> dict[str, str]:
+    """Return cached display translations only.
+
+    Misses are omitted so renderers naturally fall back to English. This is the
+    low-latency path for callback rendering, where a button tap should never
+    wait on an LLM/network translation miss.
+    """
+    unique = [text for text in dict.fromkeys(texts) if text]
+    if lang == "en" or not unique:
+        return {}
+    rows = session.exec(
+        select(NameTranslation).where(
+            NameTranslation.lang == lang,
+            col(NameTranslation.source_text).in_(unique),
+        )
+    ).all()
+    return {row.source_text: row.translated_text for row in rows}
+
+
 async def translate_texts(
     session: Session,
     texts: Iterable[str],
@@ -66,14 +90,8 @@ async def translate_texts(
     if lang == "en" or not unique:
         return {text: text for text in unique}
 
-    result: dict[str, str] = {}
-    misses: list[str] = []
-    for text in unique:
-        row = session.get(NameTranslation, (lang, text))
-        if row is not None:
-            result[text] = row.translated_text
-        else:
-            misses.append(text)
+    result = cached_name_translations(session, unique, lang=lang)
+    misses = [text for text in unique if text not in result]
 
     if misses:
         try:

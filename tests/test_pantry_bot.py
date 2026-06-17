@@ -6,7 +6,8 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
-from app.models import Household, PantryItem, User
+from app.models import Household, NameTranslation, PantryItem, User
+from tests.fakes import FakeTranslationLLM
 
 
 @pytest.fixture
@@ -136,6 +137,53 @@ async def test_item_open_all_renders_card_with_full_pantry_back_button(session_f
 
     markup = cb.message.edit_text.await_args.kwargs["reply_markup"]
     assert markup.inline_keyboard[-1][0].callback_data == "item:list:all"
+
+
+@pytest.mark.asyncio
+async def test_item_open_callback_does_not_call_translation_llm_on_cache_miss(session_factory):
+    item_id = _active_item(session_factory)
+    with session_factory() as db:
+        user = db.get(User, 1)
+        assert user is not None
+        user.lang = "zh"
+        db.add(user)
+        db.commit()
+    cb = _cb(f"item:open:{item_id}")
+    fake = FakeTranslationLLM(table={"Milk": "牛奶"})
+
+    await bot_mod.handle_item_callback(
+        cb,
+        session_factory=session_factory,
+        now_provider=_now,
+        translation_llm=fake,
+    )
+
+    assert fake.calls == []
+    assert "Milk" in cb.message.edit_text.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_item_open_callback_uses_cached_translation(session_factory):
+    item_id = _active_item(session_factory)
+    with session_factory() as db:
+        user = db.get(User, 1)
+        assert user is not None
+        user.lang = "zh"
+        db.add(user)
+        db.add(NameTranslation(lang="zh", source_text="Milk", translated_text="牛奶"))
+        db.commit()
+    cb = _cb(f"item:open:{item_id}")
+    fake = FakeTranslationLLM(table={"Milk": "LLM milk"})
+
+    await bot_mod.handle_item_callback(
+        cb,
+        session_factory=session_factory,
+        now_provider=_now,
+        translation_llm=fake,
+    )
+
+    assert fake.calls == []
+    assert "牛奶" in cb.message.edit_text.await_args.args[0]
 
 
 @pytest.mark.asyncio

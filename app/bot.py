@@ -149,7 +149,7 @@ from app.renderer import (
     render_undo_result,
 )
 from app.profile_service import profile_from_household, update_profile_from_sentence
-from app.translation_service import translate_texts
+from app.translation_service import cached_name_translations, translate_texts
 
 DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8
@@ -297,6 +297,10 @@ async def _translate_for_render(session, *, lang, texts, translation_llm):
     if lang == "en" or translation_llm is None:
         return {}
     return await translate_texts(session, [x for x in texts if x], lang=lang, llm=translation_llm)
+
+
+def _cached_names_for_render(session, *, lang, texts):
+    return cached_name_translations(session, [x for x in texts if x], lang=lang)
 
 
 def _cook_card_texts(cards) -> list[str]:
@@ -1985,10 +1989,9 @@ async def handle_item_callback(
                 return
             await refresh()
 
-        async def item_names(item) -> dict:
-            return await _translate_for_render(
-                session, lang=user.lang, texts=[item.raw_name],
-                translation_llm=translation_llm,
+        def item_names(item) -> dict:
+            return _cached_names_for_render(
+                session, lang=user.lang, texts=[item.raw_name]
             )
 
         if action.kind == "list":
@@ -2021,7 +2024,7 @@ async def handle_item_callback(
                 item_id=item_id, days=new_days, today=today,
             )
             await dispatch_answer(cb, "updated")
-            names = await item_names(item)
+            names = item_names(item)
             await edit_or_resend(
                 cb,
                 render_correct_menu(item, today=today, lang=user.lang, names=names),
@@ -2040,7 +2043,7 @@ async def handle_item_callback(
 
         if action.kind == "ctext":
             await dispatch_answer(cb)
-            names = await item_names(item)
+            names = item_names(item)
             display_name = names.get(item.raw_name, item.raw_name)
             prompt = t(
                 "correct.freetext_prompt", user.lang,
@@ -2057,7 +2060,7 @@ async def handle_item_callback(
 
         # Pure view changes: acknowledge, then render the requested screen.
         await dispatch_answer(cb)
-        names = await item_names(item)
+        names = item_names(item)
         if action.kind == "open":
             await edit_or_resend(
                 cb,
@@ -2256,11 +2259,10 @@ async def handle_callback(
             if not rows:
                 await cb.answer("nothing due")
                 return
-            row_names = await _translate_for_render(
+            row_names = _cached_names_for_render(
                 session,
                 lang=user.lang,
                 texts=[i.raw_name for i in rows],
-                translation_llm=translation_llm,
             )
             rendered = render_digest(
                 rows, today=today, lang=user.lang, names=row_names, cap=None
@@ -2522,11 +2524,10 @@ async def _refresh_digest_message(
 ) -> None:
     remaining = list_digest_due(session, household_id=household_id, today=today)
     if remaining:
-        names = await _translate_for_render(
+        names = _cached_names_for_render(
             session,
             lang=lang,
             texts=[i.raw_name for i in remaining],
-            translation_llm=translation_llm,
         )
         rendered = render_digest(remaining, today=today, lang=lang, names=names)
         keyboard = to_aiogram_keyboard(
@@ -2553,11 +2554,10 @@ async def _refresh_pantry_message(
         today=today,
     )
     if remaining:
-        names = await _translate_for_render(
+        names = _cached_names_for_render(
             session,
             lang=lang,
             texts=[i.raw_name for i in remaining],
-            translation_llm=translation_llm,
         )
         rendered = render_digest(remaining, today=today, lang=lang, names=names, cap=None)
         keyboard = to_aiogram_keyboard(

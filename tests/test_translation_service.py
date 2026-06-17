@@ -11,7 +11,7 @@ from app.translation_llm import (
     TranslationList,
     TranslationLLMProviderSelector,
 )
-from app.translation_service import translate_texts
+from app.translation_service import cached_name_translations, translate_texts
 from tests.fakes import FakeTranslationLLM
 from tests.test_v1_5_llm import _OpenAIParsedResponse, _TextResponse
 
@@ -64,8 +64,16 @@ async def test_cache_hit_skips_llm():
         s.commit()
         fake = FakeTranslationLLM(table={})
         out = await translate_texts(s, ["Milk"], lang="zh", llm=fake)
-        assert out == {"Milk": "牛奶"}
-        assert fake.calls == []
+    assert out == {"Milk": "牛奶"}
+    assert fake.calls == []
+
+
+def test_cached_name_translations_returns_hits_only_without_llm():
+    with _session() as s:
+        s.add(NameTranslation(lang="zh", source_text="Milk", translated_text="牛奶"))
+        s.commit()
+        out = cached_name_translations(s, ["Milk", "Eggs", "Milk"], lang="zh")
+    assert out == {"Milk": "牛奶"}
 
 
 async def test_partial_cache_only_sends_misses():

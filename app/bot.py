@@ -69,6 +69,7 @@ from app.llm import (
     ProfileUpdateLLMClient,
     TextLLMClient,
 )
+from app.providers import ALL_PROVIDERS, supports
 from app.household_service import (
     provision_solo_household,
     restore_household_for_user,
@@ -88,6 +89,7 @@ from app.invite_service import (
 )
 from app.models import CookSession, Household, PantryItem, User
 from app.refine_service import run_receipt_refine
+from app.shelf_life_search import ShelfLifeSearchClient
 from app.storage_state import shelf_life_origin
 from app.callback_dispatch import answer as dispatch_answer, edit_or_resend
 from app.pantry_service import (
@@ -267,9 +269,12 @@ def _require_today(today: date | None) -> date:
 def _available_llm_providers(
     llm: LLMClient, text_llm: TextLLMClient
 ) -> tuple[str, ...]:
-    image_providers = set(getattr(llm, "available_providers", ("anthropic",)))
-    text_providers = set(getattr(text_llm, "available_providers", ("anthropic",)))
-    return tuple(sorted(image_providers & text_providers))
+    # A provider is selectable if it can serve the core text tasks (corrections,
+    # /add, profile, cook, translation) — the floor every provider must meet.
+    # Image extraction and web search fall back to a capable provider when the
+    # chosen one lacks them, so they are not required for selectability. (The
+    # ``llm`` image selector is accepted for call-site symmetry.)
+    return tuple(sorted(getattr(text_llm, "available_providers", ("anthropic",))))
 
 
 def _select_llm_client(llm: LLMClient, provider: str) -> LLMClient:
@@ -317,11 +322,19 @@ def _cook_card_texts(cards) -> list[str]:
 
 def _render_llm_status(user: User, llm: LLMClient, text_llm: TextLLMClient) -> str:
     available = _available_llm_providers(llm, text_llm)
-    return (
-        f"LLM provider: {user.llm_provider}\n"
-        f"Available: {', '.join(available) if available else 'none'}\n"
-        "Usage: /llm [anthropic|openai]"
-    )
+    lines = [
+        f"LLM provider: {user.llm_provider}",
+        f"Available: {', '.join(available) if available else 'none'}",
+    ]
+    text_only = [p for p in available if not supports(p, "image")]
+    if text_only:
+        verb = "is" if len(text_only) == 1 else "are"
+        lines.append(
+            f"Note: {', '.join(text_only)} {verb} text-only; photos & web "
+            "search use a capable provider."
+        )
+    lines.append(f"Usage: /llm [{'|'.join(ALL_PROVIDERS)}]")
+    return "\n".join(lines)
 
 
 def _authorized_callback_user(session: Session, telegram_id: int) -> User | None:
@@ -880,7 +893,7 @@ async def handle_add(
     now_provider: NowProvider,
     text_llm: TextLLMClient,
     on_user_created: Callable[[User], None] = _noop_user_created,
-    search=None,
+    search: ShelfLifeSearchClient | None = None,
 ) -> None:
     async with _request(
         msg,
@@ -897,6 +910,7 @@ async def handle_add(
             return
         try:
             selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
+            selected_search = _select_search(search, user.llm_provider)
             proposals, _ = await propose_add(
                 session,
                 llm=selected_text_llm,
@@ -904,7 +918,7 @@ async def handle_add(
                 user_text=parts[1].strip(),
                 today=today,
                 tz=user.tz,
-                search=search,
+                search=selected_search,
             )
         except LLMProviderNotConfigured:
             await msg.answer(
@@ -1510,7 +1524,7 @@ async def handle_photo(
     llm: LLMClient,
     photo_downloader: Callable[[str], Awaitable[bytes]],
     on_user_created: Callable[[User], None] = _noop_user_created,
-    search=None,
+    search: ShelfLifeSearchClient | None = None,
     spawn=None,
     bot=None,
     translation_llm=None,
@@ -1534,6 +1548,7 @@ async def handle_photo(
         )
         try:
             selected_llm = _select_llm_client(llm, user.llm_provider)
+            selected_search = _select_search(search, user.llm_provider)
             summary = await ingest_photo(
                 session,
                 selected_llm,
@@ -1541,7 +1556,7 @@ async def handle_photo(
                 photo_file_id=file_id,
                 image_bytes=await photo_downloader(file_id),
                 today=today,
-                search=search,
+                search=selected_search,
             )
         except LLMProviderNotConfigured:
             await msg.answer(
@@ -1587,13 +1602,14 @@ async def handle_photo(
             else None
         )
         refine_household_id = user.household_id
+        refine_search = selected_search
         sent = await msg.answer(
             render_ingest_reply(summary, today=today, lang=user_lang, names=names),
             reply_markup=keyboard,
         )
 
     if (
-        search is not None
+        refine_search is not None
         and spawn is not None
         and bot is not None
         and summary.receipt_id is not None
@@ -1607,7 +1623,7 @@ async def handle_photo(
         async def _run_refine():
             refined = await run_receipt_refine(
                 session_factory,
-                search,
+                refine_search,
                 item_ids=item_ids,
                 summary=summary,
                 household_id=refine_household_id,
@@ -1656,6 +1672,21 @@ def _cuisine_options(household: Household) -> list[str]:
 def _select_cook(client, provider: str):
     selector = getattr(client, "for_provider", None)
     return selector(provider) if callable(selector) else client
+
+
+def _select_search(
+    search: ShelfLifeSearchClient | None, provider: str
+) -> ShelfLifeSearchClient | None:
+    """Resolve the per-user web-search client (with capability fallback).
+
+    ``search`` may be a ``SearchProviderSelector``, a bare client, or None (in
+    tests); only the selector exposes ``for_provider``, so the others pass
+    through unchanged.
+    """
+    selector = getattr(search, "for_provider", None)
+    if callable(selector):
+        return cast(ShelfLifeSearchClient, selector(provider))
+    return search
 
 
 async def _safe_edit_cb(cb, text: str, keyboard=None) -> bool:
@@ -2088,7 +2119,12 @@ async def handle_item_callback(
 
 
 async def handle_callback(
-    cb, *, session_factory, now_provider, translation_llm=None, search=None
+    cb,
+    *,
+    session_factory,
+    now_provider,
+    translation_llm=None,
+    search: ShelfLifeSearchClient | None = None,
 ) -> None:
     try:
         action = parse_callback(cb.data)
@@ -2355,7 +2391,7 @@ async def handle_callback(
                     item_id=item_id,
                     state="frozen" if action.verb == "freeze" else "fridge",
                     today=today,
-                    search=search,
+                    search=_select_search(search, user.llm_provider),
                 )
             else:
                 await dispatch_answer(cb, "unrecognized action")
@@ -2634,7 +2670,7 @@ def build_dispatcher(
     on_user_created: Callable[[User], None],
     reschedule: Callable[[User], None],
     unschedule: Callable[[int], None] = lambda _telegram_id: None,
-    search=None,
+    search: ShelfLifeSearchClient | None = None,
     selection_llm=None,
     recipe_llm=None,
     nutrition_llm=None,

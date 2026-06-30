@@ -204,7 +204,9 @@ async def test_propose_correct_localized_name_carries_all_translations_and_expir
 
     assert payload.diff["name"] == {"old": "Milk", "new": "Soy Milk"}
     assert payload.diff["expires_on"] == {"old": "2026-06-02", "new": "2026-06-10"}
-    assert payload.diff["shelf_life_days"]["new"] == 15
+    shelf_life_days_diff = payload.diff["shelf_life_days"]
+    assert shelf_life_days_diff is not None
+    assert shelf_life_days_diff["new"] == 15
     assert payload.name_translations == {
         "en": "Soy Milk",
         "zh": "豆奶",

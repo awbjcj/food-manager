@@ -41,7 +41,10 @@ Single-user Telegram bot: user sends grocery receipt photos → Claude parses th
 | `app/models.py` | SQLModel ORM: `User`, `Receipt`, `PantryItem`, `ShelfLifeCache` |
 | `app/settings.py` | `pydantic-settings` env-var loading (aliases like `TELEGRAM_BOT_TOKEN`) |
 | `app/db.py` | Engine + session factory creation |
-| `app/llm.py` | `LLMClient` Protocol + `AnthropicLLMClient`; `ParsedItem`/`LLMResult` Pydantic models |
+| `app/providers.py` | Canonical `Provider` type, `PROVIDER_CAPABILITIES`/`supports()`, `LLMProviderNotConfigured`, and the generic `ProviderSelector` base (with fallback) reused by every seam |
+| `app/llm.py` | `LLMClient` Protocol + Anthropic/OpenAI clients; capability selectors (subclass `ProviderSelector`); `ParsedItem`/`LLMResult` models |
+| `app/gemini_llm.py` | All Google Gemini clients (native `google-genai`): image, text, profile, cook, translation, search |
+| `app/deepseek_llm.py` | DeepSeek text-only clients (OpenAI-compatible `chat.completions`): text, profile, selection, nutrition, translation |
 | `app/translation_llm.py` | `TranslationLLMClient` Protocol + Anthropic/OpenAI clients + selector (translates dynamic names) |
 | `app/translation_service.py` | `translate_texts()`: lazy LLM translate + `NameTranslation` cache, English fallback |
 | `app/i18n.py` | Static `MESSAGES` catalog, `t(key, lang, **kw)`, locale date/weekday helpers |
@@ -99,6 +102,45 @@ FoodKeeper table -> the existing `ShelfLifeSearchClient` queried as
 `"frozen <food>"` -> a cached 90-day default. Freezing is one-way (no thaw).
 Frozen items are excluded from the post-ingest fresh web-search refine path and,
 with their long expiries, fall out of the 7-day digest window automatically.
+
+### Multi-provider LLM routing (v4.7)
+
+Four providers are selectable per user (`User.llm_provider`, set via `/llm`):
+`anthropic`, `openai`, `gemini`, `deepseek`. The column is a plain `str` (no DB
+migration needed); `app/providers.py` is the single source of truth for the
+`Provider` type and the capability matrix.
+
+- **Capabilities differ per provider.** `anthropic`/`openai`/`gemini` are full
+  providers (image + web search + text); **DeepSeek's API is text-only** (no
+  image input, no API-level web-search tool). `PROVIDER_CAPABILITIES` /
+  `supports(provider, capability)` encode this.
+- **One generic selector.** Every seam (image, text, profile, cook
+  selection/recipe/nutrition, translation, search) is a thin subclass of
+  `ProviderSelector` mapping `provider -> client`. `for_provider(name)` returns
+  the client; with `fallback=True` a missing provider routes to a capable one
+  (the seed default if capable, else the first available, logged as
+  `llm_provider_fallback`). Fallback is **on** for image/search/recipe (a
+  provider may legitimately lack them) and **off** for text seams (the user's
+  choice is always honoured).
+- **Selectability floor is text.** `_available_llm_providers` (bot.py) lists
+  providers that can serve the *text* tasks, so DeepSeek is selectable even
+  though it can't read photos; `/llm` status flags text-only providers.
+- **Seed defaults must be capable.** `bin/run.py::_capable_default` ensures an
+  image/search/recipe selector is seeded with a provider that actually has the
+  capability (a DeepSeek global default falls back to gemini/anthropic). Settings
+  validation refuses a text-only default unless an image-capable key is set.
+- **Web search is now per-user.** It used to be hardwired to Anthropic; it is a
+  `SearchProviderSelector` resolved via `_select_search(search, user.llm_provider)`
+  at the ingest/`/add`/freeze call sites. Only anthropic + gemini have a
+  `ShelfLifeSearchClient`; others fall back.
+- **Provider client cohesion.** Anthropic/OpenAI clients stay split by capability
+  (`llm.py`, `cook/llm.py`, `translation_llm.py`), but each new provider's
+  clients live in one module (`gemini_llm.py`, `deepseek_llm.py`) because their
+  SDK shapes differ enough to be worth centralizing. DeepSeek reuses the
+  Anthropic text client's "ask for JSON, validate, repair once" loop over
+  `chat.completions`; Gemini uses structured output, except the search/recipe
+  paths which use Google Search grounding and parse JSON from text (grounding and
+  structured-output mode are mutually exclusive in the SDK).
 
 ### Database
 

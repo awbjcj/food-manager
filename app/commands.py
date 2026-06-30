@@ -6,6 +6,7 @@ from typing import Literal, Optional, Sequence, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.i18n import LANGS
+from app.providers import ALL_PROVIDERS, Provider
 from app.pantry_service import (
     ALLOWED_CATEGORIES,
     NUDGE_CODES,
@@ -82,18 +83,19 @@ def parse_list_filter(args: Sequence[str]) -> ListFilter:
     )
 
 
-LLMProviderName = Literal["anthropic", "openai"]
-ALLOWED_LLM_PROVIDERS: tuple[LLMProviderName, ...] = ("anthropic", "openai")
+LLMProviderName = Provider
+ALLOWED_LLM_PROVIDERS: tuple[Provider, ...] = ALL_PROVIDERS
+_LLM_USAGE = f"usage: /llm [{'|'.join(ALLOWED_LLM_PROVIDERS)}]"
 
 
 def parse_llm_provider(args: Sequence[str]) -> Optional[LLMProviderName]:
     if len(args) > 1:
-        raise CommandError("usage: /llm [anthropic|openai]")
+        raise CommandError(_LLM_USAGE)
     if not args:
         return None
     token = args[0].lower()
     if token not in ALLOWED_LLM_PROVIDERS:
-        raise CommandError("usage: /llm [anthropic|openai]")
+        raise CommandError(_LLM_USAGE)
     return cast(LLMProviderName, token)
 
 

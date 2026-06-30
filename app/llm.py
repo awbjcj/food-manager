@@ -174,6 +174,10 @@ _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "claude-haiku-4-5-20251001": {"input": 1, "output": 5},
     "gpt-5.4": {"input": 2.5, "output": 15},
     "gpt-5.4-mini": {"input": 0.75, "output": 4.5},
+    # Approximate public per-token (micro-USD) rates; cost stays best-effort and
+    # is reported as unknown for any model absent from this table.
+    "gemini-2.5-flash": {"input": 0.3, "output": 2.5},
+    "deepseek-chat": {"input": 0.27, "output": 1.1},
 }
 
 _OPENAI_WEB_SEARCH_TOOL = {

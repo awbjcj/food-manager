@@ -11,6 +11,11 @@ from pydantic import BaseModel, Field
 
 from app.llm_transport import with_transport_retry
 from app.profile_service import FoodProfile
+from app.providers import Provider, ProviderSelector
+
+# Re-exported for callers (app.bot, app.translation_llm) that import the error
+# from app.llm; the canonical definition lives in app.providers.
+from app.providers import LLMProviderNotConfigured as LLMProviderNotConfigured
 
 Category = Literal[
     "dairy",
@@ -115,7 +120,9 @@ class ProfileUpdateLLMClient(Protocol):
 
 
 log = logging.getLogger(__name__)
-LLMProviderName = Literal["anthropic", "openai"]
+# Canonical provider type now lives in app.providers; aliased here for the many
+# modules (e.g. app.translation_llm) that import LLMProviderName from app.llm.
+LLMProviderName = Provider
 
 
 SYSTEM_PROMPT = """You parse grocery receipt photos.
@@ -237,35 +244,11 @@ def _extract_openai_parsed(response):
     raise ValueError("no parsed content in OpenAI response")
 
 
-class LLMProviderNotConfigured(ValueError):
-    pass
+# LLMProviderNotConfigured now lives in app.providers (imported above) so the
+# search seam can raise it without importing this heavyweight module.
 
 
-class LLMProviderSelector(LLMClient):
-    def __init__(
-        self,
-        clients: dict[str, LLMClient],
-        default_provider: LLMProviderName,
-    ):
-        if default_provider not in clients:
-            raise LLMProviderNotConfigured(default_provider)
-        self._clients = clients
-        self._default_provider: LLMProviderName = default_provider
-
-    @property
-    def available_providers(self) -> tuple[str, ...]:
-        return tuple(sorted(self._clients))
-
-    @property
-    def default_provider(self) -> LLMProviderName:
-        return self._default_provider
-
-    def for_provider(self, provider: str) -> LLMClient:
-        try:
-            return self._clients[provider]
-        except KeyError as exc:
-            raise LLMProviderNotConfigured(provider) from exc
-
+class LLMProviderSelector(ProviderSelector[LLMClient], LLMClient):
     async def extract_items_from_image(
         self,
         image_bytes: bytes,
@@ -278,31 +261,7 @@ class LLMProviderSelector(LLMClient):
         )
 
 
-class TextLLMProviderSelector(TextLLMClient):
-    def __init__(
-        self,
-        clients: dict[str, TextLLMClient],
-        default_provider: LLMProviderName,
-    ):
-        if default_provider not in clients:
-            raise LLMProviderNotConfigured(default_provider)
-        self._clients = clients
-        self._default_provider: LLMProviderName = default_provider
-
-    @property
-    def available_providers(self) -> tuple[str, ...]:
-        return tuple(sorted(self._clients))
-
-    @property
-    def default_provider(self) -> LLMProviderName:
-        return self._default_provider
-
-    def for_provider(self, provider: str) -> TextLLMClient:
-        try:
-            return self._clients[provider]
-        except KeyError as exc:
-            raise LLMProviderNotConfigured(provider) from exc
-
+class TextLLMProviderSelector(ProviderSelector[TextLLMClient], TextLLMClient):
     async def parse_correct(
         self,
         *,
@@ -332,31 +291,9 @@ class TextLLMProviderSelector(TextLLMClient):
         )
 
 
-class ProfileLLMProviderSelector(ProfileUpdateLLMClient):
-    def __init__(
-        self,
-        clients: dict[str, ProfileUpdateLLMClient],
-        default_provider: LLMProviderName,
-    ):
-        if default_provider not in clients:
-            raise LLMProviderNotConfigured(default_provider)
-        self._clients = clients
-        self._default_provider: LLMProviderName = default_provider
-
-    @property
-    def available_providers(self) -> tuple[str, ...]:
-        return tuple(sorted(self._clients))
-
-    @property
-    def default_provider(self) -> LLMProviderName:
-        return self._default_provider
-
-    def for_provider(self, provider: str) -> ProfileUpdateLLMClient:
-        try:
-            return self._clients[provider]
-        except KeyError as exc:
-            raise LLMProviderNotConfigured(provider) from exc
-
+class ProfileLLMProviderSelector(
+    ProviderSelector[ProfileUpdateLLMClient], ProfileUpdateLLMClient
+):
     async def parse_profile_update(
         self, *, current: FoodProfile, sentence: str
     ) -> tuple[FoodProfile, Optional[int]]:
@@ -369,77 +306,17 @@ class ProfileLLMProviderSelector(ProfileUpdateLLMClient):
 # The cook-pipeline selectors are duck-typed rather than subclassing the cook
 # Protocols (which live in app.cook.llm and import from this module), so that
 # app.llm has no import dependency on app.cook.llm.
-class SelectionLLMProviderSelector:
-    def __init__(self, clients: dict, default_provider: LLMProviderName):
-        if default_provider not in clients:
-            raise LLMProviderNotConfigured(default_provider)
-        self._clients = clients
-        self._default_provider: LLMProviderName = default_provider
-
-    @property
-    def available_providers(self) -> tuple[str, ...]:
-        return tuple(sorted(self._clients))
-
-    @property
-    def default_provider(self) -> LLMProviderName:
-        return self._default_provider
-
-    def for_provider(self, provider: str):
-        try:
-            return self._clients[provider]
-        except KeyError as exc:
-            raise LLMProviderNotConfigured(provider) from exc
-
+class SelectionLLMProviderSelector(ProviderSelector):
     async def select_items(self, *, prompt: str):
         return await self.for_provider(self._default_provider).select_items(prompt=prompt)
 
 
-class RecipeLLMProviderSelector:
-    def __init__(self, clients: dict, default_provider: LLMProviderName):
-        if default_provider not in clients:
-            raise LLMProviderNotConfigured(default_provider)
-        self._clients = clients
-        self._default_provider: LLMProviderName = default_provider
-
-    @property
-    def available_providers(self) -> tuple[str, ...]:
-        return tuple(sorted(self._clients))
-
-    @property
-    def default_provider(self) -> LLMProviderName:
-        return self._default_provider
-
-    def for_provider(self, provider: str):
-        try:
-            return self._clients[provider]
-        except KeyError as exc:
-            raise LLMProviderNotConfigured(provider) from exc
-
+class RecipeLLMProviderSelector(ProviderSelector):
     async def fetch_recipes(self, *, prompt: str):
         return await self.for_provider(self._default_provider).fetch_recipes(prompt=prompt)
 
 
-class NutritionLLMProviderSelector:
-    def __init__(self, clients: dict, default_provider: LLMProviderName):
-        if default_provider not in clients:
-            raise LLMProviderNotConfigured(default_provider)
-        self._clients = clients
-        self._default_provider: LLMProviderName = default_provider
-
-    @property
-    def available_providers(self) -> tuple[str, ...]:
-        return tuple(sorted(self._clients))
-
-    @property
-    def default_provider(self) -> LLMProviderName:
-        return self._default_provider
-
-    def for_provider(self, provider: str):
-        try:
-            return self._clients[provider]
-        except KeyError as exc:
-            raise LLMProviderNotConfigured(provider) from exc
-
+class NutritionLLMProviderSelector(ProviderSelector):
     async def score(self, *, prompt: str):
         return await self.for_provider(self._default_provider).score(prompt=prompt)
 

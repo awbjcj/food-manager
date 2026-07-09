@@ -70,6 +70,9 @@ Single-user Telegram bot: user sends grocery receipt photos → Claude parses th
 | `app/shopping_service.py` | Shopping list CRUD: add missing `/cook` ingredients, list, mark bought |
 | `app/llm_transport.py` | `with_transport_retry`: shared retry/backoff policy for every provider network call |
 | `app/callback_dispatch.py` | Callback-query seam: ack-first, then edit-in-place or resend-as-new-message so a button tap never dead-ends |
+| `app/progress.py` | Progress-ack seam for slow commands: `start_progress` / `finish_progress` (edit ack into result) / `clear_progress` |
+| `app/alerts.py` | `OwnerAlerter`: rate-limited operational alert DMs to the bootstrap owner |
+| `app/resilience.py` | `run_with_restart`: exponential-backoff restart loop around polling |
 | `app/cook/*` | Recipe engine: `models.py` (Purpose/Effort/`RecipeCriteria`/`ScoredCandidate`), `recipe_source.py` (Spoonacular/TheMealDB real-source building blocks, v4.9, not yet wired in), `llm.py` (selection/recipe/nutrition clients), `logic.py` (scoring, shopping-list diff), `service.py` (live LLM-only pipeline), `session_service.py` (`CookSession` cost/state), `favorites_service.py` (`SavedRecipe`), `feedback.py` (liked/disliked signal) |
 | `bin/run.py` | Entry point: loads settings, runs migrations, starts scheduler + polling |
 
@@ -199,6 +202,18 @@ migration needed); `app/providers.py` is the single source of truth for the
   `chat.completions`; Gemini uses structured output, except the search/recipe
   paths which use Google Search grounding and parse JSON from text (grounding and
   structured-output mode are mutually exclusive in the SDK).
+
+### Stability & feedback (v5.0)
+
+Slow commands (photo ingest, `/add`) ack immediately via `app/progress.py` and
+edit the ack into the final reply; `/cook` already had its own "Thinking..."
+state. Failures are loud: an aiogram errors observer and the digest retry's
+`on_final_failure` hook DM the owner through `OwnerAlerter` (rate-limited, best
+effort). `User.last_digest_date` records completed digest runs (silent days
+included) so `catch_up_missed_digests` at startup sends a missed digest late
+instead of never. Polling is wrapped in `run_with_restart` (backoff, reset
+after stable runs); `docs/operations.md` documents outer supervision. All
+provider calls log `*_timing` (duration_ms, attempts) via `with_transport_retry`.
 
 ### Database
 

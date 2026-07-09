@@ -31,6 +31,7 @@ import app.cook.service as cook_service_mod
 from app.alerts import OwnerAlerter
 from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
+from app.resilience import run_with_restart
 from app.cook.llm import (
     AnthropicNutritionLLM,
     AnthropicRecipeLLM,
@@ -395,8 +396,15 @@ async def _amain(settings: Settings) -> None:
         log.info("digest_catch_up_done", extra={"count": caught_up})
 
     log.info("polling_start")
+
+    async def _alert_polling_crash(exc: Exception) -> None:
+        await alerter.alert("polling_crashed", f"{type(exc).__name__}: {exc}")
+
     try:
-        await dispatcher.start_polling(bot)
+        await run_with_restart(
+            lambda: dispatcher.start_polling(bot),
+            on_crash=_alert_polling_crash,
+        )
     finally:
         scheduler.shutdown(wait=False)
         await bot.session.close()

@@ -909,6 +909,7 @@ async def handle_add(
         if len(parts) != 2 or not parts[1].strip():
             await msg.answer("usage: /add <free text - name, category, expiry>")
             return
+        progress = await start_progress(msg, t("progress.parsing_add", user.lang))
         try:
             selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
             selected_search = _select_search(search, user.llm_provider)
@@ -922,8 +923,10 @@ async def handle_add(
                 search=selected_search,
             )
         except LLMProviderNotConfigured:
-            await msg.answer(
-                f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
+            await finish_progress(
+                progress,
+                msg,
+                f"LLM provider {user.llm_provider!r} is not configured. Use /llm.",
             )
             return
         except Exception as exc:
@@ -934,12 +937,17 @@ async def handle_add(
                     "error_class": type(exc).__name__,
                 },
             )
-            await msg.answer("couldn't parse that add - try simpler wording")
+            await finish_progress(
+                progress, msg, "couldn't parse that add - try simpler wording"
+            )
             return
         if not proposals:
-            await msg.answer("usage: /add <free text - name, category, expiry>")
+            await finish_progress(
+                progress, msg, "usage: /add <free text - name, category, expiry>"
+            )
             return
 
+        await clear_progress(progress)
         for proposal in proposals:
             pending = create_pending(
                 session,

@@ -247,7 +247,11 @@ async def test_handle_add_sends_one_pending_message_per_item(session_factory, mo
         ),
     ], 200))
     msg = _msg("/add oat milk 10d, basil")
-    msg.answer.side_effect = [MagicMock(message_id=1001), MagicMock(message_id=1002)]
+    msg.answer.side_effect = [
+        MagicMock(message_id=1000),  # progress ack
+        MagicMock(message_id=1001),
+        MagicMock(message_id=1002),
+    ]
 
     await bot_mod.handle_add(
         msg,
@@ -256,7 +260,7 @@ async def test_handle_add_sends_one_pending_message_per_item(session_factory, mo
         text_llm=fake,
     )
 
-    assert msg.answer.await_count == 2
+    assert msg.answer.await_count == 3
     with session_factory() as db:
         rows = list(db.exec(select(PendingCorrection)).all())
         assert len(rows) == 2

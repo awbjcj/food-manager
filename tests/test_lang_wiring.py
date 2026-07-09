@@ -512,3 +512,52 @@ async def test_cook_result_english_user_unaffected(session_factory, monkeypatch)
     )
     assert edits
     assert "Pasta" in edits[-1]
+
+
+@pytest.mark.asyncio
+async def test_photo_sends_progress_ack_then_edits_result(session_factory, monkeypatch):
+    from app.i18n import t
+
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    _set_user_lang(session_factory, "en")
+
+    llm = FakeLLMClient(
+        canned=LLMResult(
+            parse=ParseResult(
+                items=[
+                    ParsedItem(
+                        is_food=True,
+                        name="Kefir",
+                        category="dairy",
+                        est_shelf_life_days=7,
+                        confidence=0.9,
+                        track_worthy=True,
+                    )
+                ]
+            ),
+            cost_micros_usd=100,
+        )
+    )
+
+    sent_msg = MagicMock()
+    sent_msg.message_id = 99
+    sent_msg.edit_text = AsyncMock()
+    msg = _msg("")
+    photo_obj = MagicMock()
+    photo_obj.file_id = "fake_file_id"
+    msg.photo = [photo_obj]
+    msg.answer = AsyncMock(return_value=sent_msg)
+
+    await handle_photo(
+        msg,
+        session_factory=session_factory,
+        now_provider=_now,
+        llm=llm,
+        photo_downloader=AsyncMock(return_value=b"jpg"),
+    )
+
+    # The ack goes out first, as its own message...
+    assert msg.answer.await_args_list[0].args[0] == t("progress.reading_receipt", "en")
+    # ...and is edited into the ingest reply.
+    sent_msg.edit_text.assert_awaited_once()
+    assert "Kefir" in sent_msg.edit_text.await_args.args[0]

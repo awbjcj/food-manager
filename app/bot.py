@@ -92,6 +92,7 @@ from app.refine_service import run_receipt_refine
 from app.shelf_life_search import ShelfLifeSearchClient
 from app.storage_state import shelf_life_origin
 from app.callback_dispatch import answer as dispatch_answer, edit_or_resend
+from app.progress import clear_progress, finish_progress, start_progress
 from app.pantry_service import (
     ListFilter,
     NotOwnerOrMissing,
@@ -1546,6 +1547,7 @@ async def handle_photo(
             "receipt_ingest_started",
             extra={"user_id": user.telegram_id, "photo_file_id": file_id},
         )
+        progress = await start_progress(msg, t("progress.reading_receipt", user.lang))
         try:
             selected_llm = _select_llm_client(llm, user.llm_provider)
             selected_search = _select_search(search, user.llm_provider)
@@ -1559,12 +1561,14 @@ async def handle_photo(
                 search=selected_search,
             )
         except LLMProviderNotConfigured:
-            await msg.answer(
-                f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
+            await finish_progress(
+                progress,
+                msg,
+                f"LLM provider {user.llm_provider!r} is not configured. Use /llm.",
             )
             return
         except DuplicateReceipt:
-            await msg.answer("this receipt was already logged")
+            await finish_progress(progress, msg, "this receipt was already logged")
             return
         except Exception as exc:
             log.warning(
@@ -1575,8 +1579,10 @@ async def handle_photo(
                     "error_class": type(exc).__name__,
                 },
             )
-            await msg.answer(
-                "couldn't read that one - try a clearer photo or /add <items> manually"
+            await finish_progress(
+                progress,
+                msg,
+                "couldn't read that one - try a clearer photo or /add <items> manually",
             )
             return
         log.info(
@@ -1603,9 +1609,11 @@ async def handle_photo(
         )
         refine_household_id = user.household_id
         refine_search = selected_search
-        sent = await msg.answer(
+        sent = await finish_progress(
+            progress,
+            msg,
             render_ingest_reply(summary, today=today, lang=user_lang, names=names),
-            reply_markup=keyboard,
+            keyboard,
         )
 
     if (

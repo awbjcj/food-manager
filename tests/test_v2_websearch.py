@@ -219,6 +219,7 @@ async def test_handle_photo_spawns_refine_and_edits_message(monkeypatch):
     # Stub message
     sent_msg = MagicMock()
     sent_msg.message_id = 99
+    sent_msg.edit_text = AsyncMock()
     msg = MagicMock()
     msg.from_user = MagicMock(id=1)
     msg.chat = MagicMock(id=1, type="private")
@@ -242,7 +243,7 @@ async def test_handle_photo_spawns_refine_and_edits_message(monkeypatch):
         bot=stub_bot,
     )
 
-    # Fast reply was sent once
+    # The progress ack was sent once; the result was edited into it
     msg.answer.assert_awaited_once()
 
     # Exactly one coroutine was captured (not yet run)

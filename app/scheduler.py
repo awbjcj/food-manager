@@ -58,6 +58,9 @@ async def send_digest_once(
         payload = build_digest_payload(session, user_id=user_id, today=today)
         if payload is None:
             log.info("digest_silent_day", extra={"user_id": user_id, "today": str(today)})
+            user.last_digest_date = today
+            session.add(user)
+            session.commit()
             return False
         names: dict[str, str] = {}
         if user.lang != "en" and translation_llm is not None:
@@ -82,6 +85,9 @@ async def send_digest_once(
             "digest_sent",
             extra={"user_id": user_id, "items": rendered.rendered_count},
         )
+        user.last_digest_date = today
+        session.add(user)
+        session.commit()
         return True
 
 

@@ -61,6 +61,8 @@ class User(SQLModel, table=True):
     lang: str = "en"
     role: str = "member"  # "owner" | "member"; owner is the household creator
     created_at: datetime
+    # Last date (user tz) a digest run completed — silent days count. None = never.
+    last_digest_date: Optional[date] = None
 
 
 class Receipt(SQLModel, table=True):

@@ -5,7 +5,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.models import Household, PantryItem, User
-from app.scheduler import send_digest_once
+from app.scheduler import catch_up_missed_digests, send_digest_once
 
 TODAY = date(2026, 7, 8)
 
@@ -85,3 +85,44 @@ async def test_silent_day_also_marks_last_digest_date(session_factory):
     assert sent is False
     with session_factory() as db:
         assert db.get(User, 1).last_digest_date == TODAY
+
+
+@pytest.mark.asyncio
+async def test_catch_up_sends_missed_digest(session_factory):
+    send = AsyncMock()
+    count = await catch_up_missed_digests(
+        session_factory=session_factory,
+        send=send,
+        now_provider=lambda tz: datetime(2026, 7, 8, 9, 30),  # past digest_hour 8
+    )
+    assert count == 1
+    send.assert_awaited_once_with(1)
+
+
+@pytest.mark.asyncio
+async def test_catch_up_skips_before_digest_hour(session_factory):
+    send = AsyncMock()
+    count = await catch_up_missed_digests(
+        session_factory=session_factory,
+        send=send,
+        now_provider=lambda tz: datetime(2026, 7, 8, 7, 0),
+    )
+    assert count == 0
+    send.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_catch_up_skips_already_sent_today(session_factory):
+    with session_factory() as db:
+        user = db.get(User, 1)
+        user.last_digest_date = date(2026, 7, 8)
+        db.add(user)
+        db.commit()
+    send = AsyncMock()
+    count = await catch_up_missed_digests(
+        session_factory=session_factory,
+        send=send,
+        now_provider=lambda tz: datetime(2026, 7, 8, 9, 30),
+    )
+    assert count == 0
+    send.assert_not_awaited()

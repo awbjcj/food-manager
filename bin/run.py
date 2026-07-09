@@ -79,6 +79,7 @@ from app.gemini_llm import (
 from app.refine_service import AnthropicSearchClient
 from app.shelf_life_search import SearchProviderSelector
 from app.scheduler import (
+    catch_up_missed_digests,
     register_all_user_digests,
     register_sweep_expired_cooks,
     register_sweep_expired_pendings,
@@ -384,6 +385,15 @@ async def _amain(settings: Settings) -> None:
 
     scheduler.start()
     log.info("scheduler_started")
+
+    caught_up = await catch_up_missed_digests(
+        session_factory=session_factory,
+        send=send,
+        now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
+    )
+    if caught_up:
+        log.info("digest_catch_up_done", extra={"count": caught_up})
+
     log.info("polling_start")
     try:
         await dispatcher.start_polling(bot)

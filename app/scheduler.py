@@ -146,6 +146,37 @@ async def send_digest_with_retry(
                 log.warning("digest_failure_hook_failed", extra={"user_id": user_id})
 
 
+async def catch_up_missed_digests(
+    *,
+    session_factory: SessionFactory,
+    send: Callable[..., Awaitable[None]],
+    now_provider: Callable[[str], datetime],
+) -> int:
+    """Send digests missed while the process was down.
+
+    A digest is missed when the user's digest hour has already passed today
+    (their tz) and no digest run was recorded for today. Called once at
+    startup after cron jobs are registered; a crash therefore delays the
+    morning digest instead of losing it.
+    """
+    with session_factory() as session:
+        users = list(session.exec(select(User)).all())
+    sent = 0
+    for user in users:
+        now = now_provider(user.tz)
+        if now.hour < user.digest_hour:
+            continue
+        if user.last_digest_date is not None and user.last_digest_date >= now.date():
+            continue
+        log.info(
+            "digest_catch_up",
+            extra={"user_id": user.telegram_id, "today": str(now.date())},
+        )
+        await send(user.telegram_id)
+        sent += 1
+    return sent
+
+
 def schedule_user_digest(
     scheduler: AsyncIOScheduler,
     user: User,

@@ -93,6 +93,7 @@ async def send_digest_with_retry(
     today_provider: TodayProvider,
     retry_sleep_seconds: int = 60,
     translation_llm=None,
+    on_final_failure: Optional[Callable[[int, Exception], Awaitable[None]]] = None,
 ) -> None:
     try:
         await send_digest_once(
@@ -132,6 +133,11 @@ async def send_digest_with_retry(
                 "will_retry": False,
             },
         )
+        if on_final_failure is not None:
+            try:
+                await on_final_failure(user_id, exc)
+            except Exception:  # noqa: BLE001 - the hook is best-effort
+                log.warning("digest_failure_hook_failed", extra={"user_id": user_id})
 
 
 def schedule_user_digest(

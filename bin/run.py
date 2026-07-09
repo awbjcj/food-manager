@@ -28,6 +28,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import app.bot as bot_mod
 import app.cook.service as cook_service_mod
+from app.alerts import OwnerAlerter
 from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
 from app.cook.llm import (
@@ -306,6 +307,7 @@ async def _amain(settings: Settings) -> None:
     log.info("migration_ok")
 
     bot = Bot(token=settings.telegram_bot_token)
+    alerter = OwnerAlerter(bot, settings.allowed_telegram_user_id)
     bundle = _build_llm_clients(settings)
     # Per-provider model names so the log reflects the configured provider
     # (deepseek is text-only, hence "n/a" for image).
@@ -337,6 +339,11 @@ async def _amain(settings: Settings) -> None:
 
     translation_llm = bundle.translation
 
+    async def _alert_digest_failure(user_id: int, exc: Exception) -> None:
+        await alerter.alert(
+            "digest_failed", f"user {user_id}: {type(exc).__name__}: {exc}"
+        )
+
     async def send(user_id: int) -> None:
         await send_digest_with_retry(
             user_id=user_id,
@@ -344,6 +351,7 @@ async def _amain(settings: Settings) -> None:
             session_factory=session_factory,
             today_provider=lambda tz: datetime.now(ZoneInfo(tz)).date(),
             translation_llm=translation_llm,
+            on_final_failure=_alert_digest_failure,
         )
 
     register_all_user_digests(scheduler, session_factory=session_factory, send=send)
@@ -371,6 +379,7 @@ async def _amain(settings: Settings) -> None:
         reschedule=reschedule,
         unschedule=unschedule,
         translation_llm=translation_llm,
+        alerter=alerter,
     )
 
     scheduler.start()

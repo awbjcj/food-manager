@@ -2691,6 +2691,7 @@ def build_dispatcher(
     recipe_llm=None,
     nutrition_llm=None,
     translation_llm=None,
+    alerter=None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -2791,5 +2792,16 @@ def build_dispatcher(
             search=search,
         )
 
+    async def on_error(event) -> bool:
+        exc = event.exception
+        log.error(
+            "unhandled_update_error",
+            extra={"error_class": type(exc).__name__, "error": str(exc)},
+        )
+        if alerter is not None:
+            await alerter.alert("handler_error", f"{type(exc).__name__}: {exc}")
+        return True  # handled: aiogram must not escalate
+
+    dispatcher.errors.register(on_error)
     dispatcher.callback_query.register(on_callback)
     return dispatcher

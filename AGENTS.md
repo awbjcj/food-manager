@@ -65,7 +65,7 @@ Single-user Telegram bot: user sends grocery receipt photos → Codex parses the
 | `app/refine_service.py` | Post-ingest web-search refine pass over a fresh receipt's low-confidence items |
 | `app/shelf_life_search.py` | `ShelfLifeSearchClient` Protocol + `ShelfLifeSearchResult` + `resolve_search_days` — the shared web-search contract consumed by correction, ingest, refine, and frozen/fridge resolution |
 | `app/storage_state.py` | Storage State axis (`default → fridge → frozen`, forward-only) + `shelf_life_origin`/`compute_expiry` shared formula |
-| `app/frozen_shelf_life.py` | `resolve_frozen_days` / `resolve_fridge_days`: cache → vendored USDA FoodKeeper table → web search → default fallback, one resolver parameterised by Storage State |
+| `app/frozen_shelf_life.py` | `resolve_storage_days` (generic, parameterised by Storage State; `resolve_frozen_days` is a frozen-only wrapper): cache → vendored USDA FoodKeeper table → web search → default fallback |
 | `app/profile_service.py` | `FoodProfile` household food-preference model (diet, exclusions, cuisines, cook-time cap) read from/written to `Household` |
 | `app/shopping_service.py` | Shopping list CRUD: add missing `/cook` ingredients, list, mark bought |
 | `app/llm_transport.py` | `with_transport_retry`: shared retry/backoff policy for every provider network call |

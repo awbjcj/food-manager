@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     openai_text_model: str = Field(default="gpt-5.4-mini", alias="OPENAI_TEXT_MODEL")
     anthropic_search_model: str = Field(default="claude-sonnet-4-6", alias="ANTHROPIC_SEARCH_MODEL")
     gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_MODEL")
-    gemini_text_model: str = Field(default="gemini-2.5-flash", alias="GEMINI_TEXT_MODEL")
+    gemini_model: str = Field(default="gemini-3.5-flash", alias="GEMINI_MODEL")
+    gemini_text_model: str = Field(default="gemini-3.5-flash", alias="GEMINI_TEXT_MODEL")
     # DeepSeek is OpenAI-compatible and text-only (no image/search). One model
     # field suffices since it serves only the text capabilities.
     deepseek_api_key: str | None = Field(default=None, alias="DEEPSEEK_API_KEY")

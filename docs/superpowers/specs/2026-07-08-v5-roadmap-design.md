@@ -24,9 +24,9 @@ boundaries and ordering, not implementation detail.
 
 | Release | Theme | Plan status |
 |---|---|---|
-| v5.0 | Stability & Feedback | needs plan (this doc is its spec seed) |
-| v4.8 | Pantry action drill-down interface | plan committed — refresh, then execute |
-| v4.9 | Recipe engine overhaul | plan committed — refresh, then execute |
+| v5.0 | Stability & Feedback | plan committed (`plans/2026-07-08-v5.0-stability-feedback.md`) |
+| v4.8 | Pantry action drill-down interface | **already shipped** (audit 2026-07-08: implemented and extended by the `/pantry` command, PR #7) — no work remains |
+| v4.9 | Recipe engine overhaul | tasks 1–8 shipped (source-chain foundation); tasks 9–14 pending; plan refreshed 2026-07-08 against the v4.7 codebase |
 | v5.1 | Agno natural-language input + onboarding/help | needs spec |
 | v5.2 | Meal planning (Agno workflow over v4.9 engine) | needs spec |
 | v5.3 | Affinity learning + recipe quality/media | needs spec (revive v3.6 design) |
@@ -60,11 +60,16 @@ Smallest release; every later release benefits. Scope:
 
 ## v4.8 and v4.9 — execute the committed plans
 
-Ship in order (v4.8 → v4.9). Both plans predate the v4.7 multi-provider layer, so
-each starts with a **plan-refresh checkpoint**: a pass over the committed plan to
-update references to pre-v4.7 seams (single-provider assumptions, renamed
-selectors) before execution begins. Scope changes beyond mechanical refresh go
-back through a design conversation.
+*(Updated by the 2026-07-08 refresh audit.)* **v4.8 already shipped**: the item-card
+drill-down, nudges, remove-confirm, and free-text correct are all live, and the
+June-14 `/pantry` command extended them; nothing remains. **v4.9 is half-shipped**:
+its foundation (`app/cook/recipe_source.py` with Spoonacular/TheMealDB/LLM
+adapters + chain, `CookSession.purpose`/`search_offset` + migration 0013, models,
+settings key, tests) exists, but nothing consumes it — `run_cook` still calls the
+LLM clients directly and the purpose-round / More/Adjust UX is absent. The
+remaining work is tasks 9–14 of `plans/2026-06-10-v4.9-recipe-engine.md`, which
+was refreshed in place on 2026-07-08 (package paths, bot line references, and a
+per-user LLM-tail wiring correction preserving v4.7 provider routing).
 
 ## Agno adoption boundary (applies to v5.1+)
 

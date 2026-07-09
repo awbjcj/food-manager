@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Awaitable, Callable, Optional, TypeVar
 
 log = logging.getLogger(__name__)
@@ -57,20 +58,20 @@ async def with_transport_retry(
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     attempts: int = DEFAULT_ATTEMPTS,
     classify: Optional[Callable[[Exception], bool]] = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> T:
     """Run `make_call`, retrying transient failures with exponential backoff.
 
     `log_event` is the structured-log stem: a retry logs ``f"{log_event}_retrying"``
     and the final failure logs ``f"{log_event}_final"`` (preserving the existing
-    event names so log-based alerting keeps working).
-
-    `classify` decides whether an exception is retryable. ``None`` (default) means
-    retry every exception, matching the receipt/text/translation clients. Pass
-    `is_retryable_transport_error` to fail fast on non-transport errors.
+    event names so log-based alerting keeps working). On success, logs
+    ``f"{log_event}_timing"`` with `duration_ms`/`attempts`. `clock` feeds the
+    success timing log; inject a fake in tests.
     """
+    started = clock()
     for attempt in range(attempts):
         try:
-            return await make_call()
+            result = await make_call()
         except Exception as exc:
             if classify is not None and not classify(exc):
                 raise
@@ -83,4 +84,13 @@ async def with_transport_retry(
                 f"{log_event}_retrying", extra={"error_class": type(exc).__name__}
             )
             await sleep(2**attempt)
+            continue
+        log.info(
+            f"{log_event}_timing",
+            extra={
+                "duration_ms": int((clock() - started) * 1000),
+                "attempts": attempt + 1,
+            },
+        )
+        return result
     raise RuntimeError("unreachable")

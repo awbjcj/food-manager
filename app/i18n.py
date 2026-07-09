@@ -166,6 +166,18 @@ MESSAGES: dict[str, dict[str, str]] = {
     "btn.undo": {"en": "Undo", "zh": "撤销", "fr": "Annuler", "es": "Deshacer"},
     "btn.apply": {"en": "Apply", "zh": "应用", "fr": "Appliquer", "es": "Aplicar"},
     "btn.cancel": {"en": "Cancel", "zh": "取消", "fr": "Annuler", "es": "Cancelar"},
+    "progress.reading_receipt": {
+        "en": "📸 Reading your receipt…",
+        "zh": "📸 正在读取收据…",
+        "fr": "📸 Lecture du reçu…",
+        "es": "📸 Leyendo tu recibo…",
+    },
+    "progress.parsing_add": {
+        "en": "📝 Adding your items…",
+        "zh": "📝 正在添加食品…",
+        "fr": "📝 Ajout de vos articles…",
+        "es": "📝 Añadiendo tus artículos…",
+    },
     "btn.correct": {"en": "✏️ Correct", "zh": "✏️ 更正", "fr": "✏️ Corriger", "es": "✏️ Corregir"},
     "btn.remove": {"en": "❌ Remove", "zh": "❌ 移除", "fr": "❌ Retirer", "es": "❌ Quitar"},
     "btn.back_to_list": {"en": "⬅ Back to list", "zh": "⬅ 返回列表", "fr": "⬅ Retour à la liste", "es": "⬅ Volver a la lista"},

@@ -17,7 +17,7 @@ import logging
 log = logging.getLogger(__name__)
 
 
-def _is_not_modified(exc: Exception) -> bool:
+def is_not_modified(exc: Exception) -> bool:
     # aiogram raises TelegramBadRequest("... message is not modified ...") when the
     # new text+keyboard equal the current ones. That is a no-op, i.e. success.
     return "not modified" in str(exc).lower()
@@ -44,7 +44,7 @@ async def edit_or_resend(cb, text: str, keyboard=None) -> None:
         await message.edit_text(text, reply_markup=keyboard)
         return
     except Exception as exc:  # noqa: BLE001 - classified below
-        if _is_not_modified(exc):
+        if is_not_modified(exc):
             return
         log.info(
             "callback_edit_resend",

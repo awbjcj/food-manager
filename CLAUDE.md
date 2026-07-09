@@ -60,6 +60,17 @@ Single-user Telegram bot: user sends grocery receipt photos → Claude parses th
 | `app/backup.py` | SQLite `.backup-TIMESTAMP` rotation before migrations |
 | `app/normalization.py` | Food name normalization (lowercasing, alias mapping) |
 | `app/shelf_life_defaults.py` | Hardcoded shelf-life fallback table |
+| `app/pending_service.py` | `PendingCorrection` lifecycle shared by `/correct` and `/add`: create, apply, cancel, 10-min TTL expiry |
+| `app/correction_service.py` | Parses a `/correct` free-text diff against an item and applies it (cache update, back-computed days, name translation) |
+| `app/refine_service.py` | Post-ingest web-search refine pass over a fresh receipt's low-confidence items |
+| `app/shelf_life_search.py` | `ShelfLifeSearchClient` Protocol + `ShelfLifeSearchResult` + `resolve_search_days` — the shared web-search contract consumed by correction, ingest, refine, and frozen/fridge resolution |
+| `app/storage_state.py` | Storage State axis (`default → fridge → frozen`, forward-only) + `shelf_life_origin`/`compute_expiry` shared formula |
+| `app/frozen_shelf_life.py` | `resolve_frozen_days` / `resolve_fridge_days`: cache → vendored USDA FoodKeeper table → web search → default fallback, one resolver parameterised by Storage State |
+| `app/profile_service.py` | `FoodProfile` household food-preference model (diet, exclusions, cuisines, cook-time cap) read from/written to `Household` |
+| `app/shopping_service.py` | Shopping list CRUD: add missing `/cook` ingredients, list, mark bought |
+| `app/llm_transport.py` | `with_transport_retry`: shared retry/backoff policy for every provider network call |
+| `app/callback_dispatch.py` | Callback-query seam: ack-first, then edit-in-place or resend-as-new-message so a button tap never dead-ends |
+| `app/cook/*` | Recipe engine: `models.py` (Purpose/Effort/`RecipeCriteria`/`ScoredCandidate`), `recipe_source.py` (Spoonacular/TheMealDB real-source building blocks, v4.9, not yet wired in), `llm.py` (selection/recipe/nutrition clients), `logic.py` (scoring, shopping-list diff), `service.py` (live LLM-only pipeline), `session_service.py` (`CookSession` cost/state), `favorites_service.py` (`SavedRecipe`), `feedback.py` (liked/disliked signal) |
 | `bin/run.py` | Entry point: loads settings, runs migrations, starts scheduler + polling |
 
 ### Key design conventions
@@ -90,18 +101,65 @@ A household can have multiple members who share everything household-scoped (pan
 - **Join notifications**: on a successful redeem, `_notify_household_join` best-effort DMs every existing member (in their own language) that someone joined; failures are swallowed so a blocked chat never breaks the join.
 - A removed/left user's `User` row is deleted (deauthorized) and their digest job is cancelled via the `unschedule` callback wired in `bin/run.py`.
 
-### Frozen storage state (v4.6)
+### Storage states: default → fridge → frozen (v4.6)
 
-`PantryItem.storage` (`default | frozen`) is a storage axis orthogonal to `category`:
-`category` is what the food is, and `storage` is how it is kept for shelf-life
-purposes. Expiry is `(frozen_on or purchased_on) + shelf_life_days`; `frozen_on`
-is set when an item enters the freezer (purchase date for LLM-flagged frozen buys,
-today for a `❄️ Freeze` tap). Frozen durations come from
-`app/frozen_shelf_life.py` (`resolve_frozen_days`): cache -> vendored USDA
-FoodKeeper table -> the existing `ShelfLifeSearchClient` queried as
-`"frozen <food>"` -> a cached 90-day default. Freezing is one-way (no thaw).
+`PantryItem.storage` (`default | fridge | frozen`) is a storage axis orthogonal
+to `category`: `category` is what the food is, and `storage` is how it is kept
+for shelf-life purposes. Transitions are one-way forward only
+(`default → fridge → frozen`; `frozen` is terminal) — see `app/storage_state.py`
+for the transition graph and the one shared formula: expiry is
+`shelf_life_origin(item) + shelf_life_days`, where `shelf_life_origin` is
+`stored_on` once the item has entered a non-default state, else `purchased_on`.
+`stored_on` is set when an item enters `fridge` or `frozen` (purchase date for
+LLM-flagged frozen buys, today for a `🧊 Fridge` / `❄️ Freeze` tap) and becomes
+the new Shelf-Life Origin — moving `default → fridge` and later `fridge →
+frozen` each reset it. Fridge/frozen durations both come from
+`app/frozen_shelf_life.py`, one resolver parameterised by Storage State: cache
+-> vendored USDA FoodKeeper table -> `ShelfLifeSearchClient` queried as
+`"frozen <food>"`/`"fridge <food>"` -> a cached default (90d frozen, 7d fridge).
 Frozen items are excluded from the post-ingest fresh web-search refine path and,
 with their long expiries, fall out of the 7-day digest window automatically.
+
+### Interactive pantry management (v4.8)
+
+`/pantry [digest|<id>]` renders a stateful view from stateless callback data —
+`digest` (items due within 7 days), no-arg (full active list), or a numeric
+`<id>` (single item card with action buttons: Correct, Remove, Freeze, Fridge,
+back-to-list). Every button tap re-derives its target view from the callback
+payload rather than server-side session state, so a card stays actionable even
+across bot restarts. `app/callback_dispatch.py` is the shared seam every button
+handler goes through: acknowledge the callback first (Telegram callback tokens
+expire quickly), then edit the message in place, falling back to sending a
+fresh message if the edit fails for any reason other than "not modified" (which
+is treated as success, since it means the view didn't need to change).
+
+### Recipe engine: `/cook`, `/shopping`, `/favorites` (v3.5, v4.9 in progress)
+
+The live `/cook` pipeline (`app/cook/service.py::run_cook`, called from
+`run_cook_and_render` in `bot.py`) is LLM-only, in three metered steps against
+the household's active pantry and `FoodProfile` (`app/profile_service.py`):
+`selection_llm` picks which pantry items to use, `recipe_llm` turns those into
+candidate recipes (regenerating once if every candidate violates a profile
+exclusion), then `nutrition_llm` scores each one. Each step's cost accrues onto
+the `CookSession` row (`app/cook/session_service.py`) and the pipeline bails
+early once `COOK_COST_CEILING_MICROS` is exceeded (raise it if recipes come
+back empty). Final ranking is `blended_score` (`app/cook/logic.py`): nutrition
+health score + expiry utilization (how much of the pantry's soon-to-expire
+stock the recipe uses) + source `deliciousness`; `shopping_list` is the
+ingredient gap versus the pantry. Result cards offer "Show alternatives" (the
+next-ranked candidate from the same run) plus ★ Save
+(`app/cook/favorites_service.py` → `SavedRecipe`, re-cookable against the
+current pantry via `/favorites`) and ➕ Shopping list (`app/shopping_service.py`
+→ `/shopping`, tap an item once bought). 👍/👎 feedback (`app/cook/feedback.py`)
+records a `(cuisine, ingredients, verdict)` signal per session for future
+affinity-weighted scoring — not yet consumed by `blended_score`.
+
+**v4.9 (in progress, not yet wired in):** `app/cook/recipe_source.py` has the
+building blocks for a real-source alternative to the LLM-only pipeline —
+`RecipeCriteria`/`Purpose` (use-it-up, quick, healthy, comfort, surprise),
+a Spoonacular `RecipeSource` (`SPOONACULAR_API_KEY`), and TheMealDB fetch
+helpers — but `run_cook` does not call into it yet; see `tests/test_recipe_source.py`
+for the parts already covered in isolation.
 
 ### Multi-provider LLM routing (v4.7)
 

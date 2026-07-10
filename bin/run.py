@@ -22,6 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import httpx
 from anthropic import AsyncAnthropic
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -31,6 +32,7 @@ import app.cook.service as cook_service_mod
 from app.alerts import OwnerAlerter
 from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
+from app.cook.recipe_source import SpoonacularSource, TheMealDbSource
 from app.resilience import run_with_restart
 from app.cook.llm import (
     AnthropicNutritionLLM,
@@ -310,6 +312,11 @@ async def _amain(settings: Settings) -> None:
 
     bot = Bot(token=settings.telegram_bot_token)
     alerter = OwnerAlerter(bot, settings.allowed_telegram_user_id)
+    recipe_http = httpx.AsyncClient()
+    recipe_sources = [
+        SpoonacularSource(http=recipe_http, api_key=settings.spoonacular_api_key),
+        TheMealDbSource(http=recipe_http),
+    ]
     bundle = _build_llm_clients(settings)
     # Per-provider model names so the log reflects the configured provider
     # (deepseek is text-only, hence "n/a" for image).
@@ -382,6 +389,7 @@ async def _amain(settings: Settings) -> None:
         unschedule=unschedule,
         translation_llm=translation_llm,
         alerter=alerter,
+        recipe_sources=recipe_sources,
     )
 
     scheduler.start()
@@ -407,6 +415,7 @@ async def _amain(settings: Settings) -> None:
         )
     finally:
         scheduler.shutdown(wait=False)
+        await recipe_http.aclose()
         await bot.session.close()
 
 

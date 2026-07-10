@@ -308,6 +308,7 @@ async def test_plan_swap_replaces_entry_and_rerenders(session_factory, monkeypat
     )
     cb.answer.assert_awaited()
     cb.message.edit_text.assert_awaited()
+    assert cb.message.edit_text.await_args is not None
     text = cb.message.edit_text.await_args.args[0]
     assert "Fresh Yogurt" in text
 
@@ -325,6 +326,7 @@ async def test_plan_swap_no_result_leaves_message_with_notice(session_factory, m
     )
     from app.i18n import t
 
+    assert cb.message.edit_text.await_args is not None
     text = cb.message.edit_text.await_args.args[0]
     assert text == t("plan.no_swap", "en")
 
@@ -344,6 +346,7 @@ async def test_plan_shop_adds_union_then_second_tap_adds_zero(session_factory, m
     await bot_mod.handle_plan_callback(
         cb1, session_factory=session_factory, now_provider=_NOW, recipe_sources=[],
     )
+    assert cb1.answer.await_args is not None
     first_text = cb1.answer.await_args.args[0]
     assert "Added" in first_text
 
@@ -353,6 +356,7 @@ async def test_plan_shop_adds_union_then_second_tap_adds_zero(session_factory, m
     )
     from app.i18n import t
 
+    assert cb2.answer.await_args is not None
     assert cb2.answer.await_args.args[0] == t("plan.shopping_none", "en")
 
 
@@ -367,6 +371,7 @@ async def test_plan_cancel_is_terminal_and_blocks_further_callbacks(session_fact
     )
     from app.i18n import t
 
+    assert cancel_cb.message.edit_text.await_args is not None
     assert cancel_cb.message.edit_text.await_args.args[0] == t("plan.cancelled", "en")
     with session_factory() as db:
         from sqlmodel import select
@@ -378,6 +383,7 @@ async def test_plan_cancel_is_terminal_and_blocks_further_callbacks(session_fact
     await bot_mod.handle_plan_callback(
         shop_cb, session_factory=session_factory, now_provider=_NOW, recipe_sources=[],
     )
+    assert shop_cb.answer.await_args is not None
     assert shop_cb.answer.await_args.args[0] == t("plan.expired", "en")
 
 
@@ -390,6 +396,7 @@ async def test_plan_callback_rejects_cross_household(session_factory, monkeypatc
     await bot_mod.handle_plan_callback(
         cb, session_factory=session_factory, now_provider=_NOW, recipe_sources=[],
     )
+    assert cb.answer.await_args is not None
     assert "not authorized" in cb.answer.await_args.args[0]
     with session_factory() as db:
         from sqlmodel import select

@@ -143,6 +143,7 @@ def test_cook_pick_advances_cuisine_to_purpose_then_ready_once(monkeypatch):
         assert cook.meal_type == "Dinner" and cook.cuisine is None
         assert cook.status == "collecting"
     assert spawned == []
+    assert meal_cb.message.edit_text.await_args is not None
     quick_cuisine_keyboard = meal_cb.message.edit_text.await_args.kwargs["reply_markup"]
     quick_callbacks = [
         button.callback_data
@@ -162,6 +163,7 @@ def test_cook_pick_advances_cuisine_to_purpose_then_ready_once(monkeypatch):
         assert cook.purpose is None
         assert cook.status == "collecting"
     assert spawned == []
+    assert cuisine_cb.message.edit_text.await_args is not None
     purpose_keyboard = cuisine_cb.message.edit_text.await_args.kwargs["reply_markup"]
     assert all(
         button.callback_data.startswith(f"cookpick:{cook_id}:purpose:")
@@ -208,6 +210,7 @@ def test_more_cuisines_selection_uses_the_full_list_index(monkeypatch):
         expand_cb, session_factory=lambda: Session(engine), now_provider=_NOW,
         spawn=spawn, bot=None, **_fakes(),
     ))
+    assert expand_cb.message.edit_text.await_args is not None
     keyboard = expand_cb.message.edit_text.await_args.kwargs["reply_markup"]
     full_callbacks = [
         button.callback_data
@@ -253,6 +256,7 @@ def test_adjust_resets_choices_but_preserves_selected_item_ids(monkeypatch):
         assert cook.search_offset == 0
         assert cook.selected_item_ids == "[11, 12]"
     assert spawned == []
+    assert cb.message.edit_text.await_args is not None
     keyboard = cb.message.edit_text.await_args.kwargs["reply_markup"]
     callbacks = [
         button.callback_data

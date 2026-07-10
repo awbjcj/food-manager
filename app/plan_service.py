@@ -15,6 +15,7 @@ from typing import Optional, Sequence
 
 from sqlmodel import Session, select
 
+from app.cook.affinity import affinity, list_recent_signals
 from app.cook.logic import (
     blended_score,
     expiry_utilization,
@@ -32,6 +33,7 @@ from app.week_composer import DaySpec, heuristic_compose
 log = logging.getLogger(__name__)
 
 PLAN_PAGE = 6  # candidates per search page; swap advances offset by this
+PLAN_COST_CEILING_MICROS = 150_000  # overwritten from Settings at bootstrap
 
 
 class NotEnoughItemsToPlan(Exception):
@@ -64,7 +66,7 @@ def aggregate_shopping(entries: Sequence[MealPlanEntry]) -> list[str]:
     return out
 
 
-def _score(sourced, *, urgent_names: list[str]) -> ScoredCandidate:
+def _score(sourced, *, urgent_names: list[str], signals) -> ScoredCandidate:
     names = [i.name for i in sourced.recipe.ingredients]
     expiry_use = expiry_utilization(recipe_names=names, urgent_names=urgent_names)
     return ScoredCandidate(
@@ -76,12 +78,15 @@ def _score(sourced, *, urgent_names: list[str]) -> ScoredCandidate:
             health_0_1=sourced.nutrition.health_score / 100.0,
             expiry_use=expiry_use,
             deliciousness=sourced.recipe.deliciousness,
+            affinity_0_1=affinity(
+                cuisine=sourced.recipe.cuisine, ingredient_names=names, signals=signals
+            ),
         ),
     )
 
 
 def _pick(
-    sourced_list, *, exclusions, taken_ids: set[str], urgent_names: list[str]
+    sourced_list, *, exclusions, taken_ids: set[str], urgent_names: list[str], signals
 ) -> Optional[ScoredCandidate]:
     safe = [
         s
@@ -92,7 +97,7 @@ def _pick(
         and (s.external_id is None or s.external_id not in taken_ids)
     ]
     scored = sorted(
-        (_score(s, urgent_names=urgent_names) for s in safe),
+        (_score(s, urgent_names=urgent_names, signals=signals) for s in safe),
         key=lambda c: c.final_score,
         reverse=True,
     )
@@ -184,6 +189,7 @@ async def build_plan(
     pool = sorted(pantry, key=lambda pair: pair[1])  # (name, days_left), expiring first
     taken_ids: set[str] = set()
     entries: list[MealPlanEntry] = []
+    signals = list_recent_signals(session, household_id=household_id)
     for spec in specs[:days]:
         pool_names = [name for name, _ in pool]
         include = [f for f in spec.feature_items if normalize(f) in pool_names]
@@ -201,6 +207,7 @@ async def build_plan(
             exclusions=profile.exclusions,
             taken_ids=taken_ids,
             urgent_names=urgent,
+            signals=signals,
         )
         if candidate is None:
             if cost > cost_ceiling_micros:
@@ -284,8 +291,13 @@ async def swap_day(
     )
     plan.cost_micros_usd = (plan.cost_micros_usd or 0) + (cost or 0)
     urgent = [n for n, d in pantry if d <= URGENT_DAYS]
+    signals = list_recent_signals(session, household_id=plan.household_id)
     candidate = _pick(
-        sourced, exclusions=profile.exclusions, taken_ids=taken_ids, urgent_names=urgent
+        sourced,
+        exclusions=profile.exclusions,
+        taken_ids=taken_ids,
+        urgent_names=urgent,
+        signals=signals,
     )
     session.add(plan)
     if candidate is None:

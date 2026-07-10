@@ -6,6 +6,7 @@ from datetime import date
 
 from sqlmodel import Session
 
+from app.cook.affinity import affinity, list_recent_signals
 from app.cook.logic import (
     blended_score,
     expiry_utilization,
@@ -86,7 +87,7 @@ def _shown_external_ids(cook: CookSession) -> set[str]:
 
 
 def _score_sourced(
-    sourced: list, *, selected_items: list[PantryItem], today: date
+    sourced: list, *, selected_items: list[PantryItem], today: date, signals
 ) -> list[ScoredCandidate]:
     urgent_names = [
         item.normalized_name
@@ -109,6 +110,11 @@ def _score_sourced(
                     health_0_1=sourced_recipe.nutrition.health_score / 100.0,
                     expiry_use=expiry_use,
                     deliciousness=sourced_recipe.recipe.deliciousness,
+                    affinity_0_1=affinity(
+                        cuisine=sourced_recipe.recipe.cuisine,
+                        ingredient_names=ingredient_names,
+                        signals=signals,
+                    ),
                 ),
             )
         )
@@ -202,7 +208,8 @@ async def run_cook(
         return []
 
     pantry_normalized = [item.normalized_name for item in active_items]
-    scored = _score_sourced(safe, selected_items=selected_items, today=today)
+    signals = list_recent_signals(session, household_id=cook.household_id)
+    scored = _score_sourced(safe, selected_items=selected_items, today=today, signals=signals)
     _assign_shopping_list(scored, pantry_normalized=pantry_normalized)
 
     cook.candidates_json = json.dumps([candidate.model_dump() for candidate in scored])
@@ -271,7 +278,8 @@ async def run_cook_more(
         return []
 
     pantry_normalized = [item.normalized_name for item in active_items]
-    scored = _score_sourced(fresh, selected_items=selected_items, today=today)
+    signals = list_recent_signals(session, household_id=cook.household_id)
+    scored = _score_sourced(fresh, selected_items=selected_items, today=today, signals=signals)
     _assign_shopping_list(scored, pantry_normalized=pantry_normalized)
 
     cook.candidates_json = json.dumps(

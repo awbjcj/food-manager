@@ -244,6 +244,7 @@ def test_run_cook_builds_exact_criteria_ranks_and_persists_source_results():
         health_0_1=1.0,
         expiry_use=0.5,
         deliciousness=1.0,
+        affinity_0_1=0.5,  # no feedback signals seeded -> neutral
     )
     assert result[0].external_id == "spoon:10"
     assert result[0].shopping_list == ["pasta"]
@@ -635,7 +636,9 @@ def test_expiry_utilization_fraction_of_urgent_items_used():
 
 
 def test_blended_score_weights():
-    score = blended_score(health_0_1=1.0, expiry_use=0.0, deliciousness=0.0)
+    score = blended_score(
+        health_0_1=1.0, expiry_use=0.0, deliciousness=0.0, affinity_0_1=0.0
+    )
     assert abs(score - BLEND_WEIGHTS["health"]) < 1e-9
 
 

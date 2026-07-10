@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     cook_cost_ceiling_micros: int = Field(
         default=100_000, alias="COOK_COST_CEILING_MICROS"
     )
+    plan_cost_ceiling_micros: int = Field(
+        default=150_000, alias="PLAN_COST_CEILING_MICROS"
+    )
     database_path: str = Field(default="./food.db", alias="DATABASE_PATH")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     env: str = Field(default="dev", alias="ENV")

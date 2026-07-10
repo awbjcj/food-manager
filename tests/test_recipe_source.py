@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.cook.models import (
@@ -114,6 +116,19 @@ def test_build_criteria_surprise_clears_filters():
     assert criteria.max_ready_minutes is None
 
 
+def test_build_criteria_quick_keeps_stricter_profile_limit():
+    criteria = build_criteria(
+        include_ingredients=["egg"],
+        meal_type="Breakfast",
+        cuisine="American",
+        purpose=Purpose.QUICK,
+        profile=_profile(max_cook_minutes=15),
+        offset=0,
+    )
+
+    assert criteria.max_ready_minutes == 15
+
+
 def test_spoonacular_params():
     criteria = RecipeCriteria(
         include_ingredients=["chicken", "spinach"],
@@ -191,8 +206,40 @@ class _SeqHttp:
         return _FakeResp({"meals": None})
 
 
+class _MealDbPageHttp:
+    def __init__(self):
+        self.calls = []
+
+    async def get(self, url, params=None, timeout=None):
+        self.calls.append((url, params))
+        if "filter.php" in url:
+            return _FakeResp(
+                {"meals": [{"idMeal": "1"}, {"idMeal": "2"}, {"idMeal": "3"}]}
+            )
+        meal_id = params["i"]
+        return _FakeResp(
+            {
+                "meals": [
+                    {
+                        "idMeal": meal_id,
+                        "strMeal": f"Meal {meal_id}",
+                        "strArea": "American",
+                        "strSource": f"https://ex.com/{meal_id}",
+                        "strInstructions": "Cook.",
+                        "strIngredient1": "chicken",
+                        "strMeasure1": "1",
+                    }
+                ]
+            }
+        )
+
+
 class _FakeRecipeLLM:
+    def __init__(self):
+        self.calls = []
+
     async def fetch_recipes(self, *, prompt):
+        self.calls.append(prompt)
         return RecipeCandidates(
             candidates=[
                 RecipeCandidate(
@@ -206,7 +253,11 @@ class _FakeRecipeLLM:
 
 
 class _FakeNutritionLLM:
+    def __init__(self):
+        self.calls = []
+
     async def score(self, *, prompt):
+        self.calls.append(prompt)
         return NutritionScores(
             scores=[
                 NutritionScore(
@@ -228,8 +279,26 @@ class _StubSource:
     def available(self):
         return self._ok
 
-    async def search(self, criteria):
+    async def search(self, criteria, *, remaining_cost_micros=None):
         return list(self._recipes), self._cost
+
+
+class _RaisingSource:
+    def available(self):
+        return True
+
+    async def search(self, criteria, *, remaining_cost_micros=None):
+        raise RuntimeError("source unavailable")
+
+
+class _SequenceRecipeLLM:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = []
+
+    async def fetch_recipes(self, *, prompt):
+        self.calls.append(prompt)
+        return self._responses.pop(0)
 
 
 @pytest.mark.asyncio
@@ -290,6 +359,27 @@ async def test_themealdb_empty_yields_empty():
 
 
 @pytest.mark.asyncio
+async def test_themealdb_source_applies_offset_before_page_size():
+    http = _MealDbPageHttp()
+    source = TheMealDbSource(http=http)
+
+    recipes, _ = await source.search(
+        RecipeCriteria(
+            include_ingredients=["chicken"],
+            purpose=Purpose.USE_IT_UP,
+            number=1,
+            offset=1,
+        )
+    )
+
+    assert [recipe.external_id for recipe in recipes] == ["mealdb:2"]
+    lookup_ids = [
+        params["i"] for url, params in http.calls if "lookup.php" in url
+    ]
+    assert lookup_ids == ["2"]
+
+
+@pytest.mark.asyncio
 async def test_llm_recipe_source_pairs_recipe_and_nutrition():
     source = LlmRecipeSource(
         recipe_llm=_FakeRecipeLLM(),
@@ -301,6 +391,83 @@ async def test_llm_recipe_source_pairs_recipe_and_nutrition():
     assert recipes[0].recipe.title == "LLM Stew"
     assert recipes[0].nutrition.health_score == 55
     assert cost == 1500
+
+
+@pytest.mark.asyncio
+async def test_llm_recipe_source_forwards_page_and_builds_stable_external_id():
+    first_recipe = _FakeRecipeLLM()
+    first_source = LlmRecipeSource(
+        recipe_llm=first_recipe,
+        nutrition_llm=_FakeNutritionLLM(),
+    )
+    criteria = RecipeCriteria(
+        include_ingredients=["carrot"],
+        purpose=Purpose.SURPRISE,
+        number=4,
+        offset=8,
+    )
+
+    first, _ = await first_source.search(criteria)
+    second, _ = await LlmRecipeSource(
+        recipe_llm=_FakeRecipeLLM(),
+        nutrition_llm=_FakeNutritionLLM(),
+    ).search(criteria)
+
+    prompt = json.loads(first_recipe.calls[0])
+    assert prompt["number"] == 4
+    assert prompt["offset"] == 8
+    assert first[0].external_id is not None
+    assert first[0].external_id.startswith("llm:")
+    assert first[0].external_id == second[0].external_id
+
+
+@pytest.mark.asyncio
+async def test_llm_recipe_source_budget_stops_before_nutrition():
+    nutrition = _FakeNutritionLLM()
+    source = LlmRecipeSource(
+        recipe_llm=_FakeRecipeLLM(),
+        nutrition_llm=nutrition,
+    )
+
+    recipes, cost = await source.search(
+        RecipeCriteria(include_ingredients=["carrot"], purpose=Purpose.SURPRISE),
+        remaining_cost_micros=999,
+    )
+
+    assert recipes == []
+    assert cost == 1000
+    assert nutrition.calls == []
+
+
+@pytest.mark.asyncio
+async def test_llm_recipe_source_budget_stops_before_exclusion_regeneration():
+    unsafe = RecipeCandidates(
+        candidates=[
+            RecipeCandidate(
+                title="Peanut Stew",
+                cuisine="rustic",
+                ingredients=[RecipeIngredient(name="peanut")],
+                method_gist="simmer",
+            )
+        ]
+    )
+    recipe_llm = _SequenceRecipeLLM([(unsafe, 1000), (unsafe, 1000)])
+    nutrition = _FakeNutritionLLM()
+    source = LlmRecipeSource(recipe_llm=recipe_llm, nutrition_llm=nutrition)
+
+    recipes, cost = await source.search(
+        RecipeCriteria(
+            include_ingredients=["carrot"],
+            purpose=Purpose.SURPRISE,
+            exclude_ingredients=["peanut"],
+        ),
+        remaining_cost_micros=999,
+    )
+
+    assert recipes == []
+    assert cost == 1000
+    assert len(recipe_llm.calls) == 1
+    assert nutrition.calls == []
 
 
 @pytest.mark.asyncio
@@ -345,3 +512,83 @@ async def test_chain_skips_unavailable():
     )
     assert recipes == []
     assert cost is None
+
+
+@pytest.mark.asyncio
+async def test_chain_filters_unsafe_primary_and_uses_safe_fallback():
+    unsafe = SourcedRecipe(
+        recipe=RecipeCandidate(
+            title="Peanut Dish",
+            cuisine="x",
+            ingredients=[RecipeIngredient(name="peanut")],
+            method_gist="cook",
+        ),
+        nutrition=NutritionScore(
+            health_score=50,
+            effort="easy",
+            est_minutes=10,
+            rationale="r",
+        ),
+        external_id="unsafe",
+    )
+    safe = SourcedRecipe(
+        recipe=RecipeCandidate(
+            title="Safe Dish",
+            cuisine="x",
+            ingredients=[RecipeIngredient(name="carrot")],
+            method_gist="cook",
+        ),
+        nutrition=NutritionScore(
+            health_score=50,
+            effort="easy",
+            est_minutes=10,
+            rationale="r",
+        ),
+        external_id="safe",
+    )
+    chain = ChainedRecipeSource([
+        _StubSource([unsafe], cost=3),
+        _StubSource([safe], cost=7),
+    ])
+
+    recipes, cost = await chain.search(
+        RecipeCriteria(
+            include_ingredients=["carrot"],
+            purpose=Purpose.SURPRISE,
+            exclude_ingredients=["peanut"],
+        )
+    )
+
+    assert [recipe.external_id for recipe in recipes] == ["safe"]
+    assert cost == 10
+
+
+@pytest.mark.asyncio
+async def test_chain_catches_source_exception_and_accumulates_empty_attempt_cost():
+    safe = SourcedRecipe(
+        recipe=RecipeCandidate(
+            title="Safe Dish",
+            cuisine="x",
+            ingredients=[RecipeIngredient(name="carrot")],
+            method_gist="cook",
+        ),
+        nutrition=NutritionScore(
+            health_score=50,
+            effort="easy",
+            est_minutes=10,
+            rationale="r",
+        ),
+        external_id="safe",
+    )
+    chain = ChainedRecipeSource([
+        _StubSource([], cost=3),
+        _RaisingSource(),
+        _StubSource([safe], cost=7),
+    ])
+
+    recipes, cost = await chain.search(
+        RecipeCriteria(include_ingredients=["carrot"], purpose=Purpose.SURPRISE)
+    )
+
+    assert [recipe.external_id for recipe in recipes] == ["safe"]
+    assert cost == 10

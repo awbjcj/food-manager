@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json as _json
+import hashlib
 import logging
 from typing import Optional, Protocol
 
@@ -45,7 +46,13 @@ def build_criteria(
 ) -> RecipeCriteria:
     meal = None if meal_type in (None, "Surprise me") else meal_type
     cuisine_value = None if cuisine in (None, "Surprise me", "Any") else cuisine
-    max_ready = _QUICK_MINUTES if purpose == Purpose.QUICK else profile.max_cook_minutes
+    max_ready = profile.max_cook_minutes
+    if purpose == Purpose.QUICK:
+        max_ready = (
+            _QUICK_MINUTES
+            if max_ready is None
+            else min(_QUICK_MINUTES, max_ready)
+        )
     diet = None if profile.diet in (None, "", "none", "omnivore") else profile.diet
     return RecipeCriteria(
         include_ingredients=list(include_ingredients),
@@ -175,7 +182,10 @@ def map_spoonacular(payload: dict) -> list[SourcedRecipe]:
 class RecipeSource(Protocol):
     def available(self) -> bool: ...
     async def search(
-        self, criteria: RecipeCriteria
+        self,
+        criteria: RecipeCriteria,
+        *,
+        remaining_cost_micros: Optional[int] = None,
     ) -> tuple[list[SourcedRecipe], Optional[int]]: ...
 
 
@@ -189,7 +199,10 @@ class SpoonacularSource:
         return bool(self._api_key)
 
     async def search(
-        self, criteria: RecipeCriteria
+        self,
+        criteria: RecipeCriteria,
+        *,
+        remaining_cost_micros: Optional[int] = None,
     ) -> tuple[list[SourcedRecipe], Optional[int]]:
         if not self._api_key:
             return [], None
@@ -233,7 +246,10 @@ class TheMealDbSource:
         return True
 
     async def search(
-        self, criteria: RecipeCriteria
+        self,
+        criteria: RecipeCriteria,
+        *,
+        remaining_cost_micros: Optional[int] = None,
     ) -> tuple[list[SourcedRecipe], Optional[int]]:
         if not criteria.include_ingredients:
             return [], None
@@ -247,7 +263,8 @@ class TheMealDbSource:
             filtered.raise_for_status()
             meals = (filtered.json() or {}).get("meals") or []
             out: list[SourcedRecipe] = []
-            for stub in meals[: criteria.number]:
+            page = meals[criteria.offset : criteria.offset + criteria.number]
+            for stub in page:
                 lookup = await self._http.get(
                     _MEALDB_LOOKUP_URL,
                     params={"i": stub["idMeal"]},
@@ -301,7 +318,10 @@ class LlmRecipeSource:
         return self._recipe_llm is not None and self._nutrition_llm is not None
 
     async def search(
-        self, criteria: RecipeCriteria
+        self,
+        criteria: RecipeCriteria,
+        *,
+        remaining_cost_micros: Optional[int] = None,
     ) -> tuple[list[SourcedRecipe], Optional[int]]:
         if not self.available():
             return [], None
@@ -312,12 +332,18 @@ class LlmRecipeSource:
                 "cuisine": criteria.cuisine,
                 "purpose": criteria.purpose.value,
                 "must_avoid": criteria.exclude_ingredients,
+                "diet": criteria.diet,
+                "max_ready_minutes": criteria.max_ready_minutes,
+                "number": criteria.number,
+                "offset": criteria.offset,
             },
             sort_keys=True,
         )
-        total: Optional[int] = 0
+        total: Optional[int] = None
         recipes, recipe_cost = await self._recipe_llm.fetch_recipes(prompt=prompt)
-        total = None if recipe_cost is None else (total or 0) + recipe_cost
+        total = _add_known_cost(total, recipe_cost)
+        if _over_budget(total, remaining_cost_micros):
+            return [], total
         candidates = [
             candidate
             for candidate in recipes.candidates
@@ -347,11 +373,17 @@ class LlmRecipeSource:
                         "purpose": criteria.purpose.value,
                         "must_avoid": criteria.exclude_ingredients,
                         "violated_ingredients": violated,
+                        "diet": criteria.diet,
+                        "max_ready_minutes": criteria.max_ready_minutes,
+                        "number": criteria.number,
+                        "offset": criteria.offset,
                     },
                     sort_keys=True,
                 )
             )
-            total = None if total is None or regen_cost is None else total + regen_cost
+            total = _add_known_cost(total, regen_cost)
+            if _over_budget(total, remaining_cost_micros):
+                return [], total
             candidates = [
                 candidate
                 for candidate in regenerated.candidates
@@ -368,10 +400,16 @@ class LlmRecipeSource:
                 sort_keys=True,
             )
         )
-        total = None if total is None or nutrition_cost is None else total + nutrition_cost
+        total = _add_known_cost(total, nutrition_cost)
         out: list[SourcedRecipe] = []
         for candidate, score in zip(candidates, nutrition.scores):
-            out.append(SourcedRecipe(recipe=candidate, nutrition=score, external_id=None))
+            out.append(
+                SourcedRecipe(
+                    recipe=candidate,
+                    nutrition=score,
+                    external_id=_llm_external_id(candidate),
+                )
+            )
         return out, total
 
 
@@ -383,12 +421,71 @@ class ChainedRecipeSource:
         return any(source.available() for source in self._sources)
 
     async def search(
-        self, criteria: RecipeCriteria
+        self,
+        criteria: RecipeCriteria,
+        *,
+        remaining_cost_micros: Optional[int] = None,
     ) -> tuple[list[SourcedRecipe], Optional[int]]:
+        total: Optional[int] = None
         for source in self._sources:
             if not source.available():
                 continue
-            recipes, cost = await source.search(criteria)
-            if recipes:
-                return recipes, cost
-        return [], None
+            source_budget = _remaining_budget(remaining_cost_micros, total)
+            try:
+                recipes, cost = await source.search(
+                    criteria,
+                    remaining_cost_micros=source_budget,
+                )
+            except Exception as exc:
+                log.warning(
+                    "recipe_source_failed",
+                    extra={
+                        "source": type(source).__name__,
+                        "error_class": type(exc).__name__,
+                    },
+                )
+                continue
+            total = _add_known_cost(total, cost)
+            safe = [
+                recipe
+                for recipe in recipes
+                if not violates_exclusions(
+                    [ingredient.name for ingredient in recipe.recipe.ingredients],
+                    exclusions=criteria.exclude_ingredients,
+                )
+            ]
+            if safe:
+                return safe, total
+            if _over_budget(total, remaining_cost_micros):
+                break
+        return [], total
+
+
+def _add_known_cost(total: Optional[int], cost: Optional[int]) -> Optional[int]:
+    if not cost:
+        return total
+    return (total or 0) + cost
+
+
+def _over_budget(cost: Optional[int], limit: Optional[int]) -> bool:
+    return limit is not None and cost is not None and cost > limit
+
+
+def _remaining_budget(limit: Optional[int], spent: Optional[int]) -> Optional[int]:
+    if limit is None:
+        return None
+    return max(0, limit - (spent or 0))
+
+
+def _llm_external_id(candidate: RecipeCandidate) -> str:
+    payload = {
+        "title": candidate.title.strip().casefold(),
+        "source_url": candidate.source_url or "",
+        "ingredients": sorted(
+            ingredient.name.strip().casefold() for ingredient in candidate.ingredients
+        ),
+    }
+    digest = hashlib.sha256(
+        _json.dumps(payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:20]
+    return f"llm:{digest}"

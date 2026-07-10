@@ -160,6 +160,26 @@ async def test_plan_bad_days_arg_shows_usage(session_factory, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_plan_unexpected_failure_shows_error_not_a_crash(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+
+    async def failing_build_plan(*args, **kwargs):
+        raise RuntimeError("unexpected bug")
+
+    monkeypatch.setattr(bot_mod, "build_plan", failing_build_plan)
+    msg = _msg("/plan 3")
+    await bot_mod.handle_plan(
+        msg,
+        session_factory=session_factory,
+        now_provider=_NOW,
+        composer=FakeComposerSelector(specs=[]),
+        recipe_sources=[],
+    )
+    ack = msg.answer.return_value
+    assert ack.edit_text.await_args is not None
+
+
+@pytest.mark.asyncio
 async def test_plan_tiny_pantry_replies_not_enough(session_factory, monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _msg("/plan")

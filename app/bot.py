@@ -1733,6 +1733,15 @@ async def handle_plan(
         except NotEnoughItemsToPlan:
             await finish_progress(progress, msg, t("plan.not_enough", user.lang))
             return
+        except Exception as exc:  # noqa: BLE001 - /plan must never crash the bot
+            log.warning(
+                "plan_build_failed",
+                extra={"user_id": user.telegram_id, "error_class": type(exc).__name__},
+            )
+            await finish_progress(
+                progress, msg, "couldn't build a plan right now - try /plan again"
+            )
+            return
         if not entries:
             await finish_progress(progress, msg, t("plan.not_enough", user.lang))
             return

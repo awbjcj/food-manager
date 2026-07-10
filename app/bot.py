@@ -57,10 +57,12 @@ from app.cook import (
     recipe_from_saved,
     recook_shopping_list,
     run_cook,
+    run_cook_more,
     save_candidate,
     set_feedback,
     set_message_id as set_cook_message_id,
 )
+from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
 from app.shopping_service import add_missing, check_off, list_pending
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import (
@@ -125,6 +127,7 @@ from app.renderer import (
     build_correct_menu_keyboard,
     build_cook_result_keyboard,
     build_cook_round_keyboard,
+    PURPOSE_OPTIONS,
     build_digest_keyboard,
     build_favorites_keyboard,
     build_item_card_keyboard,
@@ -160,6 +163,12 @@ DEFAULT_LLM_PROVIDER = "anthropic"
 ALLOWED_TELEGRAM_USER_ID: int = 0
 MEAL_TYPES = ["Dinner", "Lunch", "Breakfast", "Dessert", "Snack", "Surprise me"]
 DEFAULT_CUISINES = ["Italian", "Mexican", "Chinese", "American", "Surprise me"]
+SPOONACULAR_CUISINES = [
+    "African", "Asian", "American", "British", "Cajun", "Caribbean", "Chinese",
+    "Eastern European", "European", "French", "German", "Greek", "Indian", "Irish",
+    "Italian", "Japanese", "Jewish", "Korean", "Latin American", "Mediterranean",
+    "Mexican", "Middle Eastern", "Nordic", "Southern", "Spanish", "Thai", "Vietnamese",
+]
 
 _SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
@@ -1685,6 +1694,21 @@ def _cuisine_options(household: Household) -> list[str]:
     return options[:5]
 
 
+def _cuisine_round_keyboard(
+    cook_id: int, options: list[str], *, lang: str = "en"
+) -> list[list[CallbackButton]]:
+    rows = build_cook_round_keyboard(cook_id, options, round_name="cuisine")
+    rows.append(
+        [
+            CallbackButton(
+                text=t("btn.more_cuisines", lang),
+                callback_data=f"cookmore:{cook_id}:cuisine_full",
+            )
+        ]
+    )
+    return rows
+
+
 def _select_cook(client, provider: str):
     selector = getattr(client, "for_provider", None)
     return selector(provider) if callable(selector) else client
@@ -1741,13 +1765,18 @@ async def handle_cook_callback(
     spawn,
     bot,
     translation_llm=None,
+    recipe_sources=(),
 ) -> None:
     try:
         action = parse_callback(cb.data or "")
     except CommandError:
         await cb.answer("unrecognized action")
         return
-    if action.verb not in ("cook_pick", "cook_alt") or action.item_id is None:
+    if (
+        action.verb
+        not in ("cook_pick", "cook_alt", "cook_more_opts", "cook_more", "cook_adjust")
+        or action.item_id is None
+    ):
         await cb.answer("unrecognized action")
         return
 
@@ -1766,14 +1795,13 @@ async def handle_cook_callback(
         if cook is None or cook.status not in ("collecting", "ready", "done"):
             await cb.answer("this cook session expired - start a new /cook")
             return
-        if cook.status in ("collecting", "ready"):
-            now = utc_naive(now_provider(user.tz))
-            if cook.expires_at <= now:
-                cook.status = "expired"
-                session.add(cook)
-                session.commit()
-                await cb.answer("this cook session expired - start a new /cook")
-                return
+        now = utc_naive(now_provider(user.tz))
+        if cook.expires_at <= now:
+            cook.status = "expired"
+            session.add(cook)
+            session.commit()
+            await cb.answer("this cook session expired - start a new /cook")
+            return
 
         if action.verb == "cook_alt":
             try:
@@ -1804,6 +1832,134 @@ async def handle_cook_callback(
             await cb.answer("showing alternatives")
             return
 
+        if action.verb == "cook_more":
+            if cook.status != "done":
+                await cb.answer("cook is still in progress")
+                return
+            assert cook.id is not None
+            claim = session.exec(
+                update(CookSession)
+                .where(
+                    CookSession.id == cook.id,  # type: ignore[arg-type]
+                    CookSession.household_id == user.household_id,  # type: ignore[arg-type]
+                    CookSession.status == "done",  # type: ignore[arg-type]
+                )
+                .values(status="ready")
+            )
+            session.commit()
+            if claim.rowcount == 0:
+                await cb.answer("already searching")
+                return
+            await cb.answer()
+            cook = load_cook_session(
+                session, household_id=user.household_id, cook_id=cook.id
+            )
+            if cook is None:
+                return
+            try:
+                household = session.get(Household, user.household_id)
+                if household is None:
+                    cards = []
+                else:
+                    profile = profile_from_household(household)
+                    today = now_provider(user.tz).date()
+                    selected_recipe_llm = _select_cook(recipe_llm, user.llm_provider)
+                    selected_nutrition_llm = _select_cook(
+                        nutrition_llm, user.llm_provider
+                    )
+                    source = ChainedRecipeSource(
+                        [
+                            *recipe_sources,
+                            LlmRecipeSource(
+                                recipe_llm=selected_recipe_llm,
+                                nutrition_llm=selected_nutrition_llm,
+                            ),
+                        ]
+                    )
+                    cards = await run_cook_more(
+                        session,
+                        cook=cook,
+                        profile=profile,
+                        source=source,
+                        today=today,
+                    )
+                if not cards:
+                    await _safe_edit_cb(cb, t("cook.no_more", user.lang))
+                else:
+                    names = await _translate_for_render(
+                        session,
+                        lang=user.lang,
+                        texts=_cook_card_texts(cards),
+                        translation_llm=translation_llm,
+                    )
+                    await _safe_edit_cb(
+                        cb,
+                        render_cook_result(
+                            cards, show_alternatives=False, lang=user.lang, names=names
+                        ),
+                        to_aiogram_keyboard(
+                            build_cook_result_keyboard(
+                                cook.id, has_alternatives=len(cards) > 1, lang=user.lang
+                            )
+                        ),
+                    )
+            finally:
+                cook.status = "done"
+                session.add(cook)
+                session.commit()
+            return
+
+        if action.verb == "cook_adjust":
+            if cook.status != "done":
+                await cb.answer("cook is still in progress")
+                return
+            assert cook.id is not None
+            claim = session.exec(
+                update(CookSession)
+                .where(
+                    CookSession.id == cook.id,  # type: ignore[arg-type]
+                    CookSession.household_id == user.household_id,  # type: ignore[arg-type]
+                    CookSession.status == "done",  # type: ignore[arg-type]
+                )
+                .values(status="collecting", cuisine=None, purpose=None, search_offset=0)
+            )
+            session.commit()
+            if claim.rowcount == 0:
+                await cb.answer("already cooking")
+                return
+            household = session.get(Household, user.household_id)
+            if household is None:
+                await cb.answer("couldn't load your household profile")
+                return
+            await _safe_edit_cb(
+                cb,
+                "Which cuisine?",
+                to_aiogram_keyboard(
+                    _cuisine_round_keyboard(
+                        cook.id, _cuisine_options(household), lang=user.lang
+                    )
+                ),
+            )
+            await cb.answer()
+            return
+
+        if action.verb == "cook_more_opts":
+            if (
+                cook.status != "collecting"
+                or cook.meal_type is None
+                or cook.cuisine is not None
+                or action.round_name != "cuisine_full"
+            ):
+                await cb.answer("unrecognized action")
+                return
+            assert cook.id is not None
+            rows = build_cook_round_keyboard(
+                cook.id, [*SPOONACULAR_CUISINES, "Surprise me"], round_name="cuisine_full"
+            )
+            await _safe_edit_cb(cb, "Which cuisine?", to_aiogram_keyboard(rows))
+            await cb.answer()
+            return
+
         option_index = action.option_index
         if option_index is None:
             await cb.answer("unrecognized action")
@@ -1823,8 +1979,8 @@ async def handle_cook_callback(
                 return
             assert cook.id is not None
             keyboard = to_aiogram_keyboard(
-                build_cook_round_keyboard(
-                    cook.id, _cuisine_options(household), round_name="cuisine"
+                _cuisine_round_keyboard(
+                    cook.id, _cuisine_options(household), lang=user.lang
                 )
             )
             if not await _safe_edit_cb(
@@ -1844,29 +2000,68 @@ async def handle_cook_callback(
             await cb.answer("already answered")
             return
 
-        if cook.cuisine is not None:
+        if cook.cuisine is None:
+            if action.round_name not in ("cuisine", "cuisine_full"):
+                await cb.answer("unrecognized action")
+                return
+            cuisine_options = (
+                _cuisine_options(household)
+                if action.round_name == "cuisine"
+                else [*SPOONACULAR_CUISINES, "Surprise me"]
+            )
+            if option_index < 0 or option_index >= len(cuisine_options):
+                await cb.answer("unrecognized action")
+                return
+            chosen_cuisine = cuisine_options[option_index]
+            result = session.exec(
+                update(CookSession)
+                .where(
+                    CookSession.id == cook.id,  # type: ignore[arg-type]
+                    CookSession.household_id == user.household_id,  # type: ignore[arg-type]
+                    CookSession.status == "collecting",  # type: ignore[arg-type]
+                    CookSession.meal_type.is_not(None),  # type: ignore[union-attr]
+                    CookSession.cuisine.is_(None),  # type: ignore[union-attr]
+                )
+                .values(cuisine=chosen_cuisine)
+            )
+            session.commit()
+            if result.rowcount == 0:
+                await cb.answer("already cooking")
+                return
+            assert cook.id is not None
+            keyboard = to_aiogram_keyboard(
+                build_cook_round_keyboard(
+                    cook.id,
+                    [t(key, user.lang) for _code, key in PURPOSE_OPTIONS],
+                    round_name="purpose",
+                )
+            )
+            await _safe_edit_cb(cb, t("cook.round.purpose", user.lang), keyboard)
             await cb.answer()
             return
 
-        if action.round_name != "cuisine":
+        if cook.purpose is not None:
+            await cb.answer()
+            return
+
+        if action.round_name != "purpose":
             await cb.answer("unrecognized action")
             return
 
-        cuisine_options = _cuisine_options(household)
-        if option_index < 0 or option_index >= len(cuisine_options):
+        if option_index < 0 or option_index >= len(PURPOSE_OPTIONS):
             await cb.answer("unrecognized action")
             return
-        chosen_cuisine = cuisine_options[option_index]
+        chosen_purpose = PURPOSE_OPTIONS[option_index][0]
         result = session.exec(
             update(CookSession)
             .where(
                 CookSession.id == cook.id,  # type: ignore[arg-type]
                 CookSession.household_id == user.household_id,  # type: ignore[arg-type]
                 CookSession.status == "collecting",  # type: ignore[arg-type]
-                CookSession.meal_type.is_not(None),  # type: ignore[union-attr]
-                CookSession.cuisine.is_(None),  # type: ignore[union-attr]
+                CookSession.cuisine.is_not(None),  # type: ignore[union-attr]
+                CookSession.purpose.is_(None),  # type: ignore[union-attr]
             )
-            .values(cuisine=chosen_cuisine, status="ready")
+            .values(purpose=chosen_purpose, status="ready")
         )
         session.commit()
         if result.rowcount == 0:
@@ -1901,6 +2096,7 @@ async def handle_cook_callback(
             now_provider=now_provider,
             bot=bot,
             translation_llm=translation_llm,
+            recipe_sources=recipe_sources,
         )
     )
 
@@ -1918,6 +2114,7 @@ async def run_cook_and_render(
     now_provider: NowProvider,
     bot,
     translation_llm=None,
+    recipe_sources=(),
 ) -> None:
     with session_factory() as session:
         user = session.get(User, user_id)
@@ -1945,14 +2142,19 @@ async def run_cook_and_render(
         selected_selection_llm = _select_cook(selection_llm, user.llm_provider)
         selected_recipe_llm = _select_cook(recipe_llm, user.llm_provider)
         selected_nutrition_llm = _select_cook(nutrition_llm, user.llm_provider)
+        source = ChainedRecipeSource([
+            *recipe_sources,
+            LlmRecipeSource(
+                recipe_llm=selected_recipe_llm, nutrition_llm=selected_nutrition_llm
+            ),
+        ])
         try:
             cards = await run_cook(
                 session,
                 cook=cook,
                 profile=profile,
                 selection_llm=selected_selection_llm,  # type: ignore[arg-type]
-                recipe_llm=selected_recipe_llm,  # type: ignore[arg-type]
-                nutrition_llm=selected_nutrition_llm,  # type: ignore[arg-type]
+                source=source,
                 today=today,
             )
         except NotEnoughItems:
@@ -2692,6 +2894,7 @@ def build_dispatcher(
     nutrition_llm=None,
     translation_llm=None,
     alerter=None,
+    recipe_sources=(),
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -2758,7 +2961,9 @@ def build_dispatcher(
     )
 
     async def on_callback(callback):
-        if (callback.data or "").startswith(("cookpick:", "cookalt:")):
+        if (callback.data or "").startswith(
+            ("cookpick:", "cookalt:", "cookmore:", "cookmore2:", "cookadj:")
+        ):
             if selection_llm is None or recipe_llm is None or nutrition_llm is None:
                 await callback.answer(
                     "cook is not configured yet", show_alert=False
@@ -2774,6 +2979,7 @@ def build_dispatcher(
                 spawn=asyncio.create_task,
                 bot=bot,
                 translation_llm=translation_llm,
+                recipe_sources=recipe_sources,
             )
             return
         if (callback.data or "").startswith("item:"):

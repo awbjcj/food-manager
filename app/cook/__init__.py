@@ -26,7 +26,7 @@ from app.cook.models import (
     RecipeIngredient,
     ScoredCandidate,
 )
-from app.cook.service import NotEnoughItems, run_cook
+from app.cook.service import NotEnoughItems, run_cook, run_cook_more
 from app.cook.session_service import (
     create_cook_session,
     load_cook_session,
@@ -49,6 +49,7 @@ __all__ = [
     "recipe_from_saved",
     "recook_shopping_list",
     "run_cook",
+    "run_cook_more",
     "save_candidate",
     "set_feedback",
     "set_message_id",

@@ -417,6 +417,16 @@ def build_cook_alternatives_keyboard(cook_id: int, lang: str = "en") -> list[lis
     return [[CallbackButton(text=t("btn.show_alternatives", lang), callback_data=f"cookalt:{cook_id}")]]
 
 
+#: (code, i18n key) pairs for the /cook purpose intake round, in display order.
+PURPOSE_OPTIONS = [
+    ("use_it_up", "purpose.use_it_up"),
+    ("quick", "purpose.quick"),
+    ("healthy", "purpose.healthy"),
+    ("comfort", "purpose.comfort"),
+    ("surprise", "purpose.surprise"),
+]
+
+
 def build_cook_result_keyboard(
     cook_id: int, *, has_alternatives: bool, lang: str = "en"
 ) -> list[list[CallbackButton]]:
@@ -428,6 +438,10 @@ def build_cook_result_keyboard(
         [
             CallbackButton(text=t("btn.save", lang), callback_data=f"cooksave:{cook_id}"),
             CallbackButton(text=t("btn.shopping", lang), callback_data=f"cookshop:{cook_id}"),
+        ],
+        [
+            CallbackButton(text=t("btn.more_recipes", lang), callback_data=f"cookmore2:{cook_id}"),
+            CallbackButton(text=t("btn.adjust", lang), callback_data=f"cookadj:{cook_id}"),
         ],
     ]
     if has_alternatives:

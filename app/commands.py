@@ -156,6 +156,9 @@ Verb = Literal[
     "cook_shop",
     "shop_done",
     "fav_cook",
+    "cook_more",
+    "cook_adjust",
+    "cook_more_opts",
 ]
 
 
@@ -218,6 +221,30 @@ def parse_callback(data: str) -> CallbackAction:
         except ValueError as exc:
             raise CommandError(f"bad cook id {raw_id!r}") from exc
         return CallbackAction(verb="cook_alt", item_id=cook_id)
+    if data.startswith("cookmore2:"):
+        _, _, raw_id = data.partition(":")
+        try:
+            cook_id = int(raw_id)
+        except ValueError as exc:
+            raise CommandError(f"bad cook id {raw_id!r}") from exc
+        return CallbackAction(verb="cook_more", item_id=cook_id)
+    if data.startswith("cookadj:"):
+        _, _, raw_id = data.partition(":")
+        try:
+            cook_id = int(raw_id)
+        except ValueError as exc:
+            raise CommandError(f"bad cook id {raw_id!r}") from exc
+        return CallbackAction(verb="cook_adjust", item_id=cook_id)
+    if data.startswith("cookmore:"):
+        parts = data.split(":")
+        if len(parts) != 3:
+            raise CommandError(f"bad cookmore data {data!r}")
+        _, raw_id, round_name = parts
+        try:
+            cook_id = int(raw_id)
+        except ValueError as exc:
+            raise CommandError(f"bad cook id {raw_id!r}") from exc
+        return CallbackAction(verb="cook_more_opts", item_id=cook_id, round_name=round_name)
     if data.startswith("cookpick:"):
         parts = data.split(":")
         if len(parts) not in (3, 4):
@@ -227,7 +254,7 @@ def parse_callback(data: str) -> CallbackAction:
             round_name = None
         else:
             _, raw_id, round_name, raw_idx = parts
-            if round_name not in ("meal", "cuisine"):
+            if round_name not in ("meal", "cuisine", "cuisine_full", "purpose"):
                 raise CommandError(f"bad cookpick data {data!r}")
         try:
             option_index = int(raw_idx)

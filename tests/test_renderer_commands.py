@@ -18,6 +18,7 @@ from app.commands import (
     parse_snooze_args,
     parse_tz,
 )
+from app.cook.models import NutritionScore, RecipeCandidate, RecipeIngredient, ScoredCandidate
 from app.ingest_service import IngestSummary
 from app.models import PantryItem
 from app.pantry_service import ListFilter, Stats
@@ -400,6 +401,40 @@ def test_render_list_and_stats():
         )
     )
     assert "-" in empty_stats
+
+
+def _plan_candidate(title, *, cuisine="italian", minutes=20):
+    rec = RecipeCandidate(
+        title=title, cuisine=cuisine, source_url="https://x",
+        ingredients=[RecipeIngredient(name="pasta")], method_gist="boil",
+        deliciousness=0.7,
+    )
+    nut = NutritionScore(health_score=80, effort="easy", est_minutes=minutes, rationale="ok")
+    return ScoredCandidate(recipe=rec, nutrition=nut, expiry_use=0.5, final_score=0.7)
+
+
+def test_render_plan_shows_header_days_and_fire_flag():
+    from app.renderer import render_plan
+
+    rows = [
+        (date(2026, 7, 9), _plan_candidate("Yogurt Bowl", minutes=20), True),
+        (date(2026, 7, 10), _plan_candidate("Pasta", minutes=30), False),
+    ]
+    text = render_plan(rows)
+    assert text == (
+        "🗓 Dinner plan — 2 days\n"
+        "Thu: Yogurt Bowl (italian, 20m)🔥\n"
+        "Fri: Pasta (italian, 30m)"
+    )
+
+
+def test_build_plan_keyboard_emits_swap_shop_cancel():
+    from app.renderer import build_plan_keyboard
+
+    day_rows = [(0, date(2026, 7, 9)), (1, date(2026, 7, 10))]
+    rows = build_plan_keyboard(5, day_rows)
+    datas = [b.callback_data for row in rows for b in row]
+    assert datas == ["plan:swap:5:0", "plan:swap:5:1", "plan:shop:5", "plan:cancel:5"]
 
 
 def test_nl_picker_keyboard_opens_item_cards():

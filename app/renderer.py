@@ -413,6 +413,46 @@ def render_cook_result(
     return "\n\n".join(blocks)
 
 
+def render_plan(
+    rows: list, *, lang: str = "en", names: Mapping[str, str] | None = None
+) -> str:
+    lines = [t("plan.header", lang, n=len(rows))]
+    for day, candidate, uses_expiring in rows:
+        lines.append(
+            t(
+                "plan.day_line",
+                lang,
+                weekday=weekday_abbr(day, lang=lang),
+                title=_name(names, candidate.recipe.title),
+                cuisine=_name(names, candidate.recipe.cuisine),
+                minutes=candidate.nutrition.est_minutes,
+                fire="🔥" if uses_expiring else "",
+            )
+        )
+    return "\n".join(lines)
+
+
+def build_plan_keyboard(
+    plan_id: int, day_rows: list, *, lang: str = "en"
+) -> list[list[CallbackButton]]:
+    rows = [
+        [
+            CallbackButton(
+                text=t("btn.plan.swap", lang, weekday=weekday_abbr(day, lang=lang)),
+                callback_data=f"plan:swap:{plan_id}:{day_index}",
+            )
+        ]
+        for day_index, day in day_rows
+    ]
+    rows.append(
+        [
+            CallbackButton(text=t("btn.plan.shop", lang), callback_data=f"plan:shop:{plan_id}"),
+            CallbackButton(text=t("btn.plan.cancel", lang), callback_data=f"plan:cancel:{plan_id}"),
+        ]
+    )
+    return rows
+
+
 def build_nl_picker_keyboard(items, *, names=None) -> list[list[CallbackButton]]:
     """One labeled row per candidate item; tapping opens its v4.8 card."""
     resolved = names or {}

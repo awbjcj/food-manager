@@ -11,7 +11,7 @@ boundaries and ordering, not implementation detail.
 
 - **Stability/performance:** slow LLM responses with no progress feedback; silent
   failures (a missed digest is discovered days later); occasional crashes/hangs
-  requiring manual restart. LLM cost is *not* a pain point.
+  requiring manual restart. LLM cost is _not_ a pain point.
 - **Usability:** command friction (many slash commands with picky syntax), no
   progress feedback after sending a receipt photo, hard to get a quick pantry
   overview, and `/help` is a wall of text for new household members.
@@ -22,15 +22,15 @@ boundaries and ordering, not implementation detail.
 
 ## Release sequence
 
-| Release | Theme | Plan status |
-|---|---|---|
-| v5.0 | Stability & Feedback | plan committed (`plans/2026-07-08-v5.0-stability-feedback.md`) |
-| v4.8 | Pantry action drill-down interface | **already shipped** (audit 2026-07-08: implemented and extended by the `/pantry` command, PR #7) — no work remains |
-| v4.9 | Recipe engine overhaul | tasks 1–8 shipped (source-chain foundation); tasks 9–14 pending; plan refreshed 2026-07-08 against the v4.7 codebase |
-| v5.1 | Agno natural-language input + onboarding/help | needs spec |
-| v5.2 | Meal planning (Agno workflow over v4.9 engine) | needs spec |
-| v5.3 | Affinity learning + recipe quality/media | needs spec (revive v3.6 design) |
-| v5.4 | Waste/consumption analytics | needs spec |
+| Release | Theme                                          | Plan status                                                                                                          |
+| ------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| v5.0    | Stability & Feedback                           | plan committed (`plans/2026-07-08-v5.0-stability-feedback.md`)                                                       |
+| v4.8    | Pantry action drill-down interface             | **already shipped** (audit 2026-07-08: implemented and extended by the `/pantry` command, PR #7) — no work remains   |
+| v4.9    | Recipe engine overhaul                         | tasks 1–8 shipped (source-chain foundation); tasks 9–14 pending; plan refreshed 2026-07-08 against the v4.7 codebase |
+| v5.1    | Agno natural-language input + onboarding/help  | approved spec + implementation plan; pending                                                                         |
+| v5.2    | Meal planning (Agno workflow over v4.9 engine) | approved spec + implementation plan; pending                                                                         |
+| v5.3    | Affinity learning + recipe quality/media       | needs spec (revive v3.6 design)                                                                                      |
+| v5.4    | Waste/consumption analytics                    | needs spec                                                                                                           |
 
 **Housekeeping before v5.0:** commit the pending working-tree changes
 (Gemini 3.5-flash model bump in `app/settings.py`, `app/i18n.py`, `CLAUDE.md`).
@@ -43,7 +43,7 @@ Smallest release; every later release benefits. Scope:
    `/cook`, immediately send an ack message ("📸 Reading your receipt…") plus the
    Telegram "typing" chat action, then edit the ack into the final result. Reuse
    the ack-first pattern from `app/callback_dispatch.py`. This addresses
-   *perceived* LLM slowness directly.
+   _perceived_ LLM slowness directly.
 2. **Owner error alerts.** An aiogram error middleware plus a digest-send failure
    hook DM the bootstrap owner (`ALLOWED_TELEGRAM_USER_ID`) a rate-limited alert
    with the error summary. Telegram is the alerting channel; no external
@@ -60,7 +60,7 @@ Smallest release; every later release benefits. Scope:
 
 ## v4.8 and v4.9 — execute the committed plans
 
-*(Updated by the 2026-07-08 refresh audit.)* **v4.8 already shipped**: the item-card
+_(Updated by the 2026-07-08 refresh audit.)_ **v4.8 already shipped**: the item-card
 drill-down, nudges, remove-confirm, and free-text correct are all live, and the
 June-14 `/pantry` command extended them; nothing remains. **v4.9 is half-shipped**:
 its foundation (`app/cook/recipe_source.py` with Spoonacular/TheMealDB/LLM
@@ -79,7 +79,9 @@ search) stay hand-rolled — v4.7 shipped recently, is tested, and a migration h
 no user-visible payoff. Rules:
 
 - Agents are constructed once at bootstrap (never per message).
-- Agent persistence uses Agno's `SqliteDb` on the same volume as `food.db`.
+- Stateful agents use Agno's `SqliteDb` on the same volume as `food.db`.
+  Stateless classify/compose seams (v5.1/v5.2) deliberately do not create an
+  otherwise-unused agent database.
 - Agent model selection honours `User.llm_provider` where that provider supports
   the needed capability, mirroring the existing selector-fallback semantics.
 - Agents parse and decide; **all reads/writes go through existing service

@@ -6,6 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 from typing import AsyncIterator, Awaitable, Callable, Optional, cast
 
 from aiogram import Bot, Dispatcher, F
@@ -65,7 +66,7 @@ from app.cook import (
 )
 from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
 import app.plan_service as plan_service_mod
-from app.plan_service import NotEnoughItemsToPlan, build_plan
+from app.plan_service import NotEnoughItemsToPlan, aggregate_shopping, build_plan, swap_day
 from app.week_composer import DaySpec
 from app.shopping_service import add_missing, check_off, list_pending
 from app.ingest_service import DuplicateReceipt, ingest_photo
@@ -1764,6 +1765,132 @@ async def handle_plan(
         session.commit()
 
 
+def _plan_entry_rows(session, plan_id: int):
+    entries = list(
+        session.exec(
+            select(MealPlanEntry)
+            .where(MealPlanEntry.plan_id == plan_id)
+            .order_by(MealPlanEntry.day_index)  # type: ignore[arg-type]
+        ).all()
+    )
+    candidates = [ScoredCandidate.model_validate_json(e.recipe_json) for e in entries]
+    return entries, candidates
+
+
+async def _render_plan_message(session, *, plan, lang, translation_llm):
+    entries, candidates = _plan_entry_rows(session, plan.id)
+    names = await _translate_for_render(
+        session,
+        lang=lang,
+        texts=[text for c in candidates for text in (c.recipe.title, c.recipe.cuisine)],
+        translation_llm=translation_llm,
+    )
+    rows = [
+        (entry.date, candidate, _plan_uses_expiring(entry))
+        for entry, candidate in zip(entries, candidates)
+    ]
+    text = render_plan(rows, lang=lang, names=names)
+    keyboard = to_aiogram_keyboard(
+        build_plan_keyboard(
+            plan.id, [(entry.day_index, entry.date) for entry in entries], lang=lang
+        )
+    )
+    return text, keyboard
+
+
+async def handle_plan_callback(
+    cb,
+    *,
+    session_factory,
+    now_provider,
+    recipe_sources=(),
+    recipe_llm=None,
+    nutrition_llm=None,
+    translation_llm=None,
+) -> None:
+    try:
+        action = parse_callback(cb.data or "")
+    except CommandError:
+        await dispatch_answer(cb, "unrecognized action")
+        return
+    if action.verb not in ("plan_swap", "plan_shop", "plan_cancel") or action.item_id is None:
+        await dispatch_answer(cb, "unrecognized action")
+        return
+
+    with session_factory() as session:
+        user = _authorized_callback_user(session, cb.from_user.id)
+        if user is None:
+            await dispatch_answer(cb, "not authorized")
+            return
+        plan = session.get(MealPlan, action.item_id)
+        if plan is None or plan.household_id != user.household_id or plan.status != "active":
+            await dispatch_answer(cb, t("plan.expired", user.lang))
+            return
+        today = now_provider(user.tz).date()
+
+        if action.verb == "plan_cancel":
+            plan.status = "cancelled"
+            session.add(plan)
+            session.commit()
+            await dispatch_answer(cb)
+            await edit_or_resend(cb, t("plan.cancelled", user.lang))
+            return
+
+        if action.verb == "plan_shop":
+            entries, _candidates = _plan_entry_rows(session, plan.id)
+            missing_names = aggregate_shopping(entries)
+            if not missing_names:
+                await dispatch_answer(cb, t("plan.shopping_none", user.lang))
+                return
+            result = add_missing(
+                session,
+                household_id=user.household_id,
+                ingredients=[SimpleNamespace(name=n) for n in missing_names],
+                now=datetime.now(timezone.utc),
+            )
+            if not result.added:
+                await dispatch_answer(cb, t("plan.shopping_none", user.lang))
+            else:
+                await dispatch_answer(
+                    cb, t("plan.shopping_added", user.lang, n=len(result.added))
+                )
+            return
+
+        # plan_swap
+        entries, _candidates = _plan_entry_rows(session, plan.id)
+        entry = next((e for e in entries if e.day_index == action.option_index), None)
+        if entry is None:
+            await dispatch_answer(cb, "unrecognized action")
+            return
+        household = session.get(Household, user.household_id)
+        if household is None:
+            await dispatch_answer(cb, "couldn't load your household profile")
+            return
+        profile = profile_from_household(household)
+        source = _plan_source(recipe_sources, recipe_llm, nutrition_llm, user.llm_provider)
+        await dispatch_answer(cb)
+        try:
+            updated = await swap_day(
+                session,
+                plan=plan,
+                entry=entry,
+                profile=profile,
+                source=source,
+                today=today,
+                cost_ceiling_micros=plan_service_mod.PLAN_COST_CEILING_MICROS,
+            )
+        except Exception as exc:  # noqa: BLE001 - swap must never break the bot
+            log.warning("plan_swap_failed", extra={"error_class": type(exc).__name__})
+            updated = None
+        if updated is None:
+            await edit_or_resend(cb, t("plan.no_swap", user.lang))
+            return
+        text, keyboard = await _render_plan_message(
+            session, plan=plan, lang=user.lang, translation_llm=translation_llm
+        )
+        await edit_or_resend(cb, text, keyboard)
+
+
 async def handle_llm(
     msg,
     *,
@@ -3415,6 +3542,17 @@ def build_dispatcher(
     async def on_callback(callback):
         if (callback.data or "").startswith("help:"):
             await handle_help_callback(callback, session_factory=session_factory)
+            return
+        if (callback.data or "").startswith("plan:"):
+            await handle_plan_callback(
+                callback,
+                session_factory=session_factory,
+                now_provider=now_provider,
+                recipe_sources=recipe_sources,
+                recipe_llm=recipe_llm,
+                nutrition_llm=nutrition_llm,
+                translation_llm=translation_llm,
+            )
             return
         if (callback.data or "").startswith(
             ("cookpick:", "cookalt:", "cookmore:", "cookmore2:", "cookadj:")

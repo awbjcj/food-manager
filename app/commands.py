@@ -173,6 +173,9 @@ Verb = Literal[
     "cook_more",
     "cook_adjust",
     "cook_more_opts",
+    "plan_swap",
+    "plan_shop",
+    "plan_cancel",
 ]
 
 
@@ -259,6 +262,33 @@ def parse_callback(data: str) -> CallbackAction:
         except ValueError as exc:
             raise CommandError(f"bad cook id {raw_id!r}") from exc
         return CallbackAction(verb="cook_more_opts", item_id=cook_id, round_name=round_name)
+    if data.startswith("plan:swap:"):
+        parts = data.split(":")
+        if len(parts) != 4:
+            raise CommandError(f"bad plan swap data {data!r}")
+        _, _, raw_id, raw_day = parts
+        try:
+            plan_id = int(raw_id)
+            day_index = int(raw_day)
+        except ValueError as exc:
+            raise CommandError(f"bad plan swap data {data!r}") from exc
+        return CallbackAction(verb="plan_swap", item_id=plan_id, option_index=day_index)
+    if data.startswith("plan:shop:"):
+        _, _, raw_id = data.split(":")
+        try:
+            plan_id = int(raw_id)
+        except ValueError as exc:
+            raise CommandError(f"bad plan id {raw_id!r}") from exc
+        return CallbackAction(verb="plan_shop", item_id=plan_id)
+    if data.startswith("plan:cancel:"):
+        _, _, raw_id = data.split(":")
+        try:
+            plan_id = int(raw_id)
+        except ValueError as exc:
+            raise CommandError(f"bad plan id {raw_id!r}") from exc
+        return CallbackAction(verb="plan_cancel", item_id=plan_id)
+    if data.startswith("plan:"):
+        raise CommandError(f"unrecognized plan callback {data!r}")
     if data.startswith("cookpick:"):
         parts = data.split(":")
         if len(parts) not in (3, 4):

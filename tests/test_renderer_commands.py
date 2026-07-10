@@ -439,6 +439,18 @@ def test_parse_plan_arg():
             parse_plan_arg(bad)
 
 
+def test_parse_plan_callbacks():
+    swap = parse_callback("plan:swap:5:2")
+    assert swap.verb == "plan_swap" and swap.item_id == 5 and swap.option_index == 2
+    shop = parse_callback("plan:shop:5")
+    assert shop.verb == "plan_shop" and shop.item_id == 5
+    cancel = parse_callback("plan:cancel:5")
+    assert cancel.verb == "plan_cancel" and cancel.item_id == 5
+    for bad in ("plan:swap:5", "plan:swap:5:x", "plan:bogus:5", "plan:shop:x"):
+        with pytest.raises(CommandError):
+            parse_callback(bad)
+
+
 def test_build_plan_keyboard_emits_swap_shop_cancel():
     from app.renderer import build_plan_keyboard
 

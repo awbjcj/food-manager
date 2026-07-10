@@ -219,3 +219,159 @@ async def test_second_plan_supersedes_first(session_factory, monkeypatch):
         assert len(plans) == 2
         statuses = sorted(p.status for p in plans)
         assert statuses == ["active", "cancelled"]
+
+
+class _CbMessage:
+    def __init__(self, chat_id: int = 1, message_id: int = 9) -> None:
+        from types import SimpleNamespace
+
+        self.chat = SimpleNamespace(id=chat_id)
+        self.message_id = message_id
+        self.edit_text = AsyncMock()
+        self.answer = AsyncMock()
+
+
+class _Cb:
+    def __init__(self, data, user_id: int = 1):
+        from types import SimpleNamespace
+
+        self.data = data
+        self.from_user = SimpleNamespace(id=user_id)
+        self.message = _CbMessage()
+        self.answer = AsyncMock()
+
+
+async def _build_plan_for_callbacks(session_factory, *, days_specs, pages):
+    today = datetime(2026, 7, 9).date()
+    _seed_pantry(session_factory, today)
+    composer = FakeComposerSelector(specs=days_specs)
+    source = FakeRecipeSource(pages)
+    msg = _msg(f"/plan {len(days_specs)}")
+    await bot_mod.handle_plan(
+        msg, session_factory=session_factory, now_provider=_NOW,
+        composer=composer, recipe_sources=[source],
+    )
+    from sqlmodel import select
+
+    with session_factory() as db:
+        plan = db.exec(select(MealPlan)).one()
+        return plan.id
+
+
+def _specs3():
+    return [
+        DaySpec(day_index=0, feature_items=["yogurt"]),
+        DaySpec(day_index=1, feature_items=["chicken"]),
+        DaySpec(day_index=2, feature_items=["rice"]),
+    ]
+
+
+def _pages3(prefix="p"):
+    return [
+        [_sourced(f"{prefix}0", ingredients=["yogurt"], external_id=f"{prefix}0")],
+        [_sourced(f"{prefix}1", ingredients=["chicken"], external_id=f"{prefix}1")],
+        [_sourced(f"{prefix}2", ingredients=["rice"], external_id=f"{prefix}2")],
+    ]
+
+
+@pytest.mark.asyncio
+async def test_plan_swap_replaces_entry_and_rerenders(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    plan_id = await _build_plan_for_callbacks(session_factory, days_specs=_specs3(), pages=_pages3())
+
+    fresh_source = FakeRecipeSource([[_sourced("Fresh Yogurt", ingredients=["yogurt"], external_id="Z")]])
+    cb = _Cb(f"plan:swap:{plan_id}:0")
+    await bot_mod.handle_plan_callback(
+        cb, session_factory=session_factory, now_provider=_NOW,
+        recipe_sources=[fresh_source],
+    )
+    cb.answer.assert_awaited()
+    cb.message.edit_text.assert_awaited()
+    text = cb.message.edit_text.await_args.args[0]
+    assert "Fresh Yogurt" in text
+
+
+@pytest.mark.asyncio
+async def test_plan_swap_no_result_leaves_message_with_notice(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    plan_id = await _build_plan_for_callbacks(session_factory, days_specs=_specs3(), pages=_pages3())
+
+    empty_source = FakeRecipeSource([])
+    cb = _Cb(f"plan:swap:{plan_id}:0")
+    await bot_mod.handle_plan_callback(
+        cb, session_factory=session_factory, now_provider=_NOW,
+        recipe_sources=[empty_source],
+    )
+    from app.i18n import t
+
+    text = cb.message.edit_text.await_args.args[0]
+    assert text == t("plan.no_swap", "en")
+
+
+@pytest.mark.asyncio
+async def test_plan_shop_adds_union_then_second_tap_adds_zero(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    # ingredients include items NOT in the seeded pantry, so there's a real gap to shop for
+    pages = [
+        [_sourced("p0", ingredients=["yogurt", "soy sauce"], external_id="p0")],
+        [_sourced("p1", ingredients=["chicken", "tofu"], external_id="p1")],
+        [_sourced("p2", ingredients=["rice"], external_id="p2")],
+    ]
+    plan_id = await _build_plan_for_callbacks(session_factory, days_specs=_specs3(), pages=pages)
+
+    cb1 = _Cb(f"plan:shop:{plan_id}")
+    await bot_mod.handle_plan_callback(
+        cb1, session_factory=session_factory, now_provider=_NOW, recipe_sources=[],
+    )
+    first_text = cb1.answer.await_args.args[0]
+    assert "Added" in first_text
+
+    cb2 = _Cb(f"plan:shop:{plan_id}")
+    await bot_mod.handle_plan_callback(
+        cb2, session_factory=session_factory, now_provider=_NOW, recipe_sources=[],
+    )
+    from app.i18n import t
+
+    assert cb2.answer.await_args.args[0] == t("plan.shopping_none", "en")
+
+
+@pytest.mark.asyncio
+async def test_plan_cancel_is_terminal_and_blocks_further_callbacks(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    plan_id = await _build_plan_for_callbacks(session_factory, days_specs=_specs3(), pages=_pages3())
+
+    cancel_cb = _Cb(f"plan:cancel:{plan_id}")
+    await bot_mod.handle_plan_callback(
+        cancel_cb, session_factory=session_factory, now_provider=_NOW, recipe_sources=[],
+    )
+    from app.i18n import t
+
+    assert cancel_cb.message.edit_text.await_args.args[0] == t("plan.cancelled", "en")
+    with session_factory() as db:
+        from sqlmodel import select
+
+        plan = db.exec(select(MealPlan)).one()
+        assert plan.status == "cancelled"
+
+    shop_cb = _Cb(f"plan:shop:{plan_id}")
+    await bot_mod.handle_plan_callback(
+        shop_cb, session_factory=session_factory, now_provider=_NOW, recipe_sources=[],
+    )
+    assert shop_cb.answer.await_args.args[0] == t("plan.expired", "en")
+
+
+@pytest.mark.asyncio
+async def test_plan_callback_rejects_cross_household(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    plan_id = await _build_plan_for_callbacks(session_factory, days_specs=_specs3(), pages=_pages3())
+
+    cb = _Cb(f"plan:cancel:{plan_id}", user_id=999)
+    await bot_mod.handle_plan_callback(
+        cb, session_factory=session_factory, now_provider=_NOW, recipe_sources=[],
+    )
+    assert "not authorized" in cb.answer.await_args.args[0]
+    with session_factory() as db:
+        from sqlmodel import select
+
+        plan = db.exec(select(MealPlan)).one()
+        assert plan.status == "active"

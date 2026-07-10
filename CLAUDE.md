@@ -262,9 +262,11 @@ signals, and dislikes are soft-suppressed (clamped to a `0.05` floor, never
 combination. `blended_score` (`app/cook/logic.py`) folds this in as a fourth
 term at `health 0.3 / expiry 0.3 / deliciousness 0.2 / affinity 0.2`
 (`BLEND_WEIGHTS`). `steering_summary(signals)` renders a short deterministic
-"likes X, dislikes Y" string injected only into the LLM-tail prompt
-(`LlmRecipeSource`, `AgnoWeekComposer`) as `household_taste` — Spoonacular/
-TheMealDB searches are keyword-based and never see it. Recipe cards also
+"likes X, dislikes Y" string injected only into the LLM-tail recipe search
+(`LlmRecipeSource`, via `RecipeCriteria.steering`) as `household_taste` —
+Spoonacular/TheMealDB are keyword searches and never see it, and
+`AgnoWeekComposer`'s day-composition prompt doesn't consume it either (not
+yet wired). Recipe cards also
 carry `image_url` (from Spoonacular/TheMealDB, `None` for LLM-only results)
 surfaced as a `🔗 Open recipe` URL button (`CallbackButton.url`) — no schema
 migration needed since it's not persisted.

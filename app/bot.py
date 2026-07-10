@@ -97,6 +97,7 @@ from app.shelf_life_defaults import lookup_default
 from app.shelf_life_search import ShelfLifeSearchClient, resolve_search_days
 from app.storage_state import shelf_life_origin
 from app.callback_dispatch import answer as dispatch_answer, edit_or_resend
+from app.nl_intent import MAX_CONTEXT_NAMES
 from app.progress import clear_progress, finish_progress, start_progress
 from app.pantry_service import (
     ListFilter,
@@ -1013,6 +1014,75 @@ async def handle_add(
             search=search,
             progress=progress,
         )
+
+
+async def handle_nl_message(
+    msg,
+    *,
+    session_factory,
+    now_provider,
+    intent_agent,
+    text_llm,
+    search: ShelfLifeSearchClient | None = None,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+    translation_llm=None,
+) -> None:
+    text = (msg.text or "").strip()
+    if not text or text.startswith("/"):
+        return
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+        now_provider=now_provider,
+    ) as ctx:
+        if ctx is None:
+            return
+        session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
+        progress = await start_progress(msg, t("nl.thinking", user.lang))
+        try:
+            agent = intent_agent.for_provider(user.llm_provider)
+            pantry = list_active(
+                session,
+                household_id=user.household_id,
+                f=ListFilter.default(),
+                today=today,
+            )
+            intent = await agent.parse(
+                text,
+                today=today,
+                pantry_names=[i.normalized_name for i in pantry][:MAX_CONTEXT_NAMES],
+            )
+        except Exception as exc:  # noqa: BLE001 - NL must never break the bot
+            log.warning(
+                "nl_intent_failed",
+                extra={
+                    "user_id": user.telegram_id,
+                    "error_class": type(exc).__name__,
+                },
+            )
+            await finish_progress(progress, msg, t("nl.hint", user.lang))
+            return
+        await _dispatch_nl_intent(
+            msg,
+            session=session,
+            user=user,
+            today=today,
+            text=text,
+            intent=intent,
+            pantry=pantry,
+            text_llm=text_llm,
+            search=search,
+            translation_llm=translation_llm,
+            progress=progress,
+        )
+
+
+async def _dispatch_nl_intent(
+    msg, *, session, user, today, text, intent, pantry,
+    text_llm, search, translation_llm, progress,
+) -> None:
+    await finish_progress(progress, msg, t("nl.hint", user.lang))
 
 
 async def _terminal_cmd(
@@ -2967,6 +3037,7 @@ def build_dispatcher(
     translation_llm=None,
     alerter=None,
     recipe_sources=(),
+    intent_agent=None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -2990,6 +3061,7 @@ def build_dispatcher(
         "profile_llm": profile_llm,
         "search": search,
         "translation_llm": translation_llm,
+        "intent_agent": intent_agent,
         "bot": bot,
         "photo_downloader": downloader,
         "spawn": asyncio.create_task,
@@ -3031,6 +3103,21 @@ def build_dispatcher(
         ),
         F.photo,
     )
+
+    if intent_agent is not None:
+        dispatcher.message.register(
+            _bind(
+                handle_nl_message,
+                "session_factory",
+                "now_provider",
+                "intent_agent",
+                "text_llm",
+                "search",
+                "on_user_created",
+                "translation_llm",
+            ),
+            F.text & ~F.text.startswith("/") & ~F.reply_to_message,
+        )
 
     async def on_callback(callback):
         if (callback.data or "").startswith(

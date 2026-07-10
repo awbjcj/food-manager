@@ -413,6 +413,20 @@ def render_cook_result(
     return "\n\n".join(blocks)
 
 
+def build_nl_picker_keyboard(items, *, names=None) -> list[list[CallbackButton]]:
+    """One labeled row per candidate item; tapping opens its v4.8 card."""
+    resolved = names or {}
+    return [
+        [
+            CallbackButton(
+                text=f"#{item.id} {resolved.get(item.raw_name, item.raw_name)}",
+                callback_data=f"item:open:{item.id}",
+            )
+        ]
+        for item in items[:8]
+    ]
+
+
 def build_cook_alternatives_keyboard(cook_id: int, lang: str = "en") -> list[list[CallbackButton]]:
     return [[CallbackButton(text=t("btn.show_alternatives", lang), callback_data=f"cookalt:{cook_id}")]]
 

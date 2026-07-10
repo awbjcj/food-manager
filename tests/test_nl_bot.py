@@ -143,6 +143,30 @@ async def test_commands_and_empty_text_are_ignored(session_factory, monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_dispatch_failure_degrades_to_hint_not_a_crash(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    item_id = _seed_item(session_factory, "yogurt")
+
+    def failing_mark_eaten(*args, **kwargs):
+        raise RuntimeError("db exploded")
+
+    monkeypatch.setattr(bot_mod, "mark_eaten", failing_mark_eaten)
+    msg = _nl_msg("ate the yogurt")
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        intent_agent=FakeIntentAgentSelector(
+            intent=NLIntent(kind="mark", mark_action="ate", item_name="yogurt")
+        ),
+        text_llm=None,
+    )
+    assert "didn't catch that" in _final_text(msg)
+    with session_factory() as db:
+        assert db.get(PantryItem, item_id).status == "active"
+
+
+@pytest.mark.asyncio
 async def test_mark_unique_match_applies(session_factory, monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     item_id = _seed_item(session_factory, "yogurt")

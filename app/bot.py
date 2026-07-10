@@ -1066,19 +1066,30 @@ async def handle_nl_message(
             )
             await finish_progress(progress, msg, t("nl.hint", user.lang))
             return
-        await _dispatch_nl_intent(
-            msg,
-            session=session,
-            user=user,
-            today=today,
-            text=text,
-            intent=intent,
-            pantry=pantry,
-            text_llm=text_llm,
-            search=search,
-            translation_llm=translation_llm,
-            progress=progress,
-        )
+        try:
+            await _dispatch_nl_intent(
+                msg,
+                session=session,
+                user=user,
+                today=today,
+                text=text,
+                intent=intent,
+                pantry=pantry,
+                text_llm=text_llm,
+                search=search,
+                translation_llm=translation_llm,
+                progress=progress,
+            )
+        except Exception as exc:  # noqa: BLE001 - NL must never break the bot
+            log.warning(
+                "nl_dispatch_failed",
+                extra={
+                    "user_id": user.telegram_id,
+                    "intent_kind": intent.kind,
+                    "error_class": type(exc).__name__,
+                },
+            )
+            await finish_progress(progress, msg, t("nl.hint", user.lang))
 
 
 async def _apply_mark(session, *, user, item_id, action, today, search):

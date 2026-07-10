@@ -445,6 +445,31 @@ def test_cook_callback_rejects_unauthorized(monkeypatch):
     assert spawned == []
 
 
+def test_cook_alt_still_works_on_a_done_session_older_than_the_collect_ttl(monkeypatch):
+    # A "done" cook's expires_at is never extended past its original 10-minute
+    # collecting-round TTL, so "Show alternatives" must stay available on an
+    # old done session (only More/Adjust are gated by that timestamp).
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    engine = _engine_with_user()
+    cook_id = _seed_cook(
+        engine,
+        expires_at=_NOW("America/Detroit").replace(tzinfo=None) - timedelta(hours=2),
+    )
+    cb = _Cb(f"cookalt:{cook_id}")
+    spawn, spawned = _recording_spawn()
+
+    asyncio.run(handle_cook_callback(
+        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
+        spawn=spawn, bot=None, **_fakes(),
+    ))
+
+    cb.answer.assert_awaited_with("showing alternatives")
+    with Session(engine) as db:
+        cook = db.get(CookSession, cook_id)
+        assert cook is not None
+        assert cook.status == "done"
+
+
 def test_run_cook_and_render_completes_and_edits(monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()

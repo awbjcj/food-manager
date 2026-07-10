@@ -1796,7 +1796,7 @@ async def handle_cook_callback(
             await cb.answer("this cook session expired - start a new /cook")
             return
         now = utc_naive(now_provider(user.tz))
-        if cook.expires_at <= now:
+        if cook.status in ("collecting", "ready") and cook.expires_at <= now:
             cook.status = "expired"
             session.add(cook)
             session.commit()
@@ -1835,6 +1835,12 @@ async def handle_cook_callback(
         if action.verb == "cook_more":
             if cook.status != "done":
                 await cb.answer("cook is still in progress")
+                return
+            if cook.expires_at <= now:
+                cook.status = "expired"
+                session.add(cook)
+                session.commit()
+                await cb.answer("this cook session expired - start a new /cook")
                 return
             assert cook.id is not None
             claim = session.exec(
@@ -1912,6 +1918,12 @@ async def handle_cook_callback(
         if action.verb == "cook_adjust":
             if cook.status != "done":
                 await cb.answer("cook is still in progress")
+                return
+            if cook.expires_at <= now:
+                cook.status = "expired"
+                session.add(cook)
+                session.commit()
+                await cb.answer("this cook session expired - start a new /cook")
                 return
             assert cook.id is not None
             claim = session.exec(

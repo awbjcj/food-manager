@@ -140,3 +140,59 @@ async def test_commands_and_empty_text_are_ignored(session_factory, monkeypatch)
             text_llm=None,
         )
         msg.answer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mark_unique_match_applies(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    item_id = _seed_item(session_factory, "yogurt")
+    msg = _nl_msg("ate the yogurt")
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        intent_agent=FakeIntentAgentSelector(
+            intent=NLIntent(kind="mark", mark_action="ate", item_name="yogurt")
+        ),
+        text_llm=None,
+    )
+    assert "Ate" in _final_text(msg)
+    with session_factory() as db:
+        assert db.get(PantryItem, item_id).status == "eaten"
+
+
+@pytest.mark.asyncio
+async def test_mark_ambiguous_shows_picker(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    a = _seed_item(session_factory, "whole milk")
+    b = _seed_item(session_factory, "oat milk")
+    msg = _nl_msg("finished the milk")
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        intent_agent=FakeIntentAgentSelector(
+            intent=NLIntent(kind="mark", mark_action="ate", item_name="milk")
+        ),
+        text_llm=None,
+    )
+    assert "Which one?" in _final_text(msg)
+    with session_factory() as db:  # nothing applied
+        assert db.get(PantryItem, a).status == "active"
+        assert db.get(PantryItem, b).status == "active"
+
+
+@pytest.mark.asyncio
+async def test_mark_no_match_replies_not_found(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    msg = _nl_msg("ate the caviar")
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        intent_agent=FakeIntentAgentSelector(
+            intent=NLIntent(kind="mark", mark_action="ate", item_name="caviar")
+        ),
+        text_llm=None,
+    )
+    assert "couldn't find" in _final_text(msg).lower()

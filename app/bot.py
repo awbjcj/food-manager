@@ -97,7 +97,7 @@ from app.shelf_life_defaults import lookup_default
 from app.shelf_life_search import ShelfLifeSearchClient, resolve_search_days
 from app.storage_state import shelf_life_origin
 from app.callback_dispatch import answer as dispatch_answer, edit_or_resend
-from app.nl_intent import MAX_CONTEXT_NAMES
+from app.nl_intent import MAX_CONTEXT_NAMES, match_items
 from app.progress import clear_progress, finish_progress, start_progress
 from app.pantry_service import (
     ListFilter,
@@ -106,6 +106,7 @@ from app.pantry_service import (
     compute_nudge_days,
     compute_stats,
     correct_item,
+    freeze_item,
     move_to_storage,
     list_active,
     list_digest_due,
@@ -135,6 +136,7 @@ from app.renderer import (
     build_digest_keyboard,
     build_favorites_keyboard,
     build_item_card_keyboard,
+    build_nl_picker_keyboard,
     build_remove_confirm_keyboard,
     build_shopping_keyboard,
     build_undo_add_keyboard,
@@ -1078,10 +1080,65 @@ async def handle_nl_message(
         )
 
 
+async def _apply_mark(session, *, user, item_id, action, today, search):
+    if action == "ate":
+        return mark_eaten(
+            session, household_id=user.household_id, item_id=item_id, today=today
+        )
+    if action == "tossed":
+        return mark_tossed(
+            session, household_id=user.household_id, item_id=item_id, today=today
+        )
+    if action == "snooze":
+        return snooze_item(
+            session, household_id=user.household_id, item_id=item_id, today=today
+        )
+    return await freeze_item(
+        session,
+        household_id=user.household_id,
+        item_id=item_id,
+        today=today,
+        search=_select_search(search, user.llm_provider),
+    )
+
+
 async def _dispatch_nl_intent(
     msg, *, session, user, today, text, intent, pantry,
     text_llm, search, translation_llm, progress,
 ) -> None:
+    if intent.kind == "mark" and intent.mark_action and intent.item_name:
+        matches = match_items(intent.item_name, pantry)
+        if not matches:
+            await finish_progress(
+                progress, msg, t("nl.not_found", user.lang, name=intent.item_name)
+            )
+            return
+        if len(matches) > 1:
+            names = await _translate_for_render(
+                session,
+                lang=user.lang,
+                texts=[i.raw_name for i in matches],
+                translation_llm=translation_llm,
+            )
+            keyboard = to_aiogram_keyboard(
+                build_nl_picker_keyboard(matches, names=names)
+            )
+            await finish_progress(progress, msg, t("nl.which_one", user.lang), keyboard)
+            return
+        item = matches[0]
+        assert item.id is not None
+        result = await _apply_mark(
+            session,
+            user=user,
+            item_id=item.id,
+            action=intent.mark_action,
+            today=today,
+            search=search,
+        )
+        key = f"nl.done.{intent.mark_action}" if result.applied else "nl.already_done"
+        await finish_progress(progress, msg, t(key, user.lang, name=item.raw_name))
+        return
+
     await finish_progress(progress, msg, t("nl.hint", user.lang))
 
 

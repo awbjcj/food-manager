@@ -400,3 +400,18 @@ def test_render_list_and_stats():
         )
     )
     assert "-" in empty_stats
+
+
+def test_nl_picker_keyboard_opens_item_cards():
+    from app.renderer import build_nl_picker_keyboard
+
+    items = [
+        SimpleNamespace(id=3, raw_name="Whole Milk"),
+        SimpleNamespace(id=9, raw_name="Oat Milk"),
+    ]
+    rows = build_nl_picker_keyboard(items)
+    assert [b.callback_data for row in rows for b in row] == [
+        "item:open:3",
+        "item:open:9",
+    ]
+    assert rows[0][0].text == "#3 Whole Milk"

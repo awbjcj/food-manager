@@ -21,10 +21,13 @@ def test_affinity_empty_signals_is_neutral_half():
 def test_liked_similar_beats_neutral_beats_disliked_similar():
     liked = [_sig("liked")]
     disliked = [_sig("disliked")]
-    similar = dict(cuisine="thai", ingredient_names=["tofu", "lime"])
-    unrelated = dict(cuisine="german", ingredient_names=["pork", "cabbage"])
-    assert affinity(**similar, signals=liked) > affinity(**unrelated, signals=liked)
-    assert affinity(**unrelated, signals=liked) > affinity(**similar, signals=disliked)
+    similar = affinity(cuisine="thai", ingredient_names=["tofu", "lime"], signals=liked)
+    unrelated = affinity(cuisine="german", ingredient_names=["pork", "cabbage"], signals=liked)
+    disliked_similar = affinity(
+        cuisine="thai", ingredient_names=["tofu", "lime"], signals=disliked
+    )
+    assert similar > unrelated
+    assert unrelated > disliked_similar
 
 
 def test_dislike_is_soft_never_zero():
@@ -35,12 +38,12 @@ def test_dislike_is_soft_never_zero():
 
 
 def test_affinity_is_deterministic():
-    kwargs = dict(
-        cuisine="thai",
-        ingredient_names=["tofu", "basil"],
-        signals=[_sig("liked"), _sig("disliked", cuisine="french", ingredients=("cream",))],
-    )
-    assert affinity(**kwargs) == affinity(**kwargs)
+    cuisine = "thai"
+    ingredient_names = ["tofu", "basil"]
+    signals = [_sig("liked"), _sig("disliked", cuisine="french", ingredients=("cream",))]
+    assert affinity(
+        cuisine=cuisine, ingredient_names=ingredient_names, signals=signals
+    ) == affinity(cuisine=cuisine, ingredient_names=ingredient_names, signals=signals)
 
 
 def _scored(title="Pasta", cuisine="italian", ingredients=("pasta", "tomato")):

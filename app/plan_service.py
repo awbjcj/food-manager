@@ -263,12 +263,13 @@ async def swap_day(
     siblings = session.exec(
         select(MealPlanEntry).where(MealPlanEntry.plan_id == plan.id)
     ).all()
-    taken_ids = {
-        ScoredCandidate.model_validate_json(e.recipe_json).external_id
-        for e in siblings
-        if e.id != entry.id
-    }
-    taken_ids.discard(None)
+    taken_ids: set[str] = set()
+    for e in siblings:
+        if e.id == entry.id:
+            continue
+        ext_id = ScoredCandidate.model_validate_json(e.recipe_json).external_id
+        if ext_id is not None:
+            taken_ids.add(ext_id)
     current = ScoredCandidate.model_validate_json(entry.recipe_json)
     if current.external_id:
         taken_ids.add(current.external_id)

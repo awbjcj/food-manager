@@ -1863,32 +1863,41 @@ async def handle_cook_callback(
             if cook is None:
                 return
             try:
-                household = session.get(Household, user.household_id)
-                if household is None:
-                    cards = []
-                else:
-                    profile = profile_from_household(household)
-                    today = now_provider(user.tz).date()
-                    selected_recipe_llm = _select_cook(recipe_llm, user.llm_provider)
-                    selected_nutrition_llm = _select_cook(
-                        nutrition_llm, user.llm_provider
+                try:
+                    household = session.get(Household, user.household_id)
+                    if household is None:
+                        cards = []
+                    else:
+                        profile = profile_from_household(household)
+                        today = now_provider(user.tz).date()
+                        selected_recipe_llm = _select_cook(recipe_llm, user.llm_provider)
+                        selected_nutrition_llm = _select_cook(
+                            nutrition_llm, user.llm_provider
+                        )
+                        source = ChainedRecipeSource(
+                            [
+                                *recipe_sources,
+                                LlmRecipeSource(
+                                    recipe_llm=selected_recipe_llm,
+                                    nutrition_llm=selected_nutrition_llm,
+                                ),
+                            ]
+                        )
+                        cards = await run_cook_more(
+                            session,
+                            cook=cook,
+                            profile=profile,
+                            source=source,
+                            today=today,
+                        )
+                except Exception as exc:
+                    log.warning(
+                        "cook_more_failed", extra={"error_class": type(exc).__name__}
                     )
-                    source = ChainedRecipeSource(
-                        [
-                            *recipe_sources,
-                            LlmRecipeSource(
-                                recipe_llm=selected_recipe_llm,
-                                nutrition_llm=selected_nutrition_llm,
-                            ),
-                        ]
+                    await _safe_edit_cb(
+                        cb, "Couldn't fetch more recipes right now - try again."
                     )
-                    cards = await run_cook_more(
-                        session,
-                        cook=cook,
-                        profile=profile,
-                        source=source,
-                        today=today,
-                    )
+                    return
                 if not cards:
                     await _safe_edit_cb(cb, t("cook.no_more", user.lang))
                 else:

@@ -387,6 +387,31 @@ def test_expired_done_session_blocks_more_without_searching(monkeypatch):
     assert "expired" in str(cb.answer.await_args).lower()
 
 
+def test_more_tap_shows_error_and_restores_done_when_search_raises(monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+
+    async def failing_run_cook_more(*args, **kwargs):
+        raise RuntimeError("source exploded")
+
+    monkeypatch.setattr(bot_mod, "run_cook_more", failing_run_cook_more, raising=False)
+    engine = _engine_with_user()
+    cook_id = _seed_cook(engine)
+    cb = _Cb(f"cookmore2:{cook_id}")
+    spawn, spawned = _recording_spawn()
+
+    asyncio.run(handle_cook_callback(
+        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
+        spawn=spawn, bot=None, **_fakes(),
+    ))
+
+    assert spawned == []
+    cb.message.edit_text.assert_awaited()
+    with Session(engine) as db:
+        cook = db.get(CookSession, cook_id)
+        assert cook is not None
+        assert cook.status == "done"
+
+
 def test_double_more_tap_claims_done_session_for_only_one_search(monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()

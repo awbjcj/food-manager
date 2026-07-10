@@ -153,6 +153,7 @@ def map_spoonacular(payload: dict) -> list[SourcedRecipe]:
             title=raw.get("title", "Untitled"),
             cuisine=cuisines[0] if cuisines else "various",
             source_url=raw.get("sourceUrl"),
+            image_url=raw.get("image"),
             ingredients=ingredients or [RecipeIngredient(name="(see source)")],
             method_gist=method,
             deliciousness=max(
@@ -290,6 +291,7 @@ class TheMealDbSource:
             title=meal.get("strMeal", "Untitled"),
             cuisine=meal.get("strArea") or "various",
             source_url=meal.get("strSource") or meal.get("strYoutube"),
+            image_url=meal.get("strMealThumb"),
             ingredients=_mealdb_ingredients(meal)
             or [RecipeIngredient(name="(see source)")],
             method_gist=(meal.get("strInstructions") or "").strip()[:500]

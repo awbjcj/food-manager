@@ -27,6 +27,7 @@ class RecipeCandidate(BaseModel):
     ingredients: list[RecipeIngredient]
     method_gist: str
     deliciousness: float = Field(ge=0.0, le=1.0, default=0.5)
+    image_url: Optional[str] = None
 
 
 class RecipeCandidates(BaseModel):

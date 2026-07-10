@@ -31,6 +31,7 @@ _CANNED = {
             "id": 111,
             "title": "Spinach Omelette",
             "sourceUrl": "https://ex.com/omelette",
+            "image": "https://img.spoonacular.com/x.jpg",
             "cuisines": ["French"],
             "readyInMinutes": 15,
             "spoonacularScore": 82.0,
@@ -60,6 +61,7 @@ _MEALDB_LOOKUP = {
             "strMeal": "Teriyaki Chicken",
             "strArea": "Japanese",
             "strSource": "https://ex.com/teriyaki",
+            "strMealThumb": "https://mealdb.test/thumb.jpg",
             "strInstructions": "Marinate. Grill.",
             "strIngredient1": "chicken",
             "strMeasure1": "2",
@@ -168,6 +170,14 @@ def test_map_spoonacular():
     assert sourced.nutrition.est_minutes == 15
     assert sourced.nutrition.effort == "easy"
     assert "220" in sourced.nutrition.rationale
+    assert sourced.recipe.image_url == "https://img.spoonacular.com/x.jpg"
+
+
+def test_map_spoonacular_missing_image_is_none():
+    payload = {"results": [{**_CANNED["results"][0]}]}
+    del payload["results"][0]["image"]
+    out = map_spoonacular(payload)
+    assert out[0].recipe.image_url is None
 
 
 class _FakeResp:
@@ -345,6 +355,7 @@ async def test_themealdb_source_maps_recipe_without_nutrition():
     assert "chicken" in [ingredient.name for ingredient in recipes[0].recipe.ingredients]
     assert recipes[0].nutrition.rationale == "nutrition unavailable"
     assert cost is None
+    assert recipes[0].recipe.image_url == "https://mealdb.test/thumb.jpg"
 
 
 @pytest.mark.asyncio

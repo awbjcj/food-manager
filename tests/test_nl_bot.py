@@ -196,3 +196,71 @@ async def test_mark_no_match_replies_not_found(session_factory, monkeypatch):
         text_llm=None,
     )
     assert "couldn't find" in _final_text(msg).lower()
+
+
+@pytest.mark.asyncio
+async def test_add_routes_raw_text_to_add_flow(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    captured = {}
+
+    async def fake_add_flow(msg, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(bot_mod, "_run_add_flow", fake_add_flow)
+    msg = _nl_msg("bought milk and two avocados")
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="add")),
+        text_llm="TEXT_LLM",
+    )
+    assert captured["raw_text"] == "bought milk and two avocados"
+    assert captured["text_llm"] == "TEXT_LLM"
+
+
+@pytest.mark.asyncio
+async def test_shelf_life_question_answers(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    msg = _nl_msg("how long does whole milk keep?")
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        intent_agent=FakeIntentAgentSelector(
+            intent=NLIntent(kind="shelf_life_question", food="whole milk")
+        ),
+        text_llm=None,
+    )
+    assert "7" in _final_text(msg)
+
+
+@pytest.mark.asyncio
+async def test_pantry_query_renders_digest_view(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    _seed_item(session_factory, "spinach")  # seeded due within the 7-day window
+    msg = _nl_msg("what's expiring?")
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="pantry_query")),
+        text_llm=None,
+    )
+    assert "spinach" in _final_text(msg)
+
+
+@pytest.mark.asyncio
+async def test_pantry_query_empty_replies_clear(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    msg = _nl_msg("what's in my pantry?")
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="pantry_query")),
+        text_llm=None,
+    )
+    from app.i18n import t
+
+    assert _final_text(msg) == t("digest.pantry_clear", "en")

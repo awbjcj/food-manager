@@ -1139,6 +1139,53 @@ async def _dispatch_nl_intent(
         await finish_progress(progress, msg, t(key, user.lang, name=item.raw_name))
         return
 
+    if intent.kind == "add":
+        await clear_progress(progress)
+        await _run_add_flow(
+            msg,
+            session=session,
+            user=user,
+            today=today,
+            raw_text=text,
+            text_llm=text_llm,
+            search=search,
+            progress=None,
+        )
+        return
+    if intent.kind == "shelf_life_question" and intent.food:
+        answer = await _answer_shelf_life(
+            session,
+            household_id=user.household_id,
+            food=intent.food,
+            lang=user.lang,
+            search=_select_search(search, user.llm_provider),
+        )
+        await finish_progress(progress, msg, answer)
+        return
+    if intent.kind == "pantry_query":
+        rows = list_digest_due(session, household_id=user.household_id, today=today)
+        if not rows:
+            await finish_progress(progress, msg, t("digest.pantry_clear", user.lang))
+            return
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=[i.raw_name for i in rows],
+            translation_llm=translation_llm,
+        )
+        rendered = render_digest(rows, today=today, lang=user.lang, names=names)
+        keyboard = to_aiogram_keyboard(
+            build_digest_keyboard(
+                rendered.rendered_items,
+                has_more=rendered.has_more,
+                today=today,
+                lang=user.lang,
+                names=names,
+            )
+        )
+        await finish_progress(progress, msg, rendered.text, keyboard)
+        return
+
     await finish_progress(progress, msg, t("nl.hint", user.lang))
 
 

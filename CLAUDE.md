@@ -73,6 +73,7 @@ Single-user Telegram bot: user sends grocery receipt photos → Claude parses th
 | `app/progress.py` | Progress-ack seam for slow commands: `start_progress` / `finish_progress` (edit ack into result) / `clear_progress` |
 | `app/alerts.py` | `OwnerAlerter`: rate-limited operational alert DMs to the bootstrap owner |
 | `app/resilience.py` | `run_with_restart`: exponential-backoff restart loop around polling |
+| `app/nl_intent.py` | Agno intent seam (v5.1): `NLIntent` schema, per-provider `AgnoIntentAgent`s built at bootstrap, `IntentAgentSelector` (no fallback), `match_items` |
 | `app/cook/*` | Recipe engine: `models.py` (Purpose/Effort/`RecipeCriteria`/`ScoredCandidate`), `recipe_source.py` (Spoonacular/TheMealDB real-source building blocks, v4.9, not yet wired in), `llm.py` (selection/recipe/nutrition clients), `logic.py` (scoring, shopping-list diff), `service.py` (live LLM-only pipeline), `session_service.py` (`CookSession` cost/state), `favorites_service.py` (`SavedRecipe`), `feedback.py` (liked/disliked signal) |
 | `bin/run.py` | Entry point: loads settings, runs migrations, starts scheduler + polling |
 
@@ -214,6 +215,18 @@ included) so `catch_up_missed_digests` at startup sends a missed digest late
 instead of never. Polling is wrapped in `run_with_restart` (backoff, reset
 after stable runs); `docs/operations.md` documents outer supervision. All
 provider calls log `*_timing` (duration_ms, attempts) via `with_transport_retry`.
+
+### Natural-language input & onboarding (v5.1)
+
+Plain text (non-command, non-reply) routes to `handle_nl_message`: an Agno
+agent (`app/nl_intent.py`, classify-only, stateless, per-provider like the
+text seams) maps the message to a typed `NLIntent`, and the handler dispatches
+to existing services — add → the `/add` pending flow via `_run_add_flow`,
+unambiguous marks apply directly, ambiguous marks show an `item:open` picker,
+shelf-life questions answer from cache → defaults → web search, pantry queries
+reuse the digest render. Agent failure degrades to a help hint; with no
+provider configured the catch-all is not registered. `/help` is tiered
+(overview + `help:<topic>` drill-down) and `/start` sends a welcome tour.
 
 ### Database
 

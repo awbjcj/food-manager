@@ -74,6 +74,8 @@ Single-user Telegram bot: user sends grocery receipt photos → Claude parses th
 | `app/alerts.py` | `OwnerAlerter`: rate-limited operational alert DMs to the bootstrap owner |
 | `app/resilience.py` | `run_with_restart`: exponential-backoff restart loop around polling |
 | `app/nl_intent.py` | Agno intent seam (v5.1): `NLIntent` schema, per-provider `AgnoIntentAgent`s built at bootstrap, `IntentAgentSelector` (no fallback), `match_items` |
+| `app/week_composer.py` | Agno meal-plan seam (v5.2): `DaySpec`/`WeekPlanSpec`, per-provider `AgnoWeekComposer`s built at bootstrap, `WeekComposerSelector` (no fallback), pure `heuristic_compose` fallback |
+| `app/plan_service.py` | Meal-plan orchestrator (v5.2): `build_plan` (sequential pantry allocation + composer/heuristic), `swap_day`, `aggregate_shopping`, `cancel_active_plans` |
 | `app/cook/*` | Recipe engine: `models.py` (Purpose/Effort/`RecipeCriteria`/`ScoredCandidate`), `recipe_source.py` (Spoonacular/TheMealDB real-source building blocks, v4.9, not yet wired in), `llm.py` (selection/recipe/nutrition clients), `logic.py` (scoring, shopping-list diff), `service.py` (live LLM-only pipeline), `session_service.py` (`CookSession` cost/state), `favorites_service.py` (`SavedRecipe`), `feedback.py` (liked/disliked signal) |
 | `bin/run.py` | Entry point: loads settings, runs migrations, starts scheduler + polling |
 
@@ -227,6 +229,24 @@ shelf-life questions answer from cache → defaults → web search, pantry queri
 reuse the digest render. Agent failure degrades to a help hint; with no
 provider configured the catch-all is not registered. `/help` is tiered
 (overview + `help:<topic>` drill-down) and `/start` sends a welcome tour.
+
+### Meal planning (v5.2)
+
+`/plan [3-7]` (default 5) builds a `MealPlan` + one `MealPlanEntry` per day via
+`app/plan_service.py::build_plan`: gather active pantry → `WeekComposer`
+(`app/week_composer.py`, Agno, degrades to pure `heuristic_compose` on any
+failure) proposes per-day cuisine/purpose/feature-items → sequential
+allocation searches the v4.9 `RecipeSource` chain one day at a time against a
+pantry pool that shrinks as earlier days consume ingredients, so expiring
+items get cooked first and the aggregated shopping list is correct by
+construction. A new `/plan` cancels any existing active plan for the
+household (superseded note in the reply). Callbacks are stateless
+(`plan:swap:<id>:<day>`, `plan:shop:<id>`, `plan:cancel:<id>`): swap re-searches
+one day (paginated, deduped against sibling recipes) and re-renders the whole
+plan in place; shop aggregates+dedupes every day's ingredient gap through
+`add_missing` (idempotent on repeat taps); cancel is terminal. Cost is capped
+by `PLAN_COST_CEILING_MICROS` (mirrors `COOK_COST_CEILING_MICROS`), enforced
+before every search via a shared remaining-budget calculation.
 
 ### Database
 

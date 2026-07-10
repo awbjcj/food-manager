@@ -34,7 +34,9 @@ from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
 from app.cook.recipe_source import SpoonacularSource, TheMealDbSource
 from app.nl_intent import IntentAgentSelector, build_intent_agent
+import app.plan_service as plan_service_mod
 from app.resilience import run_with_restart
+from app.week_composer import WeekComposerSelector, build_week_composer
 from app.cook.llm import (
     AnthropicNutritionLLM,
     AnthropicRecipeLLM,
@@ -160,6 +162,38 @@ def _build_intent_agents(settings: Settings) -> IntentAgentSelector | None:
     if not agents:
         return None
     return IntentAgentSelector(agents, settings.llm_provider)
+
+
+def _build_week_composers(settings: Settings) -> WeekComposerSelector | None:
+    composers: dict = {}
+    if settings.anthropic_api_key:
+        composers["anthropic"] = build_week_composer(
+            "anthropic",
+            model_id=settings.anthropic_text_model,
+            api_key=settings.anthropic_api_key,
+        )
+    if settings.openai_api_key:
+        composers["openai"] = build_week_composer(
+            "openai",
+            model_id=settings.openai_text_model,
+            api_key=settings.openai_api_key,
+        )
+    if settings.gemini_api_key:
+        composers["gemini"] = build_week_composer(
+            "gemini",
+            model_id=settings.gemini_text_model,
+            api_key=settings.gemini_api_key,
+        )
+    if settings.deepseek_api_key:
+        composers["deepseek"] = build_week_composer(
+            "deepseek",
+            model_id=settings.deepseek_model,
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+        )
+    if not composers:
+        return None
+    return WeekComposerSelector(composers, settings.llm_provider)
 
 
 def _build_llm_clients(settings: Settings) -> LLMBundle:
@@ -352,6 +386,7 @@ async def _amain(settings: Settings) -> None:
     ]
     bundle = _build_llm_clients(settings)
     intent_agent = _build_intent_agents(settings)
+    composer = _build_week_composers(settings)
     # Per-provider model names so the log reflects the configured provider
     # (deepseek is text-only, hence "n/a" for image).
     _image_models = {
@@ -377,6 +412,7 @@ async def _amain(settings: Settings) -> None:
     bot_mod.DEFAULT_LLM_PROVIDER = settings.llm_provider
     bot_mod.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
     cook_service_mod.COOK_COST_CEILING_MICROS = settings.cook_cost_ceiling_micros
+    plan_service_mod.PLAN_COST_CEILING_MICROS = settings.plan_cost_ceiling_micros
 
     scheduler = AsyncIOScheduler()
 
@@ -425,6 +461,7 @@ async def _amain(settings: Settings) -> None:
         alerter=alerter,
         recipe_sources=recipe_sources,
         intent_agent=intent_agent,
+        composer=composer,
     )
 
     scheduler.start()

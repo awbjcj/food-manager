@@ -220,12 +220,13 @@ class _MealDbPageHttp:
     def __init__(self):
         self.calls = []
 
-    async def get(self, url, params=None, timeout=None):
+    async def get(self, url, params: dict | None = None, timeout=None):
         self.calls.append((url, params))
         if "filter.php" in url:
             return _FakeResp(
                 {"meals": [{"idMeal": "1"}, {"idMeal": "2"}, {"idMeal": "3"}]}
             )
+        assert params is not None
         meal_id = params["i"]
         return _FakeResp(
             {

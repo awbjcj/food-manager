@@ -1,5 +1,6 @@
 import json
 from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
@@ -23,6 +24,7 @@ def session_factory():
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(
             User(
                 telegram_id=1,
@@ -47,6 +49,7 @@ def test_meal_plan_models_roundtrip(session_factory):
         db.commit()
         db.refresh(plan)
         assert plan.status == "draft" and plan.cost_micros_usd == 0
+        assert plan.id is not None
         entry = MealPlanEntry(
             plan_id=plan.id, day_index=0, date=date(2026, 7, 9),
             recipe_json="{}", spec_json="{}",
@@ -69,7 +72,7 @@ def test_plan_cost_ceiling_setting(monkeypatch):
 
 
 def _profile(**kw):
-    base = dict(
+    base: dict[str, Any] = dict(
         diet="none", exclusions=[], preferred_cuisines=[],
         max_cook_minutes=None, household_size=2, note="",
     )

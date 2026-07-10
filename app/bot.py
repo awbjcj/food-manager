@@ -2395,6 +2395,7 @@ async def handle_cook_callback(
             )
             if cook is None:
                 return
+            assert cook.id is not None
             try:
                 try:
                     household = session.get(Household, user.household_id)

@@ -1,5 +1,6 @@
 from datetime import date
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,7 +15,7 @@ from app.week_composer import (
 
 
 def _profile(**kw):
-    base = dict(
+    base: dict[str, Any] = dict(
         diet="none", exclusions=[], preferred_cuisines=[],
         max_cook_minutes=None, household_size=2, note="",
     )

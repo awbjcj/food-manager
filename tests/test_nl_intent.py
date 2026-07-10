@@ -80,6 +80,7 @@ def session_factory():
         db.add(household)
         db.commit()
         db.refresh(household)
+        assert household.id is not None
         db.add(
             User(
                 telegram_id=1,

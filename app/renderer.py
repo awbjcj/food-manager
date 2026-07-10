@@ -138,7 +138,8 @@ def render_ingest_reply(
 @dataclass
 class CallbackButton:
     text: str
-    callback_data: str
+    callback_data: str | None = None
+    url: str | None = None
 
 
 @dataclass
@@ -482,7 +483,7 @@ PURPOSE_OPTIONS = [
 
 
 def build_cook_result_keyboard(
-    cook_id: int, *, has_alternatives: bool, lang: str = "en"
+    cook_id: int, *, has_alternatives: bool, lang: str = "en", source_url: str | None = None
 ) -> list[list[CallbackButton]]:
     rows = [
         [
@@ -498,6 +499,8 @@ def build_cook_result_keyboard(
             CallbackButton(text=t("btn.adjust", lang), callback_data=f"cookadj:{cook_id}"),
         ],
     ]
+    if source_url:
+        rows.append([CallbackButton(text=t("btn.open_recipe", lang), url=source_url)])
     if has_alternatives:
         rows.append(
             [CallbackButton(text=t("btn.show_alternatives", lang), callback_data=f"cookalt:{cook_id}")]

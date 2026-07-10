@@ -2355,7 +2355,10 @@ async def handle_cook_callback(
                 ),
                 to_aiogram_keyboard(
                     build_cook_result_keyboard(
-                        cook.id, has_alternatives=False, lang=user.lang
+                        cook.id,
+                        has_alternatives=False,
+                        lang=user.lang,
+                        source_url=cards[0].recipe.source_url if cards else None,
                     )
                 ),
             )
@@ -2444,7 +2447,10 @@ async def handle_cook_callback(
                         ),
                         to_aiogram_keyboard(
                             build_cook_result_keyboard(
-                                cook.id, has_alternatives=len(cards) > 1, lang=user.lang
+                                cook.id,
+                                has_alternatives=len(cards) > 1,
+                                lang=user.lang,
+                                source_url=cards[0].recipe.source_url if cards else None,
                             )
                         ),
                     )
@@ -2743,7 +2749,10 @@ async def run_cook_and_render(
         keyboard = (
             to_aiogram_keyboard(
                 build_cook_result_keyboard(
-                    cook_id, has_alternatives=len(cards) > 1, lang=user.lang
+                    cook_id,
+                    has_alternatives=len(cards) > 1,
+                    lang=user.lang,
+                    source_url=cards[0].recipe.source_url,
                 )
             )
             if cards
@@ -3384,7 +3393,9 @@ def to_aiogram_keyboard(rows: list[list[CallbackButton]]) -> InlineKeyboardMarku
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(
+                InlineKeyboardButton(text=button.text, url=button.url)
+                if button.url
+                else InlineKeyboardButton(
                     text=button.text, callback_data=button.callback_data
                 )
                 for button in row

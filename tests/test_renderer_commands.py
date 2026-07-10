@@ -460,6 +460,17 @@ def test_build_plan_keyboard_emits_swap_shop_cancel():
     assert datas == ["plan:swap:5:0", "plan:swap:5:1", "plan:shop:5", "plan:cancel:5"]
 
 
+def test_to_aiogram_keyboard_maps_url_button():
+    from app.bot import to_aiogram_keyboard
+    from app.renderer import CallbackButton
+
+    rows = [[CallbackButton(text="x", url="https://e.com")]]
+    keyboard = to_aiogram_keyboard(rows)
+    button = keyboard.inline_keyboard[0][0]
+    assert button.url == "https://e.com"
+    assert button.callback_data is None
+
+
 def test_nl_picker_keyboard_opens_item_cards():
     from app.renderer import build_nl_picker_keyboard
 

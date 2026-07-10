@@ -277,6 +277,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     "btn.plan.swap": {"en": "🔄 {weekday}", "zh": "🔄 {weekday}", "fr": "🔄 {weekday}", "es": "🔄 {weekday}"},
     "btn.plan.shop": {"en": "➕ Shopping list", "zh": "➕ 购物清单", "fr": "➕ Liste de courses", "es": "➕ Lista de compras"},
     "btn.plan.cancel": {"en": "❌ Cancel plan", "zh": "❌ 取消计划", "fr": "❌ Annuler le plan", "es": "❌ Cancelar plan"},
+    "btn.open_recipe": {"en": "🔗 Open recipe", "zh": "🔗 查看菜谱", "fr": "🔗 Ouvrir la recette", "es": "🔗 Abrir receta"},
     "cook.round.purpose": {"en": "What's the goal?", "zh": "目标是什么？", "fr": "Quel est le but ?", "es": "¿Cuál es el objetivo?"},
     "purpose.use_it_up": {"en": "Use it up", "zh": "用完食材", "fr": "Tout utiliser", "es": "Aprovechar"},
     "purpose.quick": {"en": "Quick (≤30m)", "zh": "快手 (≤30分)", "fr": "Rapide (≤30min)", "es": "Rápido (≤30m)"},

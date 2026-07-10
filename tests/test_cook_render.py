@@ -124,6 +124,20 @@ def test_cook_result_keyboard_offers_more_and_adjust_before_alternatives():
     )
 
 
+def test_cook_result_keyboard_appends_open_recipe_url_button_when_source_url_set():
+    rows = build_cook_result_keyboard(5, has_alternatives=False, lang="en", source_url="https://example.com/r/1")
+    url_buttons = [b for row in rows for b in row if b.url is not None]
+    assert len(url_buttons) == 1
+    assert url_buttons[0].url == "https://example.com/r/1"
+    assert url_buttons[0].callback_data is None
+
+
+def test_cook_result_keyboard_no_url_button_without_source_url():
+    rows = build_cook_result_keyboard(5, has_alternatives=False, lang="en")
+    url_buttons = [b for row in rows for b in row if b.url is not None]
+    assert url_buttons == []
+
+
 def test_purpose_round_exposes_every_recipe_purpose_in_stable_order():
     from app.renderer import PURPOSE_OPTIONS
 

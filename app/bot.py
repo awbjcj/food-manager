@@ -91,7 +91,10 @@ from app.invite_service import (
 )
 from app.models import CookSession, Household, PantryItem, User
 from app.refine_service import run_receipt_refine
-from app.shelf_life_search import ShelfLifeSearchClient
+from app.cache import get_cached
+from app.normalization import normalize
+from app.shelf_life_defaults import lookup_default
+from app.shelf_life_search import ShelfLifeSearchClient, resolve_search_days
 from app.storage_state import shelf_life_origin
 from app.callback_dispatch import answer as dispatch_answer, edit_or_resend
 from app.progress import clear_progress, finish_progress, start_progress
@@ -1715,6 +1718,31 @@ def _cuisine_options(household: Household) -> list[str]:
     elif "Surprise me" not in options:
         options = options[:4] + ["Surprise me"]
     return options[:5]
+
+
+async def _answer_shelf_life(
+    session, *, household_id: int, food: str, lang: str, search=None
+) -> str:
+    """Answer "how long does X keep?" — cache, defaults table, then web search."""
+    needle = normalize(food)
+    cached = get_cached(session, household_id, needle)
+    if cached is not None:
+        return t("nl.shelf_life", lang, name=food, days=cached.days)
+    default = lookup_default(needle)
+    if default is not None:
+        return t("nl.shelf_life", lang, name=food, days=default.days)
+    if search is not None:
+        try:
+            result = await search.lookup_shelf_life(name=needle, category=None)
+            days = resolve_search_days(result)
+            if days is not None:
+                return t("nl.shelf_life", lang, name=food, days=days)
+        except Exception as exc:  # noqa: BLE001 - degrade to honest unknown
+            log.info(
+                "nl_shelf_life_search_failed",
+                extra={"error_class": type(exc).__name__},
+            )
+    return t("nl.shelf_life_unknown", lang, name=food)
 
 
 def _cuisine_round_keyboard(

@@ -1,9 +1,11 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlmodel import Session, SQLModel, create_engine
 
+from app.models import Household, ShelfLifeCache, User
 from app.nl_intent import AgnoIntentAgent, NLIntent, match_items
 
 
@@ -63,3 +65,71 @@ async def test_agent_parse_rejects_unstructured_content():
         await AgnoIntentAgent(inner).parse(
             "hello", today=date(2026, 7, 9), pantry_names=[]
         )
+
+
+@pytest.fixture
+def session_factory():
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+
+    def make():
+        return Session(engine)
+
+    with make() as db:
+        household = Household(created_at=datetime.now(timezone.utc))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        db.add(
+            User(
+                telegram_id=1,
+                chat_id=1,
+                household_id=household.id,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        db.commit()
+    return make
+
+
+@pytest.mark.asyncio
+async def test_shelf_life_cache_hit_short_circuits(session_factory):
+    from app.bot import _answer_shelf_life
+
+    with session_factory() as session:
+        session.add(
+            ShelfLifeCache(
+                household_id=1,
+                normalized_name="salmon",
+                days=3,
+                confidence=0.9,
+                learned_at=datetime.now(timezone.utc),
+            )
+        )
+        session.commit()
+        answer = await _answer_shelf_life(
+            session, household_id=1, food="salmon", lang="en"
+        )
+    assert "3" in answer and "salmon" in answer
+
+
+@pytest.mark.asyncio
+async def test_shelf_life_falls_back_to_defaults_table(session_factory):
+    from app.bot import _answer_shelf_life
+
+    with session_factory() as session:
+        answer = await _answer_shelf_life(
+            session, household_id=1, food="whole milk", lang="en"
+        )
+    assert "7" in answer  # shelf_life_defaults: "whole milk" -> 7d
+
+
+@pytest.mark.asyncio
+async def test_shelf_life_unknown_is_honest(session_factory):
+    from app.bot import _answer_shelf_life
+
+    with session_factory() as session:
+        answer = await _answer_shelf_life(
+            session, household_id=1, food="dragonfruit tart", lang="en"
+        )
+    assert "not sure" in answer.lower()

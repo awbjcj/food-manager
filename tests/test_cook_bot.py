@@ -553,11 +553,11 @@ def test_dispatcher_routes_every_v49_cook_prefix_with_static_sources(monkeypatch
     static_source = object()
 
     dispatcher = bot_mod.build_dispatcher(
-        bot=object(),
-        session_factory=lambda: None,
-        llm=object(),
-        text_llm=object(),
-        profile_llm=object(),
+        bot=object(),  # type: ignore[arg-type]
+        session_factory=lambda: None,  # type: ignore[arg-type,return-value]
+        llm=object(),  # type: ignore[arg-type]
+        text_llm=object(),  # type: ignore[arg-type]
+        profile_llm=object(),  # type: ignore[arg-type]
         now_provider=_NOW,
         on_user_created=lambda user: None,
         reschedule=lambda user: None,

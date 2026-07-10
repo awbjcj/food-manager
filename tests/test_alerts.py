@@ -62,8 +62,8 @@ async def test_digest_final_failure_invokes_hook(monkeypatch):
     await scheduler_mod.send_digest_with_retry(
         user_id=7,
         bot=AsyncMock(),
-        session_factory=lambda: None,
-        today_provider=lambda tz: None,
+        session_factory=lambda: None,  # type: ignore[arg-type,return-value]
+        today_provider=lambda tz: None,  # type: ignore[arg-type,return-value]
         retry_sleep_seconds=0,
         on_final_failure=hook,
     )

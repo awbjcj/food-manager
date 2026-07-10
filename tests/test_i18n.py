@@ -97,3 +97,16 @@ def test_v48_card_keys_present_en():
     assert t("remove.confirm", "en", id=3, name="spinach") == (
         "Remove #3 spinach?\nThis can't be undone here."
     )
+
+
+def test_v49_keys_present_en():
+    assert t("cook.round.purpose", "en") == "What's the goal?"
+    assert t("purpose.use_it_up", "en") == "Use it up"
+    assert t("purpose.quick", "en") == "Quick (≤30m)"
+    assert t("purpose.healthy", "en") == "Healthy"
+    assert t("purpose.comfort", "en") == "Comfort"
+    assert t("purpose.surprise", "en") == "Surprise me"
+    assert t("btn.more_recipes", "en") == "🔄 More"
+    assert t("btn.adjust", "en") == "🎛 Adjust"
+    assert t("btn.more_cuisines", "en") == "More cuisines »"
+    assert t("cook.no_more", "en") == "No more recipes for these filters — try 🎛 Adjust."

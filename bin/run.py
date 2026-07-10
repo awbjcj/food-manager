@@ -33,6 +33,7 @@ from app.alerts import OwnerAlerter
 from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
 from app.cook.recipe_source import SpoonacularSource, TheMealDbSource
+from app.nl_intent import IntentAgentSelector, build_intent_agent
 from app.resilience import run_with_restart
 from app.cook.llm import (
     AnthropicNutritionLLM,
@@ -127,6 +128,38 @@ def _capable_default(clients: dict, preferred: str) -> str:
     validation guarantees ``clients`` is non-empty for the image seam.
     """
     return preferred if preferred in clients else sorted(clients)[0]
+
+
+def _build_intent_agents(settings: Settings) -> IntentAgentSelector | None:
+    agents: dict = {}
+    if settings.anthropic_api_key:
+        agents["anthropic"] = build_intent_agent(
+            "anthropic",
+            model_id=settings.anthropic_text_model,
+            api_key=settings.anthropic_api_key,
+        )
+    if settings.openai_api_key:
+        agents["openai"] = build_intent_agent(
+            "openai",
+            model_id=settings.openai_text_model,
+            api_key=settings.openai_api_key,
+        )
+    if settings.gemini_api_key:
+        agents["gemini"] = build_intent_agent(
+            "gemini",
+            model_id=settings.gemini_text_model,
+            api_key=settings.gemini_api_key,
+        )
+    if settings.deepseek_api_key:
+        agents["deepseek"] = build_intent_agent(
+            "deepseek",
+            model_id=settings.deepseek_model,
+            api_key=settings.deepseek_api_key,
+            base_url=settings.deepseek_base_url,
+        )
+    if not agents:
+        return None
+    return IntentAgentSelector(agents, settings.llm_provider)
 
 
 def _build_llm_clients(settings: Settings) -> LLMBundle:
@@ -318,6 +351,7 @@ async def _amain(settings: Settings) -> None:
         TheMealDbSource(http=recipe_http),
     ]
     bundle = _build_llm_clients(settings)
+    intent_agent = _build_intent_agents(settings)
     # Per-provider model names so the log reflects the configured provider
     # (deepseek is text-only, hence "n/a" for image).
     _image_models = {
@@ -390,6 +424,7 @@ async def _amain(settings: Settings) -> None:
         translation_llm=translation_llm,
         alerter=alerter,
         recipe_sources=recipe_sources,
+        intent_agent=intent_agent,
     )
 
     scheduler.start()

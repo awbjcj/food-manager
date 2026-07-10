@@ -430,6 +430,8 @@ def render_plan(
                 fire="🔥" if uses_expiring else "",
             )
         )
+        if candidate.recipe.source_url:
+            lines.append(t("cook.recipe_link", lang, url=candidate.recipe.source_url))
     return "\n".join(lines)
 
 

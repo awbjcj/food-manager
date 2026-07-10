@@ -424,8 +424,25 @@ def test_render_plan_shows_header_days_and_fire_flag():
     assert text == (
         "🗓 Dinner plan — 2 days\n"
         "Thu: Yogurt Bowl (italian, 20m)🔥\n"
-        "Fri: Pasta (italian, 30m)"
+        "  Recipe: https://x\n"
+        "Fri: Pasta (italian, 30m)\n"
+        "  Recipe: https://x"
     )
+
+
+def test_render_plan_omits_link_line_when_day_has_no_source_url():
+    from app.renderer import render_plan
+
+    rec = RecipeCandidate(
+        title="Soup", cuisine="thai", source_url=None,
+        ingredients=[RecipeIngredient(name="broth")], method_gist="simmer",
+        deliciousness=0.5,
+    )
+    nut = NutritionScore(health_score=70, effort="easy", est_minutes=15, rationale="ok")
+    candidate = ScoredCandidate(recipe=rec, nutrition=nut, expiry_use=0.5, final_score=0.5)
+    rows = [(date(2026, 7, 9), candidate, False)]
+    text = render_plan(rows)
+    assert text == "🗓 Dinner plan — 1 days\nThu: Soup (thai, 15m)"
 
 
 def test_parse_plan_arg():

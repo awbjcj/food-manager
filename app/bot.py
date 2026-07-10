@@ -896,6 +896,87 @@ async def handle_pantry(
         await msg.answer(rendered.text, reply_markup=keyboard)
 
 
+async def _run_add_flow(
+    msg,
+    *,
+    session,
+    user,
+    today,
+    raw_text: str,
+    text_llm: TextLLMClient,
+    search: ShelfLifeSearchClient | None,
+    progress,
+) -> None:
+    try:
+        selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
+        selected_search = _select_search(search, user.llm_provider)
+        proposals, _ = await propose_add(
+            session,
+            llm=selected_text_llm,
+            household_id=user.household_id,
+            user_text=raw_text,
+            today=today,
+            tz=user.tz,
+            search=selected_search,
+        )
+    except LLMProviderNotConfigured:
+        await finish_progress(
+            progress,
+            msg,
+            f"LLM provider {user.llm_provider!r} is not configured. Use /llm.",
+        )
+        return
+    except Exception as exc:
+        log.warning(
+            "add_propose_failed",
+            extra={
+                "user_id": user.telegram_id,
+                "error_class": type(exc).__name__,
+            },
+        )
+        await finish_progress(
+            progress, msg, "couldn't parse that add - try simpler wording"
+        )
+        return
+    if not proposals:
+        await finish_progress(
+            progress, msg, "usage: /add <free text - name, category, expiry>"
+        )
+        return
+
+    await clear_progress(progress)
+    for proposal in proposals:
+        pending = create_pending(
+            session,
+            household_id=user.household_id,
+            action_type="add",
+            item_id=None,
+            proposed_json=add_payload_to_json(proposal.payload),
+            snapshot_json=None,
+            cost_micros_usd=proposal.cost_share,
+            chat_id=msg.chat.id,
+            now=datetime.now(timezone.utc),
+        )
+        assert pending.id is not None
+        text = render_add_diff(
+            pending_id=pending.id, payload=proposal.payload, lang=user.lang
+        )
+        keyboard = to_aiogram_keyboard(
+            build_apply_cancel_keyboard(pending_id=pending.id, lang=user.lang)
+        )
+        try:
+            sent = await msg.answer(text, reply_markup=keyboard)
+        except Exception as exc:
+            log.warning(
+                "add_send_failed",
+                extra={"pending_id": pending.id, "error_class": type(exc).__name__},
+            )
+            mark_cancelled(session, pending=pending)
+            session.commit()
+            continue
+        set_message_id(session, pending=pending, message_id=sent.message_id)
+
+
 async def handle_add(
     msg,
     *,
@@ -919,74 +1000,16 @@ async def handle_add(
             await msg.answer("usage: /add <free text - name, category, expiry>")
             return
         progress = await start_progress(msg, t("progress.parsing_add", user.lang))
-        try:
-            selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
-            selected_search = _select_search(search, user.llm_provider)
-            proposals, _ = await propose_add(
-                session,
-                llm=selected_text_llm,
-                household_id=user.household_id,
-                user_text=parts[1].strip(),
-                today=today,
-                tz=user.tz,
-                search=selected_search,
-            )
-        except LLMProviderNotConfigured:
-            await finish_progress(
-                progress,
-                msg,
-                f"LLM provider {user.llm_provider!r} is not configured. Use /llm.",
-            )
-            return
-        except Exception as exc:
-            log.warning(
-                "add_propose_failed",
-                extra={
-                    "user_id": user.telegram_id,
-                    "error_class": type(exc).__name__,
-                },
-            )
-            await finish_progress(
-                progress, msg, "couldn't parse that add - try simpler wording"
-            )
-            return
-        if not proposals:
-            await finish_progress(
-                progress, msg, "usage: /add <free text - name, category, expiry>"
-            )
-            return
-
-        await clear_progress(progress)
-        for proposal in proposals:
-            pending = create_pending(
-                session,
-                household_id=user.household_id,
-                action_type="add",
-                item_id=None,
-                proposed_json=add_payload_to_json(proposal.payload),
-                snapshot_json=None,
-                cost_micros_usd=proposal.cost_share,
-                chat_id=msg.chat.id,
-                now=datetime.now(timezone.utc),
-            )
-            assert pending.id is not None
-            text = render_add_diff(
-                pending_id=pending.id, payload=proposal.payload, lang=user.lang
-            )
-            keyboard = to_aiogram_keyboard(
-                build_apply_cancel_keyboard(pending_id=pending.id, lang=user.lang)
-            )
-            try:
-                sent = await msg.answer(text, reply_markup=keyboard)
-            except Exception as exc:
-                log.warning(
-                    "add_send_failed",
-                    extra={"pending_id": pending.id, "error_class": type(exc).__name__},
-                )
-                mark_cancelled(session, pending=pending)
-                session.commit()
-                continue
-            set_message_id(session, pending=pending, message_id=sent.message_id)
+        await _run_add_flow(
+            msg,
+            session=session,
+            user=user,
+            today=today,
+            raw_text=parts[1].strip(),
+            text_llm=text_llm,
+            search=search,
+            progress=progress,
+        )
 
 
 async def _terminal_cmd(

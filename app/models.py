@@ -166,6 +166,29 @@ class CookSession(SQLModel, table=True):
     expires_at: datetime
 
 
+class MealPlan(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    start_date: date
+    days: int
+    status: str = "draft"  # draft | active | cancelled
+    cost_micros_usd: int = 0
+    chat_id: int
+    message_id: Optional[int] = None
+    created_at: datetime
+
+
+class MealPlanEntry(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    plan_id: int = Field(foreign_key="mealplan.id", index=True)
+    day_index: int
+    date: date
+    recipe_json: str          # one ScoredCandidate payload (same shape /cook persists)
+    spec_json: str            # the DaySpec that produced it (swap rebuilds criteria from this)
+    shopping_json: str = "[]"  # that day's ingredient gap (list[str])
+    search_offset: int = 0    # advanced by swap for pagination
+
+
 class ShoppingList(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     household_id: int = Field(foreign_key="household.id", index=True)

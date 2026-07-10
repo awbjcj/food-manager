@@ -7,7 +7,11 @@ from app.cook.models import (
     ScoredCandidate,
 )
 from app.commands import CommandError, parse_callback
-from app.renderer import build_cook_round_keyboard, render_cook_result
+from app.renderer import (
+    build_cook_result_keyboard,
+    build_cook_round_keyboard,
+    render_cook_result,
+)
 
 
 def _scored(title, n_alts=0):
@@ -108,6 +112,69 @@ def test_build_cook_round_keyboard_can_include_round_token():
         "cookpick:7:meal:0",
         "cookpick:7:meal:1",
     ]
+
+
+def test_cook_result_keyboard_offers_more_and_adjust_before_alternatives():
+    rows = build_cook_result_keyboard(5, has_alternatives=True, lang="en")
+    callback_rows = [[button.callback_data for button in row] for row in rows]
+
+    assert ["cookmore2:5", "cookadj:5"] in callback_rows
+    assert callback_rows.index(["cookmore2:5", "cookadj:5"]) < callback_rows.index(
+        ["cookalt:5"]
+    )
+
+
+def test_purpose_round_exposes_every_recipe_purpose_in_stable_order():
+    from app.renderer import PURPOSE_OPTIONS
+
+    assert [code for code, _key in PURPOSE_OPTIONS] == [
+        "use_it_up",
+        "quick",
+        "healthy",
+        "comfort",
+        "surprise",
+    ]
+
+
+def test_parse_more_adjust_and_extended_round_callbacks():
+    more = parse_callback("cookmore2:5")
+    assert more.verb == "cook_more" and more.item_id == 5
+
+    adjust = parse_callback("cookadj:5")
+    assert adjust.verb == "cook_adjust" and adjust.item_id == 5
+
+    expand = parse_callback("cookmore:5:cuisine_full")
+    assert (
+        expand.verb == "cook_more_opts"
+        and expand.item_id == 5
+        and expand.round_name == "cuisine_full"
+    )
+
+    purpose = parse_callback("cookpick:5:purpose:2")
+    assert (
+        purpose.verb == "cook_pick"
+        and purpose.item_id == 5
+        and purpose.option_index == 2
+        and purpose.round_name == "purpose"
+    )
+
+    full_cuisine = parse_callback("cookpick:5:cuisine_full:7")
+    assert (
+        full_cuisine.verb == "cook_pick"
+        and full_cuisine.item_id == 5
+        and full_cuisine.option_index == 7
+        and full_cuisine.round_name == "cuisine_full"
+    )
+
+
+def test_full_cuisine_keyboard_index_matches_the_displayed_option():
+    from app.bot import SPOONACULAR_CUISINES
+
+    options = [*SPOONACULAR_CUISINES, "Surprise me"]
+    rows = build_cook_round_keyboard(5, options, round_name="cuisine_full")
+
+    assert rows[7][0].text == options[7]
+    assert rows[7][0].callback_data == "cookpick:5:cuisine_full:7"
 
 
 def test_render_stats_includes_cook_line():

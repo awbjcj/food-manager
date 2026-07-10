@@ -79,6 +79,32 @@ def _NOW(tz):
     return datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
 
 
+def _seed_cook(engine, **overrides):
+    now = _NOW("America/Detroit").replace(tzinfo=None)
+    values = {
+        "household_id": 1,
+        "status": "done",
+        "meal_type": "Dinner",
+        "cuisine": "Italian",
+        "purpose": "quick",
+        "selected_item_ids": "[11, 12]",
+        "candidates_json": "[]",
+        "search_offset": 6,
+        "chat_id": 1,
+        "message_id": 99,
+        "created_at": now - timedelta(minutes=1),
+        "expires_at": now + timedelta(minutes=10),
+    }
+    values.update(overrides)
+    with Session(engine) as db:
+        cook = CookSession(**values)
+        db.add(cook)
+        db.commit()
+        db.refresh(cook)
+        assert cook.id is not None
+        return cook.id
+
+
 def test_cook_first_round_creates_session_and_asks_meal_type(monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
@@ -97,7 +123,7 @@ def test_cook_first_round_creates_session_and_asks_meal_type(monkeypatch):
         assert len(rows) == 1 and rows[0].status == "collecting"
 
 
-def test_cook_pick_advances_rounds_without_running_pipeline(monkeypatch):
+def test_cook_pick_advances_cuisine_to_purpose_then_ready_once(monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     asyncio.run(handle_cook(_Msg(), session_factory=lambda: Session(engine),
@@ -107,8 +133,9 @@ def test_cook_pick_advances_rounds_without_running_pipeline(monkeypatch):
 
     spawn, spawned = _recording_spawn()
 
+    meal_cb = _Cb(f"cookpick:{cook_id}:meal:0")
     asyncio.run(handle_cook_callback(
-        _Cb(f"cookpick:{cook_id}:meal:0"), session_factory=lambda: Session(engine),
+        meal_cb, session_factory=lambda: Session(engine),
         now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
@@ -116,20 +143,123 @@ def test_cook_pick_advances_rounds_without_running_pipeline(monkeypatch):
         assert cook.meal_type == "Dinner" and cook.cuisine is None
         assert cook.status == "collecting"
     assert spawned == []
+    quick_cuisine_keyboard = meal_cb.message.edit_text.await_args.kwargs["reply_markup"]
+    quick_callbacks = [
+        button.callback_data
+        for row in quick_cuisine_keyboard.inline_keyboard
+        for button in row
+    ]
+    assert f"cookmore:{cook_id}:cuisine_full" in quick_callbacks
 
+    cuisine_cb = _Cb(f"cookpick:{cook_id}:cuisine:0")
     asyncio.run(handle_cook_callback(
-        _Cb(f"cookpick:{cook_id}:cuisine:0"), session_factory=lambda: Session(engine),
+        cuisine_cb, session_factory=lambda: Session(engine),
         now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
         assert cook is not None
-        assert cook.cuisine == "Italian" and cook.status == "ready"
+        assert cook.cuisine == "Italian"
+        assert cook.purpose is None
+        assert cook.status == "collecting"
+    assert spawned == []
+    purpose_keyboard = cuisine_cb.message.edit_text.await_args.kwargs["reply_markup"]
+    assert all(
+        button.callback_data.startswith(f"cookpick:{cook_id}:purpose:")
+        for row in purpose_keyboard.inline_keyboard
+        for button in row
+    )
+
+    asyncio.run(handle_cook_callback(
+        _Cb(f"cookpick:{cook_id}:purpose:0"), session_factory=lambda: Session(engine),
+        now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
+    with Session(engine) as db:
+        cook = db.get(CookSession, cook_id)
+        assert cook is not None
+        assert cook.purpose == "use_it_up"
+        assert cook.status == "ready"
     assert len(spawned) == 1
 
     asyncio.run(handle_cook_callback(
-        _Cb(f"cookpick:{cook_id}:cuisine:0"), session_factory=lambda: Session(engine),
+        _Cb(f"cookpick:{cook_id}:purpose:0"), session_factory=lambda: Session(engine),
         now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
     assert len(spawned) == 1
+
+
+def test_more_cuisines_selection_uses_the_full_list_index(monkeypatch):
+    from app.bot import SPOONACULAR_CUISINES
+
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    engine = _engine_with_user()
+    asyncio.run(handle_cook(
+        _Msg(), session_factory=lambda: Session(engine), now_provider=_NOW
+    ))
+    with Session(engine) as db:
+        cook_id = db.exec(__import__("sqlmodel").select(CookSession)).one().id
+
+    spawn, spawned = _recording_spawn()
+    asyncio.run(handle_cook_callback(
+        _Cb(f"cookpick:{cook_id}:meal:0"),
+        session_factory=lambda: Session(engine), now_provider=_NOW,
+        spawn=spawn, bot=None, **_fakes(),
+    ))
+
+    expand_cb = _Cb(f"cookmore:{cook_id}:cuisine_full")
+    asyncio.run(handle_cook_callback(
+        expand_cb, session_factory=lambda: Session(engine), now_provider=_NOW,
+        spawn=spawn, bot=None, **_fakes(),
+    ))
+    keyboard = expand_cb.message.edit_text.await_args.kwargs["reply_markup"]
+    full_callbacks = [
+        button.callback_data
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+    assert f"cookpick:{cook_id}:cuisine_full:7" in full_callbacks
+
+    asyncio.run(handle_cook_callback(
+        _Cb(f"cookpick:{cook_id}:cuisine_full:7"),
+        session_factory=lambda: Session(engine), now_provider=_NOW,
+        spawn=spawn, bot=None, **_fakes(),
+    ))
+
+    with Session(engine) as db:
+        cook = db.get(CookSession, cook_id)
+        assert cook is not None
+        assert cook.cuisine == SPOONACULAR_CUISINES[7]
+        assert cook.purpose is None
+        assert cook.status == "collecting"
+    assert spawned == []
+
+
+def test_adjust_resets_choices_but_preserves_selected_item_ids(monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    engine = _engine_with_user()
+    cook_id = _seed_cook(engine)
+    cb = _Cb(f"cookadj:{cook_id}")
+    spawn, spawned = _recording_spawn()
+
+    asyncio.run(handle_cook_callback(
+        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
+        spawn=spawn, bot=None, **_fakes(),
+    ))
+
+    with Session(engine) as db:
+        cook = db.get(CookSession, cook_id)
+        assert cook is not None
+        assert cook.status == "collecting"
+        assert cook.meal_type == "Dinner"
+        assert cook.cuisine is None
+        assert cook.purpose is None
+        assert cook.search_offset == 0
+        assert cook.selected_item_ids == "[11, 12]"
+    assert spawned == []
+    keyboard = cb.message.edit_text.await_args.kwargs["reply_markup"]
+    callbacks = [
+        button.callback_data
+        for row in keyboard.inline_keyboard
+        for button in row
+    ]
+    assert f"cookmore:{cook_id}:cuisine_full" in callbacks
 
 
 def test_cook_stale_meal_tap_after_round_one_does_not_pick_cuisine(monkeypatch):
@@ -236,6 +366,73 @@ def test_cook_pick_expires_collecting_session_without_spawning(monkeypatch):
         assert cook.status == "expired"
 
 
+def test_expired_done_session_blocks_more_without_searching(monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    run_more = AsyncMock(return_value=[])
+    monkeypatch.setattr(bot_mod, "run_cook_more", run_more, raising=False)
+    engine = _engine_with_user()
+    now = _NOW("America/Detroit").replace(tzinfo=None)
+    cook_id = _seed_cook(engine, expires_at=now - timedelta(seconds=1))
+    cb = _Cb(f"cookmore2:{cook_id}")
+    spawn, spawned = _recording_spawn()
+
+    asyncio.run(handle_cook_callback(
+        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
+        spawn=spawn, bot=None, **_fakes(),
+    ))
+
+    run_more.assert_not_awaited()
+    assert spawned == []
+    assert cb.answer.await_args is not None
+    assert "expired" in str(cb.answer.await_args).lower()
+
+
+def test_double_more_tap_claims_done_session_for_only_one_search(monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    engine = _engine_with_user()
+    cook_id = _seed_cook(engine)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    search_calls = 0
+
+    async def fake_run_cook_more(*args, **kwargs):
+        nonlocal search_calls
+        search_calls += 1
+        entered.set()
+        await release.wait()
+        return []
+
+    monkeypatch.setattr(
+        bot_mod, "run_cook_more", fake_run_cook_more, raising=False
+    )
+    first = _Cb(f"cookmore2:{cook_id}")
+    second = _Cb(f"cookmore2:{cook_id}")
+    spawn, spawned = _recording_spawn()
+
+    async def double_tap():
+        first_task = asyncio.create_task(handle_cook_callback(
+            first, session_factory=lambda: Session(engine), now_provider=_NOW,
+            spawn=spawn, bot=None, **_fakes(),
+        ))
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        second_task = asyncio.create_task(handle_cook_callback(
+            second, session_factory=lambda: Session(engine), now_provider=_NOW,
+            spawn=spawn, bot=None, **_fakes(),
+        ))
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.gather(first_task, second_task)
+
+    asyncio.run(double_tap())
+
+    assert search_calls == 1
+    assert spawned == []
+    with Session(engine) as db:
+        cook = db.get(CookSession, cook_id)
+        assert cook is not None
+        assert cook.status == "done"
+
+
 def test_cook_callback_rejects_unauthorized(monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
@@ -292,6 +489,45 @@ def test_run_cook_and_render_completes_and_edits(monkeypatch):
         assert cook.status == "done"
         assert "Safe" in (cook.candidates_json or "")
     bot.edit_message_text.assert_awaited()  # type: ignore[attr-defined]
+
+
+def test_dispatcher_routes_every_v49_cook_prefix_with_static_sources(monkeypatch):
+    cook_callback = AsyncMock()
+    generic_callback = AsyncMock()
+    monkeypatch.setattr(bot_mod, "handle_cook_callback", cook_callback)
+    monkeypatch.setattr(bot_mod, "handle_callback", generic_callback)
+    static_source = object()
+
+    dispatcher = bot_mod.build_dispatcher(
+        bot=object(),
+        session_factory=lambda: None,
+        llm=object(),
+        text_llm=object(),
+        profile_llm=object(),
+        now_provider=_NOW,
+        on_user_created=lambda user: None,
+        reschedule=lambda user: None,
+        selection_llm=object(),
+        recipe_llm=object(),
+        nutrition_llm=object(),
+        recipe_sources=(static_source,),
+    )
+    registered = dispatcher.callback_query.handlers[0].callback
+
+    async def route_all():
+        for data in (
+            "cookmore:1:cuisine_full",
+            "cookmore2:1",
+            "cookadj:1",
+        ):
+            await registered(_Cb(data))
+
+    asyncio.run(route_all())
+
+    assert cook_callback.await_count == 3
+    generic_callback.assert_not_awaited()
+    for call in cook_callback.await_args_list:
+        assert call.kwargs["recipe_sources"] == (static_source,)
 
 
 def test_build_llm_clients_returns_cook_clients(monkeypatch):

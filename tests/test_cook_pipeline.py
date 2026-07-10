@@ -10,10 +10,14 @@ from app.models import CookSession, Household, PantryItem, User
 from app.cook.models import (
     NutritionScore,
     NutritionScores,
+    Purpose,
     RecipeCandidate,
     RecipeCandidates,
+    RecipeCriteria,
     RecipeIngredient,
+    ScoredCandidate,
     SelectedItems,
+    SourcedRecipe,
 )
 from app.cook.logic import (
     BLEND_WEIGHTS,
@@ -37,6 +41,7 @@ from app.cook.service import (
     NotEnoughItems,
     run_cook,
 )
+from app.cook import service as cook_service
 from app.profile_service import FoodProfile
 from tests.fakes import FakeNutritionLLM, FakeRecipeLLM, FakeSelectionLLM
 
@@ -77,179 +82,420 @@ def _cook_row(db):
     return row
 
 
+class FakeRecipeSource:
+    def __init__(self, *responses):
+        self.responses = list(responses) or [([], 0)]
+        self.calls = []
+
+    def available(self):
+        return True
+
+    async def search(self, criteria, *, remaining_cost_micros=None):
+        self.calls.append(
+            SimpleNamespace(
+                criteria=criteria,
+                remaining_cost_micros=remaining_cost_micros,
+            )
+        )
+        if len(self.responses) == 1:
+            return self.responses[0]
+        return self.responses.pop(0)
+
+
+def _sourced(
+    title,
+    *,
+    ingredients,
+    external_id,
+    health=50,
+    deliciousness=0.5,
+):
+    return SourcedRecipe(
+        recipe=RecipeCandidate(
+            title=title,
+            cuisine="italian",
+            source_url=f"https://recipes.test/{external_id}",
+            ingredients=[RecipeIngredient(name=name) for name in ingredients],
+            method_gist="Cook it.",
+            deliciousness=deliciousness,
+        ),
+        nutrition=NutritionScore(
+            health_score=health,
+            effort="easy",
+            est_minutes=20,
+            rationale="source nutrition",
+        ),
+        external_id=external_id,
+    )
+
+
+def _item_ids(db):
+    return [
+        row.id
+        for row in db.exec(__import__("sqlmodel").select(PantryItem)).all()
+        if row.id is not None
+    ]
+
+
 def test_run_cook_guards_thin_pantry():
     db, today = _db_with_items(MIN_USABLE_ITEMS - 1, 2)
     cook = _cook_row(db)
     with pytest.raises(NotEnoughItems):
-        asyncio.run(run_cook(
-            db, cook=cook, profile=FoodProfile(),
-            selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 0)),
-            recipe_llm=FakeRecipeLLM(canned=(RecipeCandidates(candidates=[]), 0)),
-            nutrition_llm=FakeNutritionLLM(canned=(NutritionScores(scores=[]), 0)),
-            today=today,
-        ))
+        asyncio.run(
+            run_cook(
+                db,
+                cook=cook,
+                profile=FoodProfile(),
+                selection_llm=FakeSelectionLLM(
+                    canned=(SelectedItems(item_ids=[]), 0)
+                ),
+                source=FakeRecipeSource(),
+                today=today,
+            )
+        )
 
 
 def test_run_cook_excludes_expired_items():
-    # MIN_USABLE_ITEMS active rows that are all past their expiry date
     db, today = _db_with_items(MIN_USABLE_ITEMS, -1)
     cook = _cook_row(db)
     with pytest.raises(NotEnoughItems):
-        asyncio.run(run_cook(
-            db, cook=cook, profile=FoodProfile(),
-            selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 0)),
-            recipe_llm=FakeRecipeLLM(canned=(RecipeCandidates(candidates=[]), 0)),
-            nutrition_llm=FakeNutritionLLM(canned=(NutritionScores(scores=[]), 0)),
+        asyncio.run(
+            run_cook(
+                db,
+                cook=cook,
+                profile=FoodProfile(),
+                selection_llm=FakeSelectionLLM(
+                    canned=(SelectedItems(item_ids=[]), 0)
+                ),
+                source=FakeRecipeSource(),
+                today=today,
+            )
+        )
+
+
+def test_run_cook_builds_exact_criteria_ranks_and_persists_source_results():
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    cook.purpose = Purpose.HEALTHY.value
+    db.add(cook)
+    db.commit()
+    ids = _item_ids(db)
+    selection = FakeSelectionLLM(
+        canned=(SelectedItems(item_ids=ids[:2]), 5)
+    )
+    unsafe = _sourced(
+        "Peanut Dish",
+        ingredients=["peanut"],
+        external_id="spoon:unsafe",
+        health=100,
+        deliciousness=1.0,
+    )
+    pantry_fit = _sourced(
+        "Pantry Hash",
+        ingredients=["item0", "item1"],
+        external_id="mealdb:20",
+        health=20,
+        deliciousness=0.2,
+    )
+    healthy = _sourced(
+        "Healthy Pasta",
+        ingredients=["item0", "pasta"],
+        external_id="spoon:10",
+        health=100,
+        deliciousness=1.0,
+    )
+    source = FakeRecipeSource(([unsafe, pantry_fit, healthy], 11))
+    profile = FoodProfile(
+        diet="vegetarian",
+        exclusions=["peanut"],
+        max_cook_minutes=25,
+    )
+
+    result = asyncio.run(
+        run_cook(
+            db,
+            cook=cook,
+            profile=profile,
+            selection_llm=selection,
+            source=source,
             today=today,
-        ))
+        )
+    )
 
-
-def test_run_cook_ranks_and_filters_allergens():
-    import asyncio
-    db, today = _db_with_items(4, 2)
-    cook = _cook_row(db)
-    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
-    candidates = RecipeCandidates(candidates=[
-        RecipeCandidate(title="Peanut Dish", cuisine="thai", source_url="u",
-                        ingredients=[RecipeIngredient(name="peanut")],
-                        method_gist="x", deliciousness=0.9),
-        RecipeCandidate(title="Safe Dish", cuisine="italian", source_url="u",
-                        ingredients=[RecipeIngredient(name="item0"), RecipeIngredient(name="pasta")],
-                        method_gist="y", deliciousness=0.5),
-    ])
-    scores = NutritionScores(scores=[
-        NutritionScore(health_score=90, effort="easy", est_minutes=20, rationale="a"),
-    ])
-    nutrition = FakeNutritionLLM(canned=(scores, 3))
-    result = asyncio.run(run_cook(
-        db, cook=cook, profile=FoodProfile(exclusions=["peanut"]),
-        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=ids), 5)),
-        recipe_llm=FakeRecipeLLM(canned=(candidates, 9)),
-        nutrition_llm=nutrition,
-        today=today,
-    ))
-    assert [c.recipe.title for c in result] == ["Safe Dish"]  # peanut dish filtered out
-    nutrition_prompt = json.loads(nutrition.calls[0])
-    assert [c["title"] for c in nutrition_prompt["candidates"]] == ["Safe Dish"]
-    assert "pasta" in result[0].shopping_list
-    db.refresh(cook)
-    assert cook.llm_cost_micros_usd == 17  # 5 + 9 + 3
-
-
-def test_run_cook_halts_on_cost_ceiling():
-    import asyncio
-    db, today = _db_with_items(4, 2)
-    cook = _cook_row(db)
-    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
-    recipe = FakeRecipeLLM(canned=(RecipeCandidates(candidates=[]), 0))
-    result = asyncio.run(run_cook(
-        db, cook=cook, profile=FoodProfile(),
-        selection_llm=FakeSelectionLLM(
-            canned=(SelectedItems(item_ids=ids), COOK_COST_CEILING_MICROS + 1)),
-        recipe_llm=recipe,
-        nutrition_llm=FakeNutritionLLM(canned=(NutritionScores(scores=[]), 0)),
-        today=today,
-    ))
-    assert result == []
-    assert recipe.calls == []  # recipe stage never reached after ceiling hit
-
-
-def test_run_cook_falls_back_to_active_items_for_empty_selection():
-    import asyncio
-    db, today = _db_with_items(4, 2)
-    cook = _cook_row(db)
-    active = db.exec(__import__("sqlmodel").select(PantryItem)).all()
-    recipe = FakeRecipeLLM(canned=(RecipeCandidates(candidates=[]), 9))
-    result = asyncio.run(run_cook(
-        db, cook=cook, profile=FoodProfile(),
-        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
-        recipe_llm=recipe,
-        nutrition_llm=FakeNutritionLLM(canned=(NutritionScores(scores=[]), 0)),
-        today=today,
-    ))
-    assert result == []
-    assert len(recipe.calls) == 1
-    recipe_prompt = json.loads(recipe.calls[0])
-    assert "items" not in recipe_prompt
-    assert [ingredient["id"] for ingredient in recipe_prompt["ingredients"]] == [
-        item.id for item in active
+    assert json.loads(selection.calls[0])["purpose"] == Purpose.HEALTHY.value
+    assert source.calls[0].criteria == RecipeCriteria(
+        include_ingredients=["item0", "item1"],
+        purpose=Purpose.HEALTHY,
+        meal_type="dinner",
+        cuisine="italian",
+        diet="vegetarian",
+        intolerances=["peanut"],
+        exclude_ingredients=["peanut"],
+        max_ready_minutes=25,
+        number=6,
+        offset=0,
+    )
+    assert source.calls[0].remaining_cost_micros == COOK_COST_CEILING_MICROS - 5
+    assert [candidate.recipe.title for candidate in result] == [
+        "Healthy Pasta",
+        "Pantry Hash",
     ]
-    assert [ingredient["name"] for ingredient in recipe_prompt["ingredients"]] == [
-        item.normalized_name for item in active
+    assert result[0].final_score == blended_score(
+        health_0_1=1.0,
+        expiry_use=0.5,
+        deliciousness=1.0,
+    )
+    assert result[0].external_id == "spoon:10"
+    assert result[0].shopping_list == ["pasta"]
+    db.refresh(cook)
+    assert cook.llm_cost_micros_usd == 16
+    assert cook.chosen_index == 0
+    stored = json.loads(cook.candidates_json or "[]")
+    assert [card["external_id"] for card in stored] == [
+        "spoon:10",
+        "mealdb:20",
+    ]
+
+
+def test_run_cook_reuses_stored_selected_items_after_adjust():
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    ids = _item_ids(db)
+    cook.selected_item_ids = json.dumps(ids[:2])
+    cook.purpose = Purpose.COMFORT.value
+    cook.llm_cost_micros_usd = 7
+    db.add(cook)
+    db.commit()
+    selection = FakeSelectionLLM(canned=(SelectedItems(item_ids=ids[2:]), 99))
+    source = FakeRecipeSource(
+        ([_sourced("Adjusted", ingredients=["item0"], external_id="A")], 3)
+    )
+
+    result = asyncio.run(
+        run_cook(
+            db,
+            cook=cook,
+            profile=FoodProfile(),
+            selection_llm=selection,
+            source=source,
+            today=today,
+        )
+    )
+
+    assert result
+    assert selection.calls == []
+    assert source.calls[0].criteria.include_ingredients == ["item0", "item1"]
+    assert source.calls[0].criteria.purpose == Purpose.COMFORT
+    assert source.calls[0].remaining_cost_micros == COOK_COST_CEILING_MICROS - 7
+    db.refresh(cook)
+    assert json.loads(cook.selected_item_ids) == ids[:2]
+    assert cook.llm_cost_micros_usd == 10
+
+
+def test_run_cook_halts_before_source_when_selection_exceeds_cost_ceiling():
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    ids = _item_ids(db)
+    source = FakeRecipeSource()
+
+    result = asyncio.run(
+        run_cook(
+            db,
+            cook=cook,
+            profile=FoodProfile(),
+            selection_llm=FakeSelectionLLM(
+                canned=(
+                    SelectedItems(item_ids=ids),
+                    COOK_COST_CEILING_MICROS + 1,
+                )
+            ),
+            source=source,
+            today=today,
+        )
+    )
+
+    assert result == []
+    assert source.calls == []
+
+
+def test_run_cook_empty_selection_uses_all_active_items():
+    db, today = _db_with_items(4, 2)
+    cook = _cook_row(db)
+    ids = _item_ids(db)
+    source = FakeRecipeSource()
+
+    result = asyncio.run(
+        run_cook(
+            db,
+            cook=cook,
+            profile=FoodProfile(),
+            selection_llm=FakeSelectionLLM(
+                canned=(SelectedItems(item_ids=[]), 5)
+            ),
+            source=source,
+            today=today,
+        )
+    )
+
+    assert result == []
+    assert source.calls[0].criteria.include_ingredients == [
+        "item0",
+        "item1",
+        "item2",
+        "item3",
     ]
     db.refresh(cook)
-    assert json.loads(cook.selected_item_ids) == [item.id for item in active]
+    assert json.loads(cook.selected_item_ids) == ids
 
 
-def test_run_cook_halts_before_regeneration_when_recipe_cost_exceeds_ceiling():
-    import asyncio
-    db, today = _db_with_items(4, 2)
+def _prepare_more_cook(db, *, selected_ids, old_candidate, cost=10):
     cook = _cook_row(db)
-    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
-    peanut_only = RecipeCandidates(candidates=[
-        RecipeCandidate(title="Peanut", cuisine="thai", source_url="u",
-                        ingredients=[RecipeIngredient(name="peanut")],
-                        method_gist="x", deliciousness=0.9)])
-    recipe = FakeRecipeLLM(canned=(peanut_only, COOK_COST_CEILING_MICROS))
-    nutrition = FakeNutritionLLM(canned=(NutritionScores(scores=[]), 3))
-    result = asyncio.run(run_cook(
-        db, cook=cook, profile=FoodProfile(exclusions=["peanut"]),
-        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=ids), 1)),
-        recipe_llm=recipe, nutrition_llm=nutrition, today=today,
-    ))
+    cook.status = "done"
+    cook.purpose = Purpose.USE_IT_UP.value
+    cook.selected_item_ids = json.dumps(selected_ids)
+    cook.candidates_json = json.dumps([old_candidate.model_dump()])
+    cook.chosen_index = 0
+    cook.llm_cost_micros_usd = cost
+    db.add(cook)
+    db.commit()
+    return cook
+
+
+def test_run_cook_more_paginates_dedups_and_retains_old_cards():
+    db, today = _db_with_items(4, 2)
+    ids = _item_ids(db)
+    old = ScoredCandidate(
+        recipe=_sourced(
+            "Old Card", ingredients=["item0"], external_id="A"
+        ).recipe,
+        nutrition=NutritionScore(
+            health_score=60,
+            effort="easy",
+            est_minutes=20,
+            rationale="old",
+        ),
+        expiry_use=0.5,
+        final_score=0.5,
+        external_id="A",
+        shopping_list=["old missing"],
+    )
+    cook = _prepare_more_cook(db, selected_ids=ids[:2], old_candidate=old)
+    duplicate = _sourced("Duplicate A", ingredients=["item0"], external_id="A")
+    fresh = _sourced(
+        "Fresh B", ingredients=["item0", "pasta"], external_id="B", health=90
+    )
+    source = FakeRecipeSource(([duplicate, fresh], 13))
+
+    result = asyncio.run(
+        cook_service.run_cook_more(
+            db,
+            cook=cook,
+            profile=FoodProfile(exclusions=["peanut"]),
+            source=source,
+            today=today,
+        )
+    )
+
+    assert [candidate.external_id for candidate in result] == ["B"]
+    call = source.calls[0]
+    assert call.criteria.offset == 6
+    assert call.criteria.number == 6
+    assert call.criteria.include_ingredients == ["item0", "item1"]
+    assert call.criteria.purpose == Purpose.USE_IT_UP
+    assert call.criteria.exclude_ingredients == ["peanut"]
+    assert call.remaining_cost_micros == COOK_COST_CEILING_MICROS - 10
+    db.refresh(cook)
+    assert cook.search_offset == 6
+    assert cook.llm_cost_micros_usd == 23
+    stored = json.loads(cook.candidates_json or "[]")
+    assert [card["external_id"] for card in stored] == ["B", "A"]
+    assert stored[1]["recipe"]["title"] == "Old Card"
+    assert stored[1]["shopping_list"] == ["old missing"]
+    assert stored[0]["shopping_list"] == ["pasta"]
+
+
+def test_run_cook_more_does_not_search_when_cost_is_already_over_ceiling():
+    db, today = _db_with_items(4, 2)
+    ids = _item_ids(db)
+    old = ScoredCandidate(
+        recipe=_sourced("Old", ingredients=["item0"], external_id="A").recipe,
+        nutrition=NutritionScore(
+            health_score=50,
+            effort="easy",
+            est_minutes=20,
+            rationale="old",
+        ),
+        expiry_use=1.0,
+        final_score=0.5,
+        external_id="A",
+    )
+    cook = _prepare_more_cook(
+        db,
+        selected_ids=ids[:2],
+        old_candidate=old,
+        cost=COOK_COST_CEILING_MICROS + 1,
+    )
+    source = FakeRecipeSource()
+    original_cards = cook.candidates_json
+
+    result = asyncio.run(
+        cook_service.run_cook_more(
+            db,
+            cook=cook,
+            profile=FoodProfile(),
+            source=source,
+            today=today,
+        )
+    )
+
     assert result == []
-    assert len(recipe.calls) == 1
-    assert nutrition.calls == []
+    assert source.calls == []
+    db.refresh(cook)
+    assert cook.search_offset == 0
+    assert cook.candidates_json == original_cards
 
 
-def test_run_cook_expiry_utilization_uses_selected_urgent_items_only():
-    import asyncio
+def test_run_cook_more_keeps_old_cards_when_source_pushes_cost_over_ceiling():
     db, today = _db_with_items(4, 2)
-    cook = _cook_row(db)
-    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
-    candidates = RecipeCandidates(candidates=[
-        RecipeCandidate(title="Selected Urgent Dish", cuisine="italian", source_url="u",
-                        ingredients=[RecipeIngredient(name="item0")],
-                        method_gist="x", deliciousness=0.5),
-    ])
-    scores = NutritionScores(scores=[
-        NutritionScore(health_score=80, effort="easy", est_minutes=20, rationale="a"),
-    ])
-    result = asyncio.run(run_cook(
-        db, cook=cook, profile=FoodProfile(),
-        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[ids[0]]), 5)),
-        recipe_llm=FakeRecipeLLM(canned=(candidates, 9)),
-        nutrition_llm=FakeNutritionLLM(canned=(scores, 3)),
-        today=today,
-    ))
-    assert result[0].expiry_use == 1.0
+    ids = _item_ids(db)
+    old = ScoredCandidate(
+        recipe=_sourced("Old", ingredients=["item0"], external_id="A").recipe,
+        nutrition=NutritionScore(
+            health_score=50,
+            effort="easy",
+            est_minutes=20,
+            rationale="old",
+        ),
+        expiry_use=1.0,
+        final_score=0.5,
+        external_id="A",
+    )
+    cook = _prepare_more_cook(
+        db,
+        selected_ids=ids[:2],
+        old_candidate=old,
+        cost=COOK_COST_CEILING_MICROS - 2,
+    )
+    original_cards = cook.candidates_json
+    source = FakeRecipeSource(
+        ([_sourced("Fresh", ingredients=["item0"], external_id="B")], 3)
+    )
 
+    result = asyncio.run(
+        cook_service.run_cook_more(
+            db,
+            cook=cook,
+            profile=FoodProfile(),
+            source=source,
+            today=today,
+        )
+    )
 
-def test_run_cook_regenerates_once_then_refuses_on_allergen_wipeout():
-    import asyncio
-    db, today = _db_with_items(4, 2)
-    cook = _cook_row(db)
-    ids = [r.id for r in db.exec(__import__("sqlmodel").select(PantryItem)).all()]
-    peanut_only = RecipeCandidates(candidates=[
-        RecipeCandidate(title="Peanut", cuisine="thai", source_url="u",
-                        ingredients=[RecipeIngredient(name="peanut")],
-                        method_gist="x", deliciousness=0.9)])
-    recipe = FakeRecipeLLM(canned_sequence=[(peanut_only, 9), (peanut_only, 9)])
-    nutrition = FakeNutritionLLM(canned=(NutritionScores(scores=[]), 3))
-    result = asyncio.run(run_cook(
-        db, cook=cook, profile=FoodProfile(exclusions=["peanut"]),
-        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=ids), 5)),
-        recipe_llm=recipe, nutrition_llm=nutrition, today=today,
-    ))
     assert result == []
-    assert len(recipe.calls) == 2  # regenerated exactly once
-    regenerate_prompt = json.loads(recipe.calls[1])
-    assert "items" not in regenerate_prompt
-    assert regenerate_prompt["ingredients"]
-    assert regenerate_prompt["must_avoid"] == ["peanut"]
-    # the re-prompt must name the specific ingredients that triggered the filter (spec §8)
-    assert regenerate_prompt["violated_ingredients"] == ["peanut"]
-    assert nutrition.calls == []   # never reached the nutrition stage
+    assert source.calls[0].remaining_cost_micros == 2
+    db.refresh(cook)
+    assert cook.llm_cost_micros_usd == COOK_COST_CEILING_MICROS + 1
+    assert cook.candidates_json == original_cards
 
 
 class _FakeOpenAIResponses:

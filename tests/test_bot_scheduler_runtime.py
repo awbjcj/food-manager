@@ -151,7 +151,7 @@ async def test_handlers_smoke(session, monkeypatch):
 
     start = _msg("/start")
     await handle_start(start, session_factory=factory, on_user_created=lambda user: None)
-    assert "/tz" in start.answer.await_args.args[0]
+    assert "/tz" in start.answer.await_args_list[0].args[0]
 
     listing = _msg("/list")
     await handle_list(listing, session_factory=factory, now_provider=now)

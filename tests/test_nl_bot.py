@@ -267,6 +267,18 @@ async def test_pantry_query_empty_replies_clear(session_factory, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_start_sends_ready_then_tour(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    msg = _nl_msg("/start")
+    await bot_mod.handle_start(
+        msg, session_factory=session_factory, on_user_created=lambda user: None
+    )
+    assert msg.answer.await_count == 2
+    tour = msg.answer.await_args_list[1].args[0]
+    assert "bought milk" in tour and "/pantry" in tour
+
+
+@pytest.mark.asyncio
 async def test_help_shows_overview_with_topic_buttons(session_factory, monkeypatch):
     monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _nl_msg("/help")

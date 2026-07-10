@@ -96,7 +96,7 @@ async def test_start_zh_returns_translated_text(session_factory, monkeypatch):
     await bot_mod.handle_start(
         msg, session_factory=session_factory, on_user_created=lambda u: None
     )
-    answer_text = msg.answer.call_args.args[0]
+    answer_text = msg.answer.call_args_list[0].args[0]
     # zh start should contain Chinese characters and the timezone placeholder filled
     assert "已就绪" in answer_text
     assert "/help" in answer_text

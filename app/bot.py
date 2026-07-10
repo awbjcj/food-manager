@@ -545,6 +545,7 @@ async def handle_start(
         await msg.answer(
             t("start.ready", user.lang, tz=user.tz, digest_hour=user.digest_hour)
         )
+        await msg.answer(t("start.tour", user.lang))
 
 
 async def handle_invite(

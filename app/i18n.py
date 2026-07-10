@@ -893,6 +893,48 @@ MESSAGES: dict[str, dict[str, str]] = {
     "btn.help.household": {"en": "👪 Household", "zh": "👪 家庭", "fr": "👪 Foyer", "es": "👪 Hogar"},
     "btn.help.settings": {"en": "⚙️ Settings", "zh": "⚙️ 设置", "fr": "⚙️ Réglages", "es": "⚙️ Ajustes"},
     "btn.help.back": {"en": "⬅ Back", "zh": "⬅ 返回", "fr": "⬅ Retour", "es": "⬅ Atrás"},
+    "start.tour": {
+        "en": (
+            "Here's how to use me:\n\n"
+            "📸 Send a photo of a grocery receipt — I'll track everything on it.\n"
+            "💬 Or just tell me things:\n"
+            "  \"bought milk and two avocados\"\n"
+            "  \"ate the yogurt\"\n"
+            "  \"how long does salmon keep?\"\n\n"
+            "🌅 Every morning I'll send a digest of what's expiring.\n"
+            "Useful commands: /pantry (what you have) · /cook (recipe from your pantry) · /help (everything else)"
+        ),
+        "zh": (
+            "使用方法：\n\n"
+            "📸 发送一张购物收据照片——我会记录上面的所有食品。\n"
+            "💬 或者直接告诉我：\n"
+            "  “买了牛奶和两个牛油果”\n"
+            "  “吃完了酸奶”\n"
+            "  “三文鱼能放多久？”\n\n"
+            "🌅 我每天早上会发送一份即将过期的摘要。\n"
+            "常用命令：/pantry（你有什么）· /cook（根据你的食品储藏推荐菜谱）· /help（其他所有命令）"
+        ),
+        "fr": (
+            "Voici comment m'utiliser :\n\n"
+            "📸 Envoyez une photo d'un reçu d'épicerie — je suivrai tout ce qui s'y trouve.\n"
+            "💬 Ou dites-moi simplement :\n"
+            "  « acheté du lait et deux avocats »\n"
+            "  « mangé le yaourt »\n"
+            "  « combien de temps se conserve le saumon ? »\n\n"
+            "🌅 Chaque matin, je vous enverrai un résumé de ce qui expire.\n"
+            "Commandes utiles : /pantry (ce que vous avez) · /cook (recette à partir de votre garde-manger) · /help (le reste)"
+        ),
+        "es": (
+            "Así es como usarme:\n\n"
+            "📸 Envía una foto de un recibo de compras — rastrearé todo lo que contenga.\n"
+            "💬 O simplemente dime cosas:\n"
+            "  \"compré leche y dos aguacates\"\n"
+            "  \"me comí el yogur\"\n"
+            "  \"¿cuánto dura el salmón?\"\n\n"
+            "🌅 Cada mañana te enviaré un resumen de lo que está por caducar.\n"
+            "Comandos útiles: /pantry (lo que tienes) · /cook (receta de tu despensa) · /help (todo lo demás)"
+        ),
+    },
     "start.ready": {
         "en": (
             "Pantry bot ready.\n"

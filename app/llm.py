@@ -33,7 +33,9 @@ Category = Literal[
 class ParsedItem(BaseModel):
     is_food: bool
     name: str
-    qty: float = Field(default=1.0, gt=0)
+    # ge, not gt: Pydantic emits gt as JSON Schema `exclusiveMinimum`, a field
+    # Gemini's structured-output Schema type doesn't recognize and rejects.
+    qty: float = Field(default=1.0, ge=0.01)
     unit: Optional[str] = None
     category: Optional[Category] = None
     est_shelf_life_days: int = Field(ge=1, le=730)
@@ -72,7 +74,8 @@ class CorrectionDiff(BaseModel):
 class ProposedAddItem(BaseModel):
     name: str
     category: Optional[Category] = None
-    qty: float = Field(default=1.0, gt=0)
+    # ge, not gt: see ParsedItem.qty above.
+    qty: float = Field(default=1.0, ge=0.01)
     unit: Optional[str] = None
     explicit_user_expiry: bool
     shelf_life_days: Optional[int] = Field(default=None, ge=1, le=730)

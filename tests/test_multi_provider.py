@@ -14,6 +14,7 @@ import pytest
 from app.commands import CommandError, parse_llm_provider
 from app.deepseek_llm import DeepSeekSelectionLLM, DeepSeekTextLLMClient
 from app.gemini_llm import GeminiLLMClient, GeminiSearchClient, GeminiSelectionLLM
+from app.llm import ParseResult, ProposedAddItems
 from app.providers import (
     ALL_PROVIDERS,
     LLMProviderNotConfigured,
@@ -251,6 +252,18 @@ async def test_gemini_image_extract():
     )
     assert result.parse.items == []
     assert result.cost_micros_usd == round(10 * 0.3 + 4 * 2.5)
+
+
+@pytest.mark.parametrize("model_cls", [ParseResult, ProposedAddItems])
+def test_gemini_structured_models_produce_valid_schema(model_cls):
+    """Every model_cls passed as Gemini's response_schema must survive the SDK's
+    real ``t_schema`` conversion — the fakes above stub out the SDK entirely, so
+    they never catch schema fields Gemini's API rejects (e.g. Pydantic's
+    ``gt=``/``lt=`` constraints emit ``exclusiveMinimum``, which ``types.Schema``
+    has no field for and rejects with a ValidationError)."""
+    from google.genai._transformers import t_schema
+
+    t_schema(None, model_cls)
 
 
 async def test_gemini_search_uses_grounding_and_parses_json():

@@ -6,7 +6,7 @@ from datetime import date
 
 from sqlmodel import Session
 
-from app.cook.affinity import affinity, list_recent_signals
+from app.cook.affinity import affinity, list_recent_signals, steering_summary
 from app.cook.logic import (
     blended_score,
     expiry_utilization,
@@ -184,6 +184,7 @@ async def run_cook(
             return []
 
     selected_items = [item_by_id[item_id] for item_id in selected_ids]
+    signals = list_recent_signals(session, household_id=cook.household_id)
     criteria = build_criteria(
         include_ingredients=[item.normalized_name for item in selected_items],
         meal_type=cook.meal_type,
@@ -191,6 +192,7 @@ async def run_cook(
         purpose=_purpose_of(cook),
         profile=profile,
         offset=cook.search_offset or 0,
+        steering=steering_summary(signals) or None,
     )
     sourced, source_cost = await source.search(
         criteria, remaining_cost_micros=_remaining_cost_budget(cook)
@@ -208,7 +210,6 @@ async def run_cook(
         return []
 
     pantry_normalized = [item.normalized_name for item in active_items]
-    signals = list_recent_signals(session, household_id=cook.household_id)
     scored = _score_sourced(safe, selected_items=selected_items, today=today, signals=signals)
     _assign_shopping_list(scored, pantry_normalized=pantry_normalized)
 
@@ -246,6 +247,7 @@ async def run_cook_more(
         return []
 
     cook.search_offset = (cook.search_offset or 0) + 6
+    signals = list_recent_signals(session, household_id=cook.household_id)
     criteria = build_criteria(
         include_ingredients=[item.normalized_name for item in selected_items],
         meal_type=cook.meal_type,
@@ -253,6 +255,7 @@ async def run_cook_more(
         purpose=_purpose_of(cook),
         profile=profile,
         offset=cook.search_offset,
+        steering=steering_summary(signals) or None,
     )
     sourced, cost = await source.search(
         criteria, remaining_cost_micros=_remaining_cost_budget(cook)
@@ -278,7 +281,6 @@ async def run_cook_more(
         return []
 
     pantry_normalized = [item.normalized_name for item in active_items]
-    signals = list_recent_signals(session, household_id=cook.household_id)
     scored = _score_sourced(fresh, selected_items=selected_items, today=today, signals=signals)
     _assign_shopping_list(scored, pantry_normalized=pantry_normalized)
 

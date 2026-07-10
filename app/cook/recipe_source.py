@@ -43,6 +43,7 @@ def build_criteria(
     profile: FoodProfile,
     offset: int,
     number: int = 6,
+    steering: Optional[str] = None,
 ) -> RecipeCriteria:
     meal = None if meal_type in (None, "Surprise me") else meal_type
     cuisine_value = None if cuisine in (None, "Surprise me", "Any") else cuisine
@@ -65,6 +66,7 @@ def build_criteria(
         max_ready_minutes=max_ready,
         number=number,
         offset=offset,
+        steering=steering,
     )
 
 
@@ -325,20 +327,20 @@ class LlmRecipeSource:
     ) -> tuple[list[SourcedRecipe], Optional[int]]:
         if not self.available():
             return [], None
-        prompt = _json.dumps(
-            {
-                "ingredients": criteria.include_ingredients,
-                "meal_type": criteria.meal_type,
-                "cuisine": criteria.cuisine,
-                "purpose": criteria.purpose.value,
-                "must_avoid": criteria.exclude_ingredients,
-                "diet": criteria.diet,
-                "max_ready_minutes": criteria.max_ready_minutes,
-                "number": criteria.number,
-                "offset": criteria.offset,
-            },
-            sort_keys=True,
-        )
+        payload: dict = {
+            "ingredients": criteria.include_ingredients,
+            "meal_type": criteria.meal_type,
+            "cuisine": criteria.cuisine,
+            "purpose": criteria.purpose.value,
+            "must_avoid": criteria.exclude_ingredients,
+            "diet": criteria.diet,
+            "max_ready_minutes": criteria.max_ready_minutes,
+            "number": criteria.number,
+            "offset": criteria.offset,
+        }
+        if criteria.steering:
+            payload["household_taste"] = criteria.steering
+        prompt = _json.dumps(payload, sort_keys=True)
         total: Optional[int] = None
         recipes, recipe_cost = await self._recipe_llm.fetch_recipes(prompt=prompt)
         total = _add_known_cost(total, recipe_cost)
@@ -364,20 +366,23 @@ class LlmRecipeSource:
                     )
                 }
             )
+            regenerate_payload: dict = {
+                "ingredients": criteria.include_ingredients,
+                "meal_type": criteria.meal_type,
+                "cuisine": criteria.cuisine,
+                "purpose": criteria.purpose.value,
+                "must_avoid": criteria.exclude_ingredients,
+                "violated_ingredients": violated,
+                "diet": criteria.diet,
+                "max_ready_minutes": criteria.max_ready_minutes,
+                "number": criteria.number,
+                "offset": criteria.offset,
+            }
+            if criteria.steering:
+                regenerate_payload["household_taste"] = criteria.steering
             regenerated, regen_cost = await self._recipe_llm.fetch_recipes(
                 prompt=_json.dumps(
-                    {
-                        "ingredients": criteria.include_ingredients,
-                        "meal_type": criteria.meal_type,
-                        "cuisine": criteria.cuisine,
-                        "purpose": criteria.purpose.value,
-                        "must_avoid": criteria.exclude_ingredients,
-                        "violated_ingredients": violated,
-                        "diet": criteria.diet,
-                        "max_ready_minutes": criteria.max_ready_minutes,
-                        "number": criteria.number,
-                        "offset": criteria.offset,
-                    },
+                    regenerate_payload,
                     sort_keys=True,
                 )
             )

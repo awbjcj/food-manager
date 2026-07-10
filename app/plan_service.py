@@ -15,7 +15,7 @@ from typing import Optional, Sequence
 
 from sqlmodel import Session, select
 
-from app.cook.affinity import affinity, list_recent_signals
+from app.cook.affinity import affinity, list_recent_signals, steering_summary
 from app.cook.logic import (
     blended_score,
     expiry_utilization,
@@ -106,7 +106,7 @@ def _pick(
 
 async def _search_day(
     source, *, spec: DaySpec, include: list[str], profile, offset: int,
-    remaining_cost_micros: Optional[int],
+    remaining_cost_micros: Optional[int], steering: Optional[str] = None,
 ):
     criteria = build_criteria(
         include_ingredients=include,
@@ -115,6 +115,7 @@ async def _search_day(
         purpose=Purpose(spec.purpose),
         profile=profile,
         offset=offset,
+        steering=steering,
     )
     sourced, cost = await source.search(
         criteria, remaining_cost_micros=remaining_cost_micros
@@ -127,6 +128,7 @@ async def _search_day(
             purpose=Purpose(spec.purpose),
             profile=profile,
             offset=offset,
+            steering=steering,
         )
         remaining_after = (
             None if remaining_cost_micros is None else max(0, remaining_cost_micros - (cost or 0))
@@ -198,7 +200,7 @@ async def build_plan(
         remaining = max(0, cost_ceiling_micros - cost)
         sourced, day_cost = await _search_day(
             source, spec=spec, include=include, profile=profile, offset=0,
-            remaining_cost_micros=remaining,
+            remaining_cost_micros=remaining, steering=steering_summary(signals) or None,
         )
         cost += day_cost or 0
         urgent = [n for n, d in pool if d <= URGENT_DAYS]
@@ -281,6 +283,7 @@ async def swap_day(
     ]
     include = [f for f in spec.feature_items if normalize(f) in {n for n, _ in pantry}]
     remaining = max(0, cost_ceiling_micros - (plan.cost_micros_usd or 0))
+    signals = list_recent_signals(session, household_id=plan.household_id)
     sourced, cost = await _search_day(
         source,
         spec=spec,
@@ -288,10 +291,10 @@ async def swap_day(
         profile=profile,
         offset=entry.search_offset,
         remaining_cost_micros=remaining,
+        steering=steering_summary(signals) or None,
     )
     plan.cost_micros_usd = (plan.cost_micros_usd or 0) + (cost or 0)
     urgent = [n for n, d in pantry if d <= URGENT_DAYS]
-    signals = list_recent_signals(session, household_id=plan.household_id)
     candidate = _pick(
         sourced,
         exclusions=profile.exclusions,

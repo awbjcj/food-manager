@@ -64,6 +64,7 @@ class RecipeCriteria:
     max_ready_minutes: Optional[int] = None
     number: int = 6
     offset: int = 0
+    steering: Optional[str] = None
 
 
 class SourcedRecipe(BaseModel):

@@ -422,6 +422,28 @@ async def test_llm_recipe_source_forwards_page_and_builds_stable_external_id():
 
 
 @pytest.mark.asyncio
+async def test_llm_recipe_source_includes_household_taste_when_steering_set():
+    recipe_llm = _FakeRecipeLLM()
+    source = LlmRecipeSource(recipe_llm=recipe_llm, nutrition_llm=_FakeNutritionLLM())
+    criteria = RecipeCriteria(
+        include_ingredients=["carrot"], purpose=Purpose.SURPRISE, steering="likes thai",
+    )
+    await source.search(criteria)
+    prompt = json.loads(recipe_llm.calls[0])
+    assert prompt["household_taste"] == "likes thai"
+
+
+@pytest.mark.asyncio
+async def test_llm_recipe_source_omits_household_taste_when_no_steering():
+    recipe_llm = _FakeRecipeLLM()
+    source = LlmRecipeSource(recipe_llm=recipe_llm, nutrition_llm=_FakeNutritionLLM())
+    criteria = RecipeCriteria(include_ingredients=["carrot"], purpose=Purpose.SURPRISE)
+    await source.search(criteria)
+    prompt = json.loads(recipe_llm.calls[0])
+    assert "household_taste" not in prompt
+
+
+@pytest.mark.asyncio
 async def test_llm_recipe_source_budget_stops_before_nutrition():
     nutrition = _FakeNutritionLLM()
     source = LlmRecipeSource(

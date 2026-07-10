@@ -428,6 +428,17 @@ def test_render_plan_shows_header_days_and_fire_flag():
     )
 
 
+def test_parse_plan_arg():
+    from app.commands import parse_plan_arg
+
+    assert parse_plan_arg([]) == 5
+    assert parse_plan_arg(["3"]) == 3
+    assert parse_plan_arg(["7"]) == 7
+    for bad in (["2"], ["8"], ["x"], ["3", "4"]):
+        with pytest.raises(CommandError):
+            parse_plan_arg(bad)
+
+
 def test_build_plan_keyboard_emits_swap_shop_cancel():
     from app.renderer import build_plan_keyboard
 

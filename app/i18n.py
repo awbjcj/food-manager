@@ -658,6 +658,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /llm [anthropic|openai|gemini|deepseek] - show or switch LLM provider\n"
             "  /prefs [sentence] - show or update your food profile\n"
             "  /cook - get a recipe from your pantry\n"
+            "  /plan [3-7] - plan dinners for the week (default 5 days)\n"
             "  /shopping - view your to-buy list; tap an item when bought\n"
             "  /favorites - view saved recipes; tap to re-cook against your pantry\n"
             "  /invite [family] - invite one person (or 'family' for a reusable link)\n"
@@ -690,6 +691,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /llm [anthropic|openai|gemini|deepseek] - 显示或切换LLM提供商\n"
             "  /prefs [语句] - 显示或更新您的饮食档案\n"
             "  /cook - 从您的储藏获取食谱\n"
+            "  /plan [3-7] - 规划本周晚餐（默认5天）\n"
             "  /shopping - 查看待购清单；点击已购买的物品\n"
             "  /favorites - 查看已保存食谱；点击重新烹饪\n"
             "  /invite [family] - 邀请一人（或用 'family' 生成可重复使用的链接）\n"
@@ -722,6 +724,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /llm [anthropic|openai|gemini|deepseek] - afficher ou changer de fournisseur LLM\n"
             "  /prefs [phrase] - afficher ou mettre à jour votre profil alimentaire\n"
             "  /cook - obtenir une recette depuis votre garde-manger\n"
+            "  /plan [3-7] - planifier les dîners de la semaine (5 jours par défaut)\n"
             "  /shopping - voir votre liste de courses ; appuyez sur un article acheté\n"
             "  /favorites - voir les recettes sauvegardées ; appuyez pour recuire\n"
             "  /invite [family] - inviter une personne (ou 'family' pour un lien réutilisable)\n"
@@ -754,6 +757,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /llm [anthropic|openai|gemini|deepseek] - mostrar o cambiar proveedor LLM\n"
             "  /prefs [frase] - mostrar o actualizar tu perfil alimentario\n"
             "  /cook - obtener una receta de tu despensa\n"
+            "  /plan [3-7] - planifica las cenas de la semana (5 días por defecto)\n"
             "  /shopping - ver tu lista de compras; toca un artículo comprado\n"
             "  /favorites - ver recetas guardadas; toca para volver a cocinar\n"
             "  /invite [family] - invitar a una persona (o 'family' para un enlace reutilizable)\n"
@@ -861,24 +865,28 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": (
             "🍳 Cook commands:\n"
             "  /cook - get a recipe from your pantry\n"
+            "  /plan [3-7] - plan dinners for the week (default 5 days)\n"
             "  /shopping - view your to-buy list; tap an item when bought\n"
             "  /favorites - view saved recipes; tap to re-cook against your pantry"
         ),
         "zh": (
             "🍳 做菜命令：\n"
             "  /cook - 根据食品储藏获取菜谱\n"
+            "  /plan [3-7] - 规划本周晚餐（默认5天）\n"
             "  /shopping - 查看待购清单；购买后点击\n"
             "  /favorites - 查看已保存菜谱；点击可重新做菜"
         ),
         "fr": (
             "🍳 Commandes cuisine :\n"
             "  /cook - obtenir une recette à partir de votre garde-manger\n"
+            "  /plan [3-7] - planifier les dîners de la semaine (5 jours par défaut)\n"
             "  /shopping - voir votre liste d'achats ; touchez un article une fois acheté\n"
             "  /favorites - voir les recettes enregistrées ; touchez pour recuisiner"
         ),
         "es": (
             "🍳 Comandos de cocina:\n"
             "  /cook - obtener una receta de tu despensa\n"
+            "  /plan [3-7] - planifica las cenas de la semana (5 días por defecto)\n"
             "  /shopping - ver tu lista de compras; toca un artículo al comprarlo\n"
             "  /favorites - ver recetas guardadas; toca para volver a cocinar"
         ),

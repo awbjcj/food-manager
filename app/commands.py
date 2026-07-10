@@ -99,6 +99,20 @@ def parse_llm_provider(args: Sequence[str]) -> Optional[LLMProviderName]:
     return cast(LLMProviderName, token)
 
 
+def parse_plan_arg(args: Sequence[str]) -> int:
+    if not args:
+        return 5
+    if len(args) != 1:
+        raise CommandError("usage: /plan [3-7]")
+    try:
+        days = int(args[0])
+    except ValueError as exc:
+        raise CommandError("usage: /plan [3-7]") from exc
+    if days < 3 or days > 7:
+        raise CommandError("usage: /plan [3-7]")
+    return days
+
+
 def parse_lang(args: Sequence[str]) -> Optional[str]:
     if len(args) > 1:
         raise CommandError(f"usage: /lang [{'|'.join(LANGS)}]")

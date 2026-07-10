@@ -12,7 +12,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import update
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.commands import (
     CommandError,
@@ -28,6 +28,7 @@ from app.commands import (
     parse_list_filter,
     parse_member_id,
     parse_pantry_arg,
+    parse_plan_arg,
     parse_snooze_args,
     parse_tz,
 )
@@ -63,6 +64,9 @@ from app.cook import (
     set_message_id as set_cook_message_id,
 )
 from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
+import app.plan_service as plan_service_mod
+from app.plan_service import NotEnoughItemsToPlan, build_plan
+from app.week_composer import DaySpec
 from app.shopping_service import add_missing, check_off, list_pending
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import (
@@ -89,7 +93,7 @@ from app.invite_service import (
     redeem_invite,
     remove_member,
 )
-from app.models import CookSession, Household, PantryItem, User
+from app.models import CookSession, Household, MealPlan, MealPlanEntry, PantryItem, User
 from app.refine_service import run_receipt_refine
 from app.cache import get_cached
 from app.normalization import normalize
@@ -137,6 +141,7 @@ from app.renderer import (
     build_favorites_keyboard,
     build_item_card_keyboard,
     build_nl_picker_keyboard,
+    build_plan_keyboard,
     build_remove_confirm_keyboard,
     build_shopping_keyboard,
     build_undo_add_keyboard,
@@ -153,6 +158,7 @@ from app.renderer import (
     render_item_card,
     render_list,
     render_profile,
+    render_plan,
     render_recook,
     render_remove_confirm,
     render_shopping_list,
@@ -1641,6 +1647,121 @@ async def handle_cook(
         )
         sent = await msg.answer("What are you cooking?", reply_markup=keyboard)
         set_cook_message_id(session, cook=cook, message_id=sent.message_id)
+
+
+def _plan_uses_expiring(entry: MealPlanEntry) -> bool:
+    try:
+        return DaySpec.model_validate_json(entry.spec_json).purpose == "use_it_up"
+    except ValueError:
+        return False
+
+
+def _plan_source(recipe_sources, recipe_llm, nutrition_llm, provider: str) -> ChainedRecipeSource:
+    selected_recipe_llm = _select_cook(recipe_llm, provider)
+    selected_nutrition_llm = _select_cook(nutrition_llm, provider)
+    return ChainedRecipeSource(
+        [
+            *recipe_sources,
+            LlmRecipeSource(
+                recipe_llm=selected_recipe_llm, nutrition_llm=selected_nutrition_llm
+            ),
+        ]
+    )
+
+
+async def handle_plan(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    now_provider: NowProvider,
+    composer,
+    recipe_sources=(),
+    recipe_llm=None,
+    nutrition_llm=None,
+    search: ShelfLifeSearchClient | None = None,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+    translation_llm=None,
+) -> None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+        now_provider=now_provider,
+    ) as ctx:
+        if ctx is None:
+            return
+        session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
+        if composer is None:
+            await msg.answer("plan is not configured yet")
+            return
+        try:
+            days = parse_plan_arg((msg.text or "").split()[1:])
+        except CommandError as exc:
+            await msg.answer(str(exc))
+            return
+        household = session.get(Household, user.household_id)
+        if household is None:
+            await msg.answer("couldn't load your household profile")
+            return
+        profile = profile_from_household(household)
+        progress = await start_progress(msg, t("plan.progress", user.lang))
+        had_active = (
+            session.exec(
+                select(MealPlan).where(
+                    MealPlan.household_id == user.household_id,
+                    MealPlan.status == "active",
+                )
+            ).first()
+            is not None
+        )
+        selected_composer = composer.for_provider(user.llm_provider)
+        source = _plan_source(recipe_sources, recipe_llm, nutrition_llm, user.llm_provider)
+        try:
+            plan, entries = await build_plan(
+                session,
+                household_id=user.household_id,
+                days=days,
+                profile=profile,
+                composer=selected_composer,
+                source=source,
+                today=today,
+                chat_id=msg.chat.id,
+                cost_ceiling_micros=plan_service_mod.PLAN_COST_CEILING_MICROS,
+                created_at=datetime.now(timezone.utc),
+            )
+        except NotEnoughItemsToPlan:
+            await finish_progress(progress, msg, t("plan.not_enough", user.lang))
+            return
+        if not entries:
+            await finish_progress(progress, msg, t("plan.not_enough", user.lang))
+            return
+
+        candidates = [ScoredCandidate.model_validate_json(entry.recipe_json) for entry in entries]
+        names = await _translate_for_render(
+            session,
+            lang=user.lang,
+            texts=[text for c in candidates for text in (c.recipe.title, c.recipe.cuisine)],
+            translation_llm=translation_llm,
+        )
+        rows = [
+            (entry.date, candidate, _plan_uses_expiring(entry))
+            for entry, candidate in zip(entries, candidates)
+        ]
+        text = render_plan(rows, lang=user.lang, names=names)
+        if had_active:
+            text = f"{text}\n{t('plan.superseded', user.lang)}"
+        assert plan.id is not None
+        keyboard = to_aiogram_keyboard(
+            build_plan_keyboard(
+                plan.id,
+                [(entry.day_index, entry.date) for entry in entries],
+                lang=user.lang,
+            )
+        )
+        sent = await finish_progress(progress, msg, text, keyboard)
+        plan.message_id = sent.message_id
+        session.add(plan)
+        session.commit()
 
 
 async def handle_llm(
@@ -3163,6 +3284,21 @@ _MESSAGE_COMMANDS: tuple[tuple[str, Callable[..., Awaitable[None]], tuple[str, .
     ("correct", handle_correct, ("session_factory", "now_provider", "text_llm", "on_user_created")),
     ("stats", handle_stats, ("session_factory", "now_provider", "on_user_created")),
     ("cook", handle_cook, ("session_factory", "now_provider", "on_user_created")),
+    (
+        "plan",
+        handle_plan,
+        (
+            "session_factory",
+            "now_provider",
+            "composer",
+            "recipe_sources",
+            "recipe_llm",
+            "nutrition_llm",
+            "search",
+            "on_user_created",
+            "translation_llm",
+        ),
+    ),
     ("shopping", handle_shopping, ("session_factory", "now_provider", "on_user_created", "translation_llm")),
     ("favorites", handle_favorites, ("session_factory", "on_user_created", "translation_llm")),
     ("llm", handle_llm, ("session_factory", "llm", "text_llm", "on_user_created")),
@@ -3190,6 +3326,7 @@ def build_dispatcher(
     alerter=None,
     recipe_sources=(),
     intent_agent=None,
+    composer=None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -3217,6 +3354,10 @@ def build_dispatcher(
         "bot": bot,
         "photo_downloader": downloader,
         "spawn": asyncio.create_task,
+        "composer": composer,
+        "recipe_sources": recipe_sources,
+        "recipe_llm": recipe_llm,
+        "nutrition_llm": nutrition_llm,
     }
 
     def _bind(handler, *dep_names):

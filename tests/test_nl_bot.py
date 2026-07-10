@@ -264,3 +264,15 @@ async def test_pantry_query_empty_replies_clear(session_factory, monkeypatch):
     from app.i18n import t
 
     assert _final_text(msg) == t("digest.pantry_clear", "en")
+
+
+@pytest.mark.asyncio
+async def test_help_shows_overview_with_topic_buttons(session_factory, monkeypatch):
+    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    msg = _nl_msg("/help")
+    await bot_mod.handle_help(msg, session_factory=session_factory)
+    text = msg.answer.await_args.args[0]
+    assert "bought milk" in text  # NL example present
+    keyboard = msg.answer.await_args.kwargs["reply_markup"]
+    datas = [b.callback_data for row in keyboard.inline_keyboard for b in row]
+    assert datas == ["help:pantry", "help:cook", "help:household", "help:settings"]

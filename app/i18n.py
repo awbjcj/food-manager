@@ -702,6 +702,197 @@ MESSAGES: dict[str, dict[str, str]] = {
             "Envía una foto de un recibo para registrarlo."
         ),
     },
+    "help.overview": {
+        "en": (
+            "I track your groceries and remind you before they expire.\n\n"
+            "Just message me:\n"
+            "  \"bought milk and two avocados\"\n"
+            "  \"ate the yogurt\"\n"
+            "  \"how long does salmon keep?\"\n"
+            "…or send a photo of a receipt.\n\n"
+            "Core commands: /pantry · /cook · /help\n"
+            "Pick a topic for the full command list:"
+        ),
+        "zh": (
+            "我帮你追踪食品杂货，并在过期前提醒你。\n\n"
+            "直接给我发消息：\n"
+            "  “买了牛奶和两个牛油果”\n"
+            "  “吃完了酸奶”\n"
+            "  “三文鱼能放多久？”\n"
+            "……或发送收据照片。\n\n"
+            "核心命令：/pantry · /cook · /help\n"
+            "选择一个主题查看完整命令列表："
+        ),
+        "fr": (
+            "Je suis les courses et vous rappelle avant qu'elles n'expirent.\n\n"
+            "Écrivez-moi simplement :\n"
+            "  « acheté du lait et deux avocats »\n"
+            "  « mangé le yaourt »\n"
+            "  « combien de temps se conserve le saumon ? »\n"
+            "…ou envoyez une photo d'un reçu.\n\n"
+            "Commandes principales : /pantry · /cook · /help\n"
+            "Choisissez un sujet pour la liste complète des commandes :"
+        ),
+        "es": (
+            "Sigo tus compras y te aviso antes de que caduquen.\n\n"
+            "Solo escríbeme:\n"
+            "  \"compré leche y dos aguacates\"\n"
+            "  \"me comí el yogur\"\n"
+            "  \"¿cuánto dura el salmón?\"\n"
+            "…o envía una foto de un recibo.\n\n"
+            "Comandos principales: /pantry · /cook · /help\n"
+            "Elige un tema para ver la lista completa de comandos:"
+        ),
+    },
+    "help.topic.pantry": {
+        "en": (
+            "🥕 Pantry commands:\n"
+            "  /list [category|week|expired] - show pantry\n"
+            "  /pantry [digest|<id>] - interactive pantry controls\n"
+            "  /add <free text> - propose new items in natural language\n"
+            "  /ate <id> - mark eaten\n"
+            "  /toss <id> - mark tossed\n"
+            "  /snooze <id> [days=2] - suppress reminders 1..30d\n"
+            "  /correct <id> <free text> - propose a correction\n"
+            "  /delete <id> - remove a wrong/duplicate import\n"
+            "  /stats - last 30 days"
+        ),
+        "zh": (
+            "🥕 食品储藏命令：\n"
+            "  /list [category|week|expired] - 显示食品储藏\n"
+            "  /pantry [digest|<id>] - 交互式食品储藏管理\n"
+            "  /add <自然语言> - 以自然语言提议添加食品\n"
+            "  /ate <id> - 标记为已食用\n"
+            "  /toss <id> - 标记为已丢弃\n"
+            "  /snooze <id> [days=2] - 延后提醒 1..30 天\n"
+            "  /correct <id> <自然语言> - 提议更正\n"
+            "  /delete <id> - 移除错误/重复的记录\n"
+            "  /stats - 最近30天统计"
+        ),
+        "fr": (
+            "🥕 Commandes garde-manger :\n"
+            "  /list [category|week|expired] - afficher le garde-manger\n"
+            "  /pantry [digest|<id>] - contrôles interactifs\n"
+            "  /add <texte libre> - proposer de nouveaux articles\n"
+            "  /ate <id> - marquer comme mangé\n"
+            "  /toss <id> - marquer comme jeté\n"
+            "  /snooze <id> [days=2] - reporter les rappels 1..30j\n"
+            "  /correct <id> <texte libre> - proposer une correction\n"
+            "  /delete <id> - retirer un import erroné/en double\n"
+            "  /stats - 30 derniers jours"
+        ),
+        "es": (
+            "🥕 Comandos de despensa:\n"
+            "  /list [category|week|expired] - mostrar despensa\n"
+            "  /pantry [digest|<id>] - controles interactivos\n"
+            "  /add <texto libre> - proponer nuevos artículos\n"
+            "  /ate <id> - marcar como comido\n"
+            "  /toss <id> - marcar como desechado\n"
+            "  /snooze <id> [days=2] - posponer recordatorios 1..30d\n"
+            "  /correct <id> <texto libre> - proponer una corrección\n"
+            "  /delete <id> - quitar una importación errónea/duplicada\n"
+            "  /stats - últimos 30 días"
+        ),
+    },
+    "help.topic.cook": {
+        "en": (
+            "🍳 Cook commands:\n"
+            "  /cook - get a recipe from your pantry\n"
+            "  /shopping - view your to-buy list; tap an item when bought\n"
+            "  /favorites - view saved recipes; tap to re-cook against your pantry"
+        ),
+        "zh": (
+            "🍳 做菜命令：\n"
+            "  /cook - 根据食品储藏获取菜谱\n"
+            "  /shopping - 查看待购清单；购买后点击\n"
+            "  /favorites - 查看已保存菜谱；点击可重新做菜"
+        ),
+        "fr": (
+            "🍳 Commandes cuisine :\n"
+            "  /cook - obtenir une recette à partir de votre garde-manger\n"
+            "  /shopping - voir votre liste d'achats ; touchez un article une fois acheté\n"
+            "  /favorites - voir les recettes enregistrées ; touchez pour recuisiner"
+        ),
+        "es": (
+            "🍳 Comandos de cocina:\n"
+            "  /cook - obtener una receta de tu despensa\n"
+            "  /shopping - ver tu lista de compras; toca un artículo al comprarlo\n"
+            "  /favorites - ver recetas guardadas; toca para volver a cocinar"
+        ),
+    },
+    "help.topic.household": {
+        "en": (
+            "👪 Household commands:\n"
+            "  /invite [family] - invite one person (or 'family' for a reusable link)\n"
+            "  /join <code> - join a household you were invited to\n"
+            "  /household - list household members\n"
+            "  /leave - leave your household\n"
+            "  /remove <id> - (owner) remove a member"
+        ),
+        "zh": (
+            "👪 家庭命令：\n"
+            "  /invite [family] - 邀请一人（或用 'family' 生成可重复使用的链接）\n"
+            "  /join <code> - 加入被邀请的家庭\n"
+            "  /household - 列出家庭成员\n"
+            "  /leave - 离开你的家庭\n"
+            "  /remove <id> - （所有者）移除成员"
+        ),
+        "fr": (
+            "👪 Commandes foyer :\n"
+            "  /invite [family] - inviter une personne (ou « family » pour un lien réutilisable)\n"
+            "  /join <code> - rejoindre un foyer auquel vous avez été invité\n"
+            "  /household - lister les membres du foyer\n"
+            "  /leave - quitter votre foyer\n"
+            "  /remove <id> - (propriétaire) retirer un membre"
+        ),
+        "es": (
+            "👪 Comandos de hogar:\n"
+            "  /invite [family] - invitar a una persona (o 'family' para un enlace reutilizable)\n"
+            "  /join <code> - unirte a un hogar al que te invitaron\n"
+            "  /household - listar miembros del hogar\n"
+            "  /leave - salir de tu hogar\n"
+            "  /remove <id> - (propietario) quitar un miembro"
+        ),
+    },
+    "help.topic.settings": {
+        "en": (
+            "⚙️ Settings commands:\n"
+            "  /tz <IANA> - set timezone\n"
+            "  /lang [en|zh|fr|es] - set your language\n"
+            "  /digest_at <0..23> - set digest hour\n"
+            "  /llm [anthropic|openai|gemini|deepseek] - show or switch LLM provider\n"
+            "  /prefs [sentence] - show or update your food profile"
+        ),
+        "zh": (
+            "⚙️ 设置命令：\n"
+            "  /tz <IANA> - 设置时区\n"
+            "  /lang [en|zh|fr|es] - 设置语言\n"
+            "  /digest_at <0..23> - 设置每日摘要时间\n"
+            "  /llm [anthropic|openai|gemini|deepseek] - 查看或切换LLM提供商\n"
+            "  /prefs [sentence] - 查看或更新你的饮食偏好"
+        ),
+        "fr": (
+            "⚙️ Commandes de réglages :\n"
+            "  /tz <IANA> - définir le fuseau horaire\n"
+            "  /lang [en|zh|fr|es] - définir votre langue\n"
+            "  /digest_at <0..23> - définir l'heure du résumé\n"
+            "  /llm [anthropic|openai|gemini|deepseek] - afficher ou changer de fournisseur LLM\n"
+            "  /prefs [sentence] - afficher ou mettre à jour votre profil alimentaire"
+        ),
+        "es": (
+            "⚙️ Comandos de ajustes:\n"
+            "  /tz <IANA> - establecer zona horaria\n"
+            "  /lang [en|zh|fr|es] - establecer tu idioma\n"
+            "  /digest_at <0..23> - establecer hora del resumen\n"
+            "  /llm [anthropic|openai|gemini|deepseek] - mostrar o cambiar proveedor LLM\n"
+            "  /prefs [sentence] - mostrar o actualizar tu perfil alimentario"
+        ),
+    },
+    "btn.help.pantry": {"en": "🥕 Pantry", "zh": "🥕 储藏", "fr": "🥕 Garde-manger", "es": "🥕 Despensa"},
+    "btn.help.cook": {"en": "🍳 Cook", "zh": "🍳 做菜", "fr": "🍳 Cuisiner", "es": "🍳 Cocinar"},
+    "btn.help.household": {"en": "👪 Household", "zh": "👪 家庭", "fr": "👪 Foyer", "es": "👪 Hogar"},
+    "btn.help.settings": {"en": "⚙️ Settings", "zh": "⚙️ 设置", "fr": "⚙️ Réglages", "es": "⚙️ Ajustes"},
+    "btn.help.back": {"en": "⬅ Back", "zh": "⬅ 返回", "fr": "⬅ Retour", "es": "⬅ Atrás"},
     "start.ready": {
         "en": (
             "Pantry bot ready.\n"

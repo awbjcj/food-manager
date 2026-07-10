@@ -79,7 +79,9 @@ async def test_help_zh_returns_translated_text(session_factory, monkeypatch):
     # zh help should contain Chinese characters
     assert "命令" in answer_text
     assert "/help" in answer_text
-    assert "/lang" in answer_text
+    from app.i18n import t
+
+    assert "/lang" in t("help.topic.settings", "zh")
 
 
 async def test_start_zh_returns_translated_text(session_factory, monkeypatch):

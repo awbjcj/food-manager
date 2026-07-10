@@ -1717,6 +1717,22 @@ async def handle_prefs(
 HELP_TEXT = t("help.body", "en")
 
 
+HELP_TOPICS = ("pantry", "cook", "household", "settings")
+
+
+def _help_topics_keyboard(lang: str):
+    return to_aiogram_keyboard(
+        [
+            [
+                CallbackButton(
+                    text=t(f"btn.help.{topic}", lang), callback_data=f"help:{topic}"
+                )
+                for topic in HELP_TOPICS
+            ]
+        ]
+    )
+
+
 async def handle_help(
     msg,
     *,
@@ -1731,7 +1747,27 @@ async def handle_help(
         if ctx is None:
             return
         user = ctx.user
-    await msg.answer(t("help.body", user.lang))
+    await msg.answer(
+        t("help.overview", user.lang), reply_markup=_help_topics_keyboard(user.lang)
+    )
+
+
+async def handle_help_callback(cb, *, session_factory) -> None:
+    with session_factory() as session:
+        user = _authorized_callback_user(session, cb.from_user.id)
+        if user is None:
+            await dispatch_answer(cb, "not authorized")
+            return
+        lang = user.lang
+    topic = (cb.data or "").split(":", 1)[1] if ":" in (cb.data or "") else "menu"
+    await dispatch_answer(cb)
+    if topic in HELP_TOPICS:
+        keyboard = to_aiogram_keyboard(
+            [[CallbackButton(text=t("btn.help.back", lang), callback_data="help:menu")]]
+        )
+        await edit_or_resend(cb, t(f"help.topic.{topic}", lang), keyboard)
+    else:
+        await edit_or_resend(cb, t("help.overview", lang), _help_topics_keyboard(lang))
 
 
 async def handle_photo(
@@ -3224,6 +3260,9 @@ def build_dispatcher(
         )
 
     async def on_callback(callback):
+        if (callback.data or "").startswith("help:"):
+            await handle_help_callback(callback, session_factory=session_factory)
+            return
         if (callback.data or "").startswith(
             ("cookpick:", "cookalt:", "cookmore:", "cookmore2:", "cookadj:")
         ):

@@ -165,7 +165,10 @@ async def test_handlers_smoke(session, monkeypatch):
 
     help_msg = _msg("/help")
     await handle_help(help_msg, session_factory=factory)
-    assert "/correct" in help_msg.answer.await_args.args[0]
+    from app.i18n import t
+
+    assert "/pantry" in help_msg.answer.await_args.args[0]
+    assert "/correct" in t("help.topic.pantry", "en")
 
 
 @pytest.mark.asyncio

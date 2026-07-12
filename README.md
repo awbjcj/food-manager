@@ -118,14 +118,14 @@ The container runs `bin/run.py` which backs up the database, runs Alembic migrat
 | `ALLOWED_TELEGRAM_USER_ID` | Yes | — | Numeric Telegram user ID allowed to bootstrap the first household |
 | `LLM_PROVIDER` | No | `anthropic` | Default provider: `anthropic`, `openai`, `gemini`, or `deepseek`. Each user can override with `/llm`. `deepseek` is text-only, so at least one image-capable provider's key must also be set |
 | `ANTHROPIC_API_KEY` | When using anthropic | — | Anthropic API key |
-| `ANTHROPIC_MODEL` | No | `claude-sonnet-4-6` | Claude model to use for receipt parsing |
+| `ANTHROPIC_MODEL` | No | `claude-sonnet-5` | Claude model to use for receipt parsing |
 | `ANTHROPIC_TEXT_MODEL` | No | `claude-haiku-4-5-20251001` | Claude model to use for `/correct` and `/add` proposals |
-| `ANTHROPIC_SEARCH_MODEL` | No | `claude-sonnet-4-6` | Claude model used for shelf-life web search — **requires web search enabled on the Anthropic workspace** |
+| `ANTHROPIC_SEARCH_MODEL` | No | `claude-sonnet-5` | Claude model used for shelf-life web search — **requires web search enabled on the Anthropic workspace** |
 | `OPENAI_API_KEY` | When using openai | — | OpenAI API key |
-| `OPENAI_MODEL` | No | `gpt-5.4` | OpenAI model to use for receipt parsing |
-| `OPENAI_TEXT_MODEL` | No | `gpt-5.4-mini` | OpenAI model to use for `/correct` and `/add` proposals |
+| `OPENAI_MODEL` | No | `gpt-5.6-terra` | OpenAI model to use for receipt parsing |
+| `OPENAI_TEXT_MODEL` | No | `gpt-5.6-luna` | OpenAI model to use for `/correct` and `/add` proposals |
 | `GEMINI_API_KEY` | When using gemini | — | Google Gemini API key (native `google-genai` SDK) |
-| `GEMINI_MODEL` | No | `gemini-3.5-flash` | Gemini model to use for receipt parsing |
+| `GEMINI_MODEL` | No | `gemini-3.1-pro-preview` | Gemini model to use for receipt parsing |
 | `GEMINI_TEXT_MODEL` | No | `gemini-3.5-flash` | Gemini model to use for `/correct` and `/add` proposals |
 | `DEEPSEEK_API_KEY` | When using deepseek | — | DeepSeek API key. DeepSeek is text-only: no receipt photo reading, no web search |
 | `DEEPSEEK_MODEL` | No | `deepseek-chat` | DeepSeek model to use for text tasks |

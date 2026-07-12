@@ -52,6 +52,16 @@ log = logging.getLogger(__name__)
 
 TModel = TypeVar("TModel", bound=BaseModel)
 
+# Gemini 2.5+/3.x are reasoning models: their "thinking" tokens are counted
+# against ``max_output_tokens`` alongside the visible reply. A budget sized for
+# the JSON output alone gets eaten by thinking, truncating the reply
+# (``finish_reason=MAX_TOKENS``) so the JSON is cut mid-string and parsing fails
+# — observed as "Gemini can't read the receipt". Every seam's ``max_output_tokens``
+# below is therefore the intended *output* size; this headroom is added centrally
+# to cover thinking. It is only a cap (unused tokens cost nothing), so it is
+# deliberately generous.
+_THINKING_HEADROOM_TOKENS = 8192
+
 
 def _gemini_cost(response, model: str) -> Optional[int]:
     """Best-effort cost in micro-USD from Gemini ``usage_metadata`` token counts."""
@@ -119,7 +129,7 @@ class _GeminiCaller:
 
         config_kwargs: dict[str, Any] = {
             "system_instruction": system,
-            "max_output_tokens": max_output_tokens,
+            "max_output_tokens": max_output_tokens + _THINKING_HEADROOM_TOKENS,
         }
         if search:
             config_kwargs["tools"] = [

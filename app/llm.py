@@ -174,12 +174,23 @@ _PARSE_RECEIPT_TOOL = {
 
 _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "claude-sonnet-4-6": {"input": 3, "output": 15},
+    # claude-sonnet-5 standard rate; an intro $2/$10 promo runs through
+    # 2026-08-31, but the durable standard rate is used here so the estimate
+    # stays correct after the promo ends.
+    "claude-sonnet-5": {"input": 3, "output": 15},
     "claude-haiku-4-5-20251001": {"input": 1, "output": 5},
     "gpt-5.4": {"input": 2.5, "output": 15},
     "gpt-5.4-mini": {"input": 0.75, "output": 4.5},
+    "gpt-5.6-terra": {"input": 2.5, "output": 15},
+    "gpt-5.6-luna": {"input": 1.0, "output": 6.0},
     # Approximate public per-token (micro-USD) rates; cost stays best-effort and
-    # is reported as unknown for any model absent from this table.
+    # is reported as unknown for any model absent from this table. Gemini 3.x has
+    # a prompt-size tier (a higher rate above 200k input tokens); receipts and
+    # text prompts here stay far under that, so the <=200k standard rate is used.
     "gemini-2.5-flash": {"input": 0.3, "output": 2.5},
+    "gemini-3.5-flash": {"input": 1.5, "output": 9.0},
+    "gemini-3.1-pro-preview": {"input": 2.0, "output": 12.0},
+    "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.5},
     "deepseek-chat": {"input": 0.27, "output": 1.1},
 }
 

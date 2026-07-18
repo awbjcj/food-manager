@@ -40,6 +40,3 @@ class CallbackRegistry:
         if handler is None:
             return CallbackResult(ack="unrecognized action")
         return await handler(request, context)
-
-
-registry = CallbackRegistry()

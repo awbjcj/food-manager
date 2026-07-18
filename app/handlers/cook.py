@@ -215,3 +215,8 @@ async def run_cook_and_render(
         await _safe_edit_bot(
             bot, chat_id=chat_id, message_id=message_id, text=text, keyboard=keyboard
         )
+
+
+COMMANDS = (
+    ("cook", handle_cook, ("session_factory", "now_provider", "on_user_created")),
+)

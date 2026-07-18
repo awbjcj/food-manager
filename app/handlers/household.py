@@ -33,10 +33,6 @@ from app.invite_service import (
 )
 from app.models import User
 
-DEFAULT_TZ = "America/Detroit"
-DEFAULT_DIGEST_HOUR = 8
-DEFAULT_LLM_PROVIDER = "anthropic"
-
 _SessionFactory = Callable[[], Session]
 log = logging.getLogger(__name__)
 
@@ -101,9 +97,9 @@ async def _try_redeem_invite(
             telegram_user_id=msg.from_user.id,
             chat_id=msg.chat.id,
             now=datetime.now(timezone.utc),
-            tz=DEFAULT_TZ,
-            digest_hour=DEFAULT_DIGEST_HOUR,
-            llm_provider=DEFAULT_LLM_PROVIDER,
+            tz=handler_support.DEFAULT_TZ,
+            digest_hour=handler_support.DEFAULT_DIGEST_HOUR,
+            llm_provider=handler_support.DEFAULT_LLM_PROVIDER,
         )
     except AlreadyMember:
         # The sender already has a row, so honour their language preference.
@@ -395,3 +391,16 @@ async def handle_digest_at(
         session.commit()
         reschedule(user)
         await msg.answer(f"digest hour set to {hour}:00 in {user.tz}")
+
+
+COMMANDS = (
+    ("start", handle_start, ("session_factory", "on_user_created", "bot")),
+    ("invite", handle_invite, ("session_factory", "bot", "on_user_created")),
+    ("join", handle_join, ("session_factory", "on_user_created", "bot")),
+    ("household", handle_household, ("session_factory", "on_user_created")),
+    ("leave", handle_leave, ("session_factory", "unschedule", "on_user_created")),
+    ("remove", handle_remove, ("session_factory", "unschedule", "on_user_created")),
+    ("tz", handle_tz, ("session_factory", "reschedule")),
+    ("lang", handle_lang, ("session_factory", "on_user_created")),
+    ("digest_at", handle_digest_at, ("session_factory", "reschedule")),
+)

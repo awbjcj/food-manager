@@ -533,3 +533,10 @@ async def _answer_shelf_life(
                 extra={"error_class": type(exc).__name__},
             )
     return t("nl.shelf_life_unknown", lang, name=food)
+
+
+COMMANDS = (
+    ("llm", handle_llm, ("session_factory", "clients", "on_user_created")),
+    ("prefs", handle_prefs, ("session_factory", "clients", "on_user_created")),
+    ("help", handle_help, ("session_factory", "on_user_created")),
+)

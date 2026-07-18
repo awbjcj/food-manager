@@ -88,3 +88,17 @@ async def handle_favorites(
             else None
         )
         await msg.answer(view.text, reply_markup=keyboard)
+
+
+COMMANDS = (
+    (
+        "shopping",
+        handle_shopping,
+        ("session_factory", "now_provider", "on_user_created", "translation_llm"),
+    ),
+    (
+        "favorites",
+        handle_favorites,
+        ("session_factory", "on_user_created", "translation_llm"),
+    ),
+)

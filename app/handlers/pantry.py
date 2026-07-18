@@ -650,3 +650,32 @@ async def handle_stats(
             now=now.astimezone(timezone.utc),
         )
         await msg.answer(render_stats(stats, lang=user.lang))
+
+
+COMMANDS = (
+    (
+        "list",
+        handle_list,
+        ("session_factory", "now_provider", "on_user_created", "translation_llm"),
+    ),
+    (
+        "pantry",
+        handle_pantry,
+        ("session_factory", "now_provider", "on_user_created", "translation_llm"),
+    ),
+    (
+        "add",
+        handle_add,
+        ("session_factory", "now_provider", "clients", "on_user_created"),
+    ),
+    ("ate", handle_ate, ("session_factory", "now_provider", "on_user_created")),
+    ("toss", handle_toss, ("session_factory", "now_provider", "on_user_created")),
+    ("delete", handle_delete, ("session_factory", "now_provider", "on_user_created")),
+    ("snooze", handle_snooze, ("session_factory", "now_provider", "on_user_created")),
+    (
+        "correct",
+        handle_correct,
+        ("session_factory", "now_provider", "clients", "on_user_created"),
+    ),
+    ("stats", handle_stats, ("session_factory", "now_provider", "on_user_created")),
+)

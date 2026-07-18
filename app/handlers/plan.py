@@ -198,3 +198,20 @@ async def _render_plan_message(session, *, plan, lang, translation_llm):
         )
     )
     return text, keyboard
+
+
+COMMANDS = (
+    (
+        "plan",
+        handle_plan,
+        (
+            "session_factory",
+            "now_provider",
+            "composer",
+            "clients",
+            "recipe_sources",
+            "on_user_created",
+            "translation_llm",
+        ),
+    ),
+)

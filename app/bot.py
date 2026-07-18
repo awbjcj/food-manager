@@ -29,7 +29,8 @@ from app.callback_dispatch import (
     apply as apply_callback_result,
 )
 
-from app.handlers.household import (
+from app.handlers.household import (  # noqa: F401
+    COMMANDS as HOUSEHOLD_COMMANDS,
     handle_start,
     handle_invite,
     handle_join,
@@ -40,7 +41,8 @@ from app.handlers.household import (
     handle_lang,
     handle_digest_at,
 )
-from app.handlers.pantry import (
+from app.handlers.pantry import (  # noqa: F401
+    COMMANDS as PANTRY_COMMANDS,
     handle_list,
     handle_pantry,
     handle_add,
@@ -52,14 +54,17 @@ from app.handlers.pantry import (
     handle_correct_reply,
     handle_stats,
 )
-from app.handlers.shopping import (
+from app.handlers.shopping import (  # noqa: F401
+    COMMANDS as SHOPPING_COMMANDS,
     handle_shopping,
     handle_favorites,
 )
-from app.handlers.plan import (
+from app.handlers.plan import (  # noqa: F401
+    COMMANDS as PLAN_COMMANDS,
     handle_plan,
 )
-from app.handlers.meta import (
+from app.handlers.meta import (  # noqa: F401
+    COMMANDS as META_COMMANDS,
     _answer_shelf_life,  # noqa: F401 - compatibility re-export
     handle_nl_message,
     handle_llm,
@@ -67,7 +72,8 @@ from app.handlers.meta import (
     handle_help,
     handle_photo,
 )
-from app.handlers.cook import (
+from app.handlers.cook import (  # noqa: F401
+    COMMANDS as COOK_COMMANDS,
     handle_cook,
     run_cook_and_render,  # noqa: F401 - compatibility re-export
 )
@@ -136,76 +142,16 @@ HELP_TEXT = t("help.body", "en")
 HELP_TOPICS = ("pantry", "cook", "household", "settings")
 
 
-# The command roster: each row is (command name, handler, the injected deps the
-# handler needs). `build_dispatcher` binds the live deps and registers each row,
-# so adding a command is one line here instead of a forwarding closure plus a
-# separate `register` call. The two non-command message routes (correction reply,
-# photo) and the callback router are wired explicitly below because their triggers
-# and dispatch differ.
+# Each handler group owns its command specs; the dispatcher only composes them.
 _MESSAGE_COMMANDS: tuple[
     tuple[str, Callable[..., Awaitable[None]], tuple[str, ...]], ...
 ] = (
-    ("start", handle_start, ("session_factory", "on_user_created", "bot")),
-    ("invite", handle_invite, ("session_factory", "bot", "on_user_created")),
-    ("join", handle_join, ("session_factory", "on_user_created", "bot")),
-    ("household", handle_household, ("session_factory", "on_user_created")),
-    ("leave", handle_leave, ("session_factory", "unschedule", "on_user_created")),
-    ("remove", handle_remove, ("session_factory", "unschedule", "on_user_created")),
-    ("tz", handle_tz, ("session_factory", "reschedule")),
-    ("lang", handle_lang, ("session_factory", "on_user_created")),
-    ("digest_at", handle_digest_at, ("session_factory", "reschedule")),
-    (
-        "list",
-        handle_list,
-        ("session_factory", "now_provider", "on_user_created", "translation_llm"),
-    ),
-    (
-        "pantry",
-        handle_pantry,
-        ("session_factory", "now_provider", "on_user_created", "translation_llm"),
-    ),
-    (
-        "add",
-        handle_add,
-        ("session_factory", "now_provider", "clients", "on_user_created"),
-    ),
-    ("ate", handle_ate, ("session_factory", "now_provider", "on_user_created")),
-    ("toss", handle_toss, ("session_factory", "now_provider", "on_user_created")),
-    ("delete", handle_delete, ("session_factory", "now_provider", "on_user_created")),
-    ("snooze", handle_snooze, ("session_factory", "now_provider", "on_user_created")),
-    (
-        "correct",
-        handle_correct,
-        ("session_factory", "now_provider", "clients", "on_user_created"),
-    ),
-    ("stats", handle_stats, ("session_factory", "now_provider", "on_user_created")),
-    ("cook", handle_cook, ("session_factory", "now_provider", "on_user_created")),
-    (
-        "plan",
-        handle_plan,
-        (
-            "session_factory",
-            "now_provider",
-            "composer",
-            "clients",
-            "recipe_sources",
-            "on_user_created",
-            "translation_llm",
-        ),
-    ),
-    (
-        "shopping",
-        handle_shopping,
-        ("session_factory", "now_provider", "on_user_created", "translation_llm"),
-    ),
-    (
-        "favorites",
-        handle_favorites,
-        ("session_factory", "on_user_created", "translation_llm"),
-    ),
-    ("llm", handle_llm, ("session_factory", "clients", "on_user_created")),
-    ("prefs", handle_prefs, ("session_factory", "clients", "on_user_created")),
-    ("help", handle_help, ("session_factory", "on_user_created")),
+    *HOUSEHOLD_COMMANDS,
+    *PANTRY_COMMANDS,
+    *COOK_COMMANDS,
+    *PLAN_COMMANDS,
+    *SHOPPING_COMMANDS,
+    *META_COMMANDS,
 )
 
 

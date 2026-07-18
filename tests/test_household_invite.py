@@ -45,8 +45,13 @@ def session():
         db.refresh(household)
         assert household.id == 1
         db.add(
-            User(telegram_id=1, chat_id=11, household_id=household.id,
-                 role="owner", created_at=now)
+            User(
+                telegram_id=1,
+                chat_id=11,
+                household_id=household.id,
+                role="owner",
+                created_at=now,
+            )
         )
         db.commit()
         yield db
@@ -86,8 +91,14 @@ def test_create_invite_returns_token_and_future_expiry(session):
 def test_redeem_invite_creates_member_and_marks_single_use(session):
     inv = create_invite(session, household_id=1, created_by=1, now=_now())
     result = redeem_invite(
-        session, token=inv.token, telegram_user_id=2, chat_id=22, now=_now(),
-        tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+        session,
+        token=inv.token,
+        telegram_user_id=2,
+        chat_id=22,
+        now=_now(),
+        tz="America/Detroit",
+        digest_hour=8,
+        llm_provider="anthropic",
     )
     assert result.household_id == 1
     joined = session.get(User, 2)
@@ -102,13 +113,25 @@ def test_redeem_invite_creates_member_and_marks_single_use(session):
 def test_redeem_invite_is_single_use(session):
     inv = create_invite(session, household_id=1, created_by=1, now=_now())
     redeem_invite(
-        session, token=inv.token, telegram_user_id=2, chat_id=22, now=_now(),
-        tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+        session,
+        token=inv.token,
+        telegram_user_id=2,
+        chat_id=22,
+        now=_now(),
+        tz="America/Detroit",
+        digest_hour=8,
+        llm_provider="anthropic",
     )
     with pytest.raises(InviteInvalid):
         redeem_invite(
-            session, token=inv.token, telegram_user_id=3, chat_id=33, now=_now(),
-            tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+            session,
+            token=inv.token,
+            telegram_user_id=3,
+            chat_id=33,
+            now=_now(),
+            tz="America/Detroit",
+            digest_hour=8,
+            llm_provider="anthropic",
         )
 
 
@@ -117,16 +140,28 @@ def test_redeem_invite_rejects_expired(session):
     inv = create_invite(session, household_id=1, created_by=1, now=past)
     with pytest.raises(InviteInvalid):
         redeem_invite(
-            session, token=inv.token, telegram_user_id=2, chat_id=22, now=_now(),
-            tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+            session,
+            token=inv.token,
+            telegram_user_id=2,
+            chat_id=22,
+            now=_now(),
+            tz="America/Detroit",
+            digest_hour=8,
+            llm_provider="anthropic",
         )
 
 
 def test_redeem_invite_rejects_unknown_token(session):
     with pytest.raises(InviteInvalid):
         redeem_invite(
-            session, token="nope", telegram_user_id=2, chat_id=22, now=_now(),
-            tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+            session,
+            token="nope",
+            telegram_user_id=2,
+            chat_id=22,
+            now=_now(),
+            tz="America/Detroit",
+            digest_hour=8,
+            llm_provider="anthropic",
         )
 
 
@@ -134,16 +169,28 @@ def test_redeem_invite_rejects_existing_member(session):
     inv = create_invite(session, household_id=1, created_by=1, now=_now())
     with pytest.raises(AlreadyMember):
         redeem_invite(
-            session, token=inv.token, telegram_user_id=1, chat_id=11, now=_now(),
-            tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+            session,
+            token=inv.token,
+            telegram_user_id=1,
+            chat_id=11,
+            now=_now(),
+            tz="America/Detroit",
+            digest_hour=8,
+            llm_provider="anthropic",
         )
 
 
 def test_list_members_orders_owner_first(session):
     inv = create_invite(session, household_id=1, created_by=1, now=_now())
     redeem_invite(
-        session, token=inv.token, telegram_user_id=2, chat_id=22, now=_now(),
-        tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+        session,
+        token=inv.token,
+        telegram_user_id=2,
+        chat_id=22,
+        now=_now(),
+        tz="America/Detroit",
+        digest_hour=8,
+        llm_provider="anthropic",
     )
     members = list_members(session, household_id=1)
     assert [(m.telegram_id, m.role) for m in members] == [(1, "owner"), (2, "member")]
@@ -152,8 +199,14 @@ def test_list_members_orders_owner_first(session):
 def test_remove_member_requires_owner(session):
     inv = create_invite(session, household_id=1, created_by=1, now=_now())
     redeem_invite(
-        session, token=inv.token, telegram_user_id=2, chat_id=22, now=_now(),
-        tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+        session,
+        token=inv.token,
+        telegram_user_id=2,
+        chat_id=22,
+        now=_now(),
+        tz="America/Detroit",
+        digest_hour=8,
+        llm_provider="anthropic",
     )
     # member (2) cannot remove owner (1)
     with pytest.raises(NotOwner):
@@ -174,8 +227,14 @@ def test_remove_member_self_and_missing(session):
 def test_leave_household_member_ok_owner_blocked(session):
     inv = create_invite(session, household_id=1, created_by=1, now=_now())
     redeem_invite(
-        session, token=inv.token, telegram_user_id=2, chat_id=22, now=_now(),
-        tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+        session,
+        token=inv.token,
+        telegram_user_id=2,
+        chat_id=22,
+        now=_now(),
+        tz="America/Detroit",
+        digest_hour=8,
+        llm_provider="anthropic",
     )
     leave_household(session, telegram_user_id=2)
     assert session.get(User, 2) is None
@@ -184,8 +243,15 @@ def test_leave_household_member_ok_owner_blocked(session):
 
 
 def _add_member(session, telegram_id, *, role="member"):
-    session.add(User(telegram_id=telegram_id, chat_id=telegram_id * 11,
-                     household_id=1, role=role, created_at=_now()))
+    session.add(
+        User(
+            telegram_id=telegram_id,
+            chat_id=telegram_id * 11,
+            household_id=1,
+            role=role,
+            created_at=_now(),
+        )
+    )
     session.commit()
 
 
@@ -196,8 +262,14 @@ def test_remove_member_revokes_their_open_invites(session):
     remove_member(session, household_id=1, actor_id=1, target_id=2)
     with pytest.raises(InviteInvalid):
         redeem_invite(
-            session, token=inv.token, telegram_user_id=9, chat_id=99, now=_now(),
-            tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+            session,
+            token=inv.token,
+            telegram_user_id=9,
+            chat_id=99,
+            now=_now(),
+            tz="America/Detroit",
+            digest_hour=8,
+            llm_provider="anthropic",
         )
 
 
@@ -207,8 +279,14 @@ def test_leave_revokes_open_invites(session):
     leave_household(session, telegram_user_id=2)
     with pytest.raises(InviteInvalid):
         redeem_invite(
-            session, token=inv.token, telegram_user_id=9, chat_id=99, now=_now(),
-            tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+            session,
+            token=inv.token,
+            telegram_user_id=9,
+            chat_id=99,
+            now=_now(),
+            tz="America/Detroit",
+            digest_hour=8,
+            llm_provider="anthropic",
         )
 
 
@@ -218,29 +296,56 @@ def test_multi_use_invite_admits_several_until_expiry(session):
     )
     for uid in (2, 3, 4):
         result = redeem_invite(
-            session, token=inv.token, telegram_user_id=uid, chat_id=uid * 11,
-            now=_now(), tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+            session,
+            token=inv.token,
+            telegram_user_id=uid,
+            chat_id=uid * 11,
+            now=_now(),
+            tz="America/Detroit",
+            digest_hour=8,
+            llm_provider="anthropic",
         )
         assert result.household_id == 1
-    assert {m.telegram_id for m in list_members(session, household_id=1)} == {1, 2, 3, 4}
+    assert {m.telegram_id for m in list_members(session, household_id=1)} == {
+        1,
+        2,
+        3,
+        4,
+    }
 
 
 def test_capped_invite_exhausts_after_max_uses(session):
-    inv = create_invite(
-        session, household_id=1, created_by=1, now=_now(), max_uses=2
+    inv = create_invite(session, household_id=1, created_by=1, now=_now(), max_uses=2)
+    redeem_invite(
+        session,
+        token=inv.token,
+        telegram_user_id=2,
+        chat_id=22,
+        now=_now(),
+        tz="America/Detroit",
+        digest_hour=8,
+        llm_provider="anthropic",
     )
     redeem_invite(
-        session, token=inv.token, telegram_user_id=2, chat_id=22, now=_now(),
-        tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
-    )
-    redeem_invite(
-        session, token=inv.token, telegram_user_id=3, chat_id=33, now=_now(),
-        tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+        session,
+        token=inv.token,
+        telegram_user_id=3,
+        chat_id=33,
+        now=_now(),
+        tz="America/Detroit",
+        digest_hour=8,
+        llm_provider="anthropic",
     )
     with pytest.raises(InviteInvalid):
         redeem_invite(
-            session, token=inv.token, telegram_user_id=4, chat_id=44, now=_now(),
-            tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+            session,
+            token=inv.token,
+            telegram_user_id=4,
+            chat_id=44,
+            now=_now(),
+            tz="America/Detroit",
+            digest_hour=8,
+            llm_provider="anthropic",
         )
 
 
@@ -251,14 +356,26 @@ def test_multi_use_invite_revoked_when_creator_leaves(session):
     )
     # one redemption, link still has uses left
     redeem_invite(
-        session, token=inv.token, telegram_user_id=5, chat_id=55, now=_now(),
-        tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+        session,
+        token=inv.token,
+        telegram_user_id=5,
+        chat_id=55,
+        now=_now(),
+        tz="America/Detroit",
+        digest_hour=8,
+        llm_provider="anthropic",
     )
     leave_household(session, telegram_user_id=2)
     with pytest.raises(InviteInvalid):
         redeem_invite(
-            session, token=inv.token, telegram_user_id=6, chat_id=66, now=_now(),
-            tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+            session,
+            token=inv.token,
+            telegram_user_id=6,
+            chat_id=66,
+            now=_now(),
+            tz="America/Detroit",
+            digest_hour=8,
+            llm_provider="anthropic",
         )
 
 
@@ -268,8 +385,14 @@ def test_revoke_leaves_other_members_invites_intact(session):
     owner_inv = create_invite(session, household_id=1, created_by=1, now=_now())
     remove_member(session, household_id=1, actor_id=1, target_id=2)
     result = redeem_invite(
-        session, token=owner_inv.token, telegram_user_id=9, chat_id=99, now=_now(),
-        tz="America/Detroit", digest_hour=8, llm_provider="anthropic",
+        session,
+        token=owner_inv.token,
+        telegram_user_id=9,
+        chat_id=99,
+        now=_now(),
+        tz="America/Detroit",
+        digest_hour=8,
+        llm_provider="anthropic",
     )
     assert result.household_id == 1
 
@@ -279,8 +402,11 @@ def test_revoke_leaves_other_members_invites_intact(session):
 # --------------------------------------------------------------------------
 def test_resolve_authorization_admits_member_not_bootstrap(session):
     # add a member who is NOT the bootstrap id
-    session.add(User(telegram_id=2, chat_id=22, household_id=1,
-                     role="member", created_at=_now()))
+    session.add(
+        User(
+            telegram_id=2, chat_id=22, household_id=1, role="member", created_at=_now()
+        )
+    )
     session.commit()
     status = resolve_authorization(session, allowed_user_id=1, telegram_user_id=2)
     assert status.allowed is True
@@ -295,12 +421,18 @@ def test_resolve_authorization_rejects_stranger(session):
 
 
 def test_authorize_admits_second_household_member(session):
-    session.add(User(telegram_id=2, chat_id=22, household_id=1,
-                     role="member", created_at=_now()))
+    session.add(
+        User(
+            telegram_id=2, chat_id=22, household_id=1, role="member", created_at=_now()
+        )
+    )
     session.commit()
     decision = authorize_and_get_user(
-        session, allowed_user_id=1, telegram_user_id=2,
-        chat_id=22, chat_type="private",
+        session,
+        allowed_user_id=1,
+        telegram_user_id=2,
+        chat_id=22,
+        chat_type="private",
     )
     assert decision.allowed is True
     assert decision.user is not None
@@ -309,8 +441,11 @@ def test_authorize_admits_second_household_member(session):
 
 def test_authorize_rejects_stranger_without_invite(session):
     decision = authorize_and_get_user(
-        session, allowed_user_id=1, telegram_user_id=777,
-        chat_id=77, chat_type="private",
+        session,
+        allowed_user_id=1,
+        telegram_user_id=777,
+        chat_id=77,
+        chat_type="private",
     )
     assert decision.allowed is False
     assert decision.reason == "not authorized"
@@ -336,8 +471,11 @@ async def test_handle_invite_replies_with_link_and_code(session, monkeypatch):
 async def test_handle_invite_by_non_owner_member(session, monkeypatch):
     # Policy: any member may invite (not just the owner).
     monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
-    session.add(User(telegram_id=2, chat_id=22, household_id=1,
-                     role="member", created_at=_now()))
+    session.add(
+        User(
+            telegram_id=2, chat_id=22, household_id=1, role="member", created_at=_now()
+        )
+    )
     session.commit()
     bot = MagicMock()
     bot.get_me = AsyncMock(return_value=MagicMock(username="PantryBot"))
@@ -374,8 +512,11 @@ async def test_handle_invite_rejects_bad_mode(session, monkeypatch):
 @pytest.mark.asyncio
 async def test_handle_join_notifies_existing_members(session, monkeypatch):
     monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
-    session.add(User(telegram_id=2, chat_id=22, household_id=1,
-                     role="member", created_at=_now()))
+    session.add(
+        User(
+            telegram_id=2, chat_id=22, household_id=1, role="member", created_at=_now()
+        )
+    )
     session.commit()
     inv = create_invite(session, household_id=1, created_by=1, now=_now())
     bot = MagicMock()
@@ -391,14 +532,18 @@ async def test_handle_join_notifies_existing_members(session, monkeypatch):
 @pytest.mark.asyncio
 async def test_handle_join_redeems_invite(session, monkeypatch):
     monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.DEFAULT_LLM_PROVIDER", "deepseek")
     inv = create_invite(session, household_id=1, created_by=1, now=_now())
     created = MagicMock()
     msg = _msg(f"/join {inv.token}", user_id=2, chat_id=22)
     await handle_join(
-        msg, session_factory=lambda: session, on_user_created=created,
+        msg,
+        session_factory=lambda: session,
+        on_user_created=created,
     )
     joined = session.get(User, 2)
     assert joined is not None and joined.household_id == 1 and joined.role == "member"
+    assert joined.llm_provider == "deepseek"
     created.assert_called_once()
 
 
@@ -440,7 +585,9 @@ async def test_handle_start_with_token_redeems(session, monkeypatch):
     created = MagicMock()
     msg = _msg(f"/start {inv.token}", user_id=3, chat_id=33)
     await handle_start(
-        msg, session_factory=lambda: session, on_user_created=created,
+        msg,
+        session_factory=lambda: session,
+        on_user_created=created,
     )
     joined = session.get(User, 3)
     assert joined is not None and joined.household_id == 1
@@ -450,8 +597,11 @@ async def test_handle_start_with_token_redeems(session, monkeypatch):
 @pytest.mark.asyncio
 async def test_handle_household_lists_members(session, monkeypatch):
     monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
-    session.add(User(telegram_id=2, chat_id=22, household_id=1,
-                     role="member", created_at=_now()))
+    session.add(
+        User(
+            telegram_id=2, chat_id=22, household_id=1, role="member", created_at=_now()
+        )
+    )
     session.commit()
     msg = _msg("/household", user_id=1)
     await handle_household(msg, session_factory=lambda: session)
@@ -474,8 +624,11 @@ async def test_handle_household_solo_owner_marks_you(session, monkeypatch):
 @pytest.mark.asyncio
 async def test_handle_leave_member_unschedules(session, monkeypatch):
     monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
-    session.add(User(telegram_id=2, chat_id=22, household_id=1,
-                     role="member", created_at=_now()))
+    session.add(
+        User(
+            telegram_id=2, chat_id=22, household_id=1, role="member", created_at=_now()
+        )
+    )
     session.commit()
     unschedule = MagicMock()
     msg = _msg("/leave", user_id=2, chat_id=22)
@@ -498,8 +651,11 @@ async def test_handle_leave_owner_blocked(session, monkeypatch):
 @pytest.mark.asyncio
 async def test_handle_remove_owner_removes_member(session, monkeypatch):
     monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
-    session.add(User(telegram_id=2, chat_id=22, household_id=1,
-                     role="member", created_at=_now()))
+    session.add(
+        User(
+            telegram_id=2, chat_id=22, household_id=1, role="member", created_at=_now()
+        )
+    )
     session.commit()
     unschedule = MagicMock()
     msg = _msg("/remove 2", user_id=1)
@@ -511,10 +667,16 @@ async def test_handle_remove_owner_removes_member(session, monkeypatch):
 @pytest.mark.asyncio
 async def test_handle_remove_non_owner_rejected(session, monkeypatch):
     monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
-    session.add(User(telegram_id=2, chat_id=22, household_id=1,
-                     role="member", created_at=_now()))
-    session.add(User(telegram_id=3, chat_id=33, household_id=1,
-                     role="member", created_at=_now()))
+    session.add(
+        User(
+            telegram_id=2, chat_id=22, household_id=1, role="member", created_at=_now()
+        )
+    )
+    session.add(
+        User(
+            telegram_id=3, chat_id=33, household_id=1, role="member", created_at=_now()
+        )
+    )
     session.commit()
     unschedule = MagicMock()
     msg = _msg("/remove 3", user_id=2, chat_id=22)

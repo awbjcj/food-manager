@@ -6,6 +6,7 @@ from sqlmodel import SQLModel, Session, create_engine
 
 import app.bot as bot_mod
 import app.callbacks.cook as cook_callbacks
+import app.callbacks.routes as callback_routes
 import app.handler_support as handler_support
 from app.client_set import PerUserClients
 from app.bot import handle_cook, handle_cook_callback, run_cook_and_render
@@ -744,8 +745,8 @@ def test_run_cook_and_render_completes_and_edits(monkeypatch):
 def test_dispatcher_routes_every_v49_cook_prefix_with_static_sources(monkeypatch):
     cook_callback = AsyncMock()
     generic_callback = AsyncMock()
-    monkeypatch.setattr(bot_mod, "handle_cook_callback", cook_callback)
-    monkeypatch.setattr(bot_mod, "handle_callback", generic_callback)
+    monkeypatch.setattr(callback_routes, "handle_cook_callback", cook_callback)
+    monkeypatch.setattr(callback_routes, "handle_callback", generic_callback)
     static_source = object()
 
     dispatcher = bot_mod.build_dispatcher(

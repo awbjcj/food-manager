@@ -11,13 +11,14 @@ from typing import AsyncIterator, Awaitable, Callable, Optional
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
-from aiogram.types import ForceReply, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import ForceReply
 from sqlalchemy import update
 from sqlmodel import Session, select
 
 from app.commands import (
     CommandError,
     parse_callback,
+    parse_callback_request,
     parse_correct_reply_marker,
     parse_digest_at,
     parse_invite_mode,
@@ -34,6 +35,7 @@ from app.commands import (
     parse_tz,
 )
 from app.client_set import PerUserClients
+from app.callbacks import CallbackContext, CallbackRegistry, EXPECTED_CALLBACK_ROUTES
 from app.i18n import DEFAULT_LANG, LANGS, t
 from app.correction_service import (
     NullDiff,
@@ -67,6 +69,7 @@ from app.cook import (
 )
 from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
 import app.plan_service as plan_service_mod
+import app.views as views
 from app.plan_service import NotEnoughItemsToPlan, aggregate_shopping, build_plan, swap_day
 from app.week_composer import DaySpec
 from app.shopping_service import add_missing, check_off, list_pending
@@ -97,7 +100,13 @@ from app.normalization import normalize
 from app.shelf_life_defaults import lookup_default
 from app.shelf_life_search import resolve_search_days
 from app.storage_state import shelf_life_origin
-from app.callback_dispatch import answer as dispatch_answer, edit_or_resend
+from app.telegram_ui import to_aiogram_keyboard
+from app.callback_dispatch import (
+    CallbackResult,
+    answer as dispatch_answer,
+    apply as apply_callback_result,
+    edit_or_resend,
+)
 from app.nl_intent import MAX_CONTEXT_NAMES, match_items
 from app.progress import clear_progress, finish_progress, start_progress
 from app.pantry_service import (
@@ -137,7 +146,6 @@ from app.renderer import (
     build_digest_keyboard,
     build_favorites_keyboard,
     build_item_card_keyboard,
-    build_nl_picker_keyboard,
     build_plan_keyboard,
     build_remove_confirm_keyboard,
     build_shopping_keyboard,
@@ -146,25 +154,14 @@ from app.renderer import (
     render_add_diff,
     render_applied_add,
     render_applied_correction,
-    render_correct_menu,
     render_correction_diff,
-    render_cook_result,
-    render_digest,
-    render_favorites,
     render_ingest_reply,
-    render_item_card,
-    render_list,
     render_profile,
-    render_plan,
-    render_recook,
-    render_remove_confirm,
-    render_shopping_list,
     render_stats,
     render_terminal_state,
     render_undo_result,
 )
 from app.profile_service import profile_from_household, update_profile_from_sentence
-from app.translation_service import cached_name_translations, translate_texts
 
 DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8
@@ -292,28 +289,6 @@ def _available_llm_providers(clients: PerUserClients) -> tuple[str, ...]:
     # chosen one lacks them, so they are not required for selectability. (The
     # ``llm`` image selector is accepted for call-site symmetry.)
     return clients.available_text_providers
-
-
-async def _translate_for_render(session, *, lang, texts, translation_llm):
-    if lang == "en" or translation_llm is None:
-        return {}
-    return await translate_texts(session, [x for x in texts if x], lang=lang, llm=translation_llm)
-
-
-def _cached_names_for_render(session, *, lang, texts):
-    return cached_name_translations(session, [x for x in texts if x], lang=lang)
-
-
-def _cook_card_texts(cards) -> list[str]:
-    texts: list[str] = []
-    for card in cards:
-        recipe = card.recipe
-        texts.append(recipe.title)
-        texts.append(recipe.cuisine)
-        texts.append(recipe.method_gist)
-        texts.extend(ing.name for ing in recipe.ingredients)
-        texts.extend(getattr(card, "shopping_list", None) or [])
-    return texts
 
 
 def _render_llm_status(user: User, clients: PerUserClients) -> str:
@@ -786,13 +761,14 @@ async def handle_list(
         items = list_active(
             session, household_id=user.household_id, f=list_filter, today=today
         )
-        names = await _translate_for_render(
+        view = await views.pantry_list(
             session,
-            lang=user.lang,
-            texts=[i.raw_name for i in items],
+            items,
+            user=user,
+            today=today,
             translation_llm=translation_llm,
         )
-        await msg.answer(render_list(items, today=today, lang=user.lang, names=names))
+        await msg.answer(view.text)
 
 
 async def handle_pantry(
@@ -830,14 +806,15 @@ async def handle_pantry(
                     t("pantry.item_inactive", user.lang, id=mode, status=item.status)
                 )
                 return
-            names = await _translate_for_render(
+            view = await views.item_card(
                 session,
-                lang=user.lang,
-                texts=[item.raw_name],
+                item,
+                user=user,
+                today=today,
                 translation_llm=translation_llm,
             )
             await msg.answer(
-                render_item_card(item, today=today, lang=user.lang, names=names),
+                view.text,
                 reply_markup=to_aiogram_keyboard(
                     build_item_card_keyboard(item, lang=user.lang, back_to="all")
                 ),
@@ -860,27 +837,28 @@ async def handle_pantry(
             cap = None
             empty_key = "pantry.all_clear"
 
-        names = await _translate_for_render(
+        view = await views.digest(
             session,
-            lang=user.lang,
-            texts=[i.raw_name for i in items],
+            items,
+            user=user,
+            today=today,
             translation_llm=translation_llm,
+            cap=cap,
         )
-        rendered = render_digest(items, today=today, lang=user.lang, names=names, cap=cap)
-        if not rendered.text:
+        if not view.text:
             await msg.answer(t(empty_key, user.lang))
             return
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
-                rendered.rendered_items,
-                has_more=rendered.has_more,
+                view.rendered_items,
+                has_more=view.has_more,
                 today=today,
                 lang=user.lang,
-                names=names,
+                names=view.names,
                 back_to=back_to,
             )
         )
-        await msg.answer(rendered.text, reply_markup=keyboard)
+        await msg.answer(view.text, reply_markup=keyboard)
 
 
 async def _run_add_flow(
@@ -1101,15 +1079,13 @@ async def _dispatch_nl_intent(
             )
             return
         if len(matches) > 1:
-            names = await _translate_for_render(
+            picker = await views.nl_picker(
                 session,
-                lang=user.lang,
-                texts=[i.raw_name for i in matches],
+                matches,
+                user=user,
                 translation_llm=translation_llm,
             )
-            keyboard = to_aiogram_keyboard(
-                build_nl_picker_keyboard(matches, names=names)
-            )
+            keyboard = to_aiogram_keyboard(picker.rows)
             await finish_progress(progress, msg, t("nl.which_one", user.lang), keyboard)
             return
         item = matches[0]
@@ -1153,23 +1129,23 @@ async def _dispatch_nl_intent(
         if not rows:
             await finish_progress(progress, msg, t("digest.pantry_clear", user.lang))
             return
-        names = await _translate_for_render(
+        view = await views.digest(
             session,
-            lang=user.lang,
-            texts=[i.raw_name for i in rows],
+            rows,
+            user=user,
+            today=today,
             translation_llm=translation_llm,
         )
-        rendered = render_digest(rows, today=today, lang=user.lang, names=names)
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
-                rendered.rendered_items,
-                has_more=rendered.has_more,
+                view.rendered_items,
+                has_more=view.has_more,
                 today=today,
                 lang=user.lang,
-                names=names,
+                names=view.names,
             )
         )
-        await finish_progress(progress, msg, rendered.text, keyboard)
+        await finish_progress(progress, msg, view.text, keyboard)
         return
 
     await finish_progress(progress, msg, t("nl.hint", user.lang))
@@ -1537,11 +1513,8 @@ async def handle_shopping(
             return
         session, user = ctx.session, ctx.user
         items = list_pending(session, household_id=user.household_id)
-        names = await _translate_for_render(
-            session,
-            lang=user.lang,
-            texts=[i.name_raw for i in items],
-            translation_llm=translation_llm,
+        view = await views.shopping(
+            session, items, user=user, translation_llm=translation_llm
         )
         keyboard = (
             to_aiogram_keyboard(
@@ -1550,7 +1523,7 @@ async def handle_shopping(
             if items
             else None
         )
-        await msg.answer(render_shopping_list(items, lang=user.lang, names=names), reply_markup=keyboard)
+        await msg.answer(view.text, reply_markup=keyboard)
 
 
 async def handle_favorites(
@@ -1569,11 +1542,8 @@ async def handle_favorites(
             return
         session, user = ctx.session, ctx.user
         recipes = list_saved(session, household_id=user.household_id)
-        names = await _translate_for_render(
-            session,
-            lang=user.lang,
-            texts=[r.title for r in recipes] + [r.cuisine for r in recipes],
-            translation_llm=translation_llm,
+        view = await views.favorites(
+            session, recipes, user=user, translation_llm=translation_llm
         )
         keyboard = (
             to_aiogram_keyboard(
@@ -1584,7 +1554,7 @@ async def handle_favorites(
             if recipes
             else None
         )
-        await msg.answer(render_favorites(recipes, lang=user.lang, names=names), reply_markup=keyboard)
+        await msg.answer(view.text, reply_markup=keyboard)
 
 
 async def handle_cook(
@@ -1717,17 +1687,14 @@ async def handle_plan(
             return
 
         candidates = [ScoredCandidate.model_validate_json(entry.recipe_json) for entry in entries]
-        names = await _translate_for_render(
-            session,
-            lang=user.lang,
-            texts=[text for c in candidates for text in (c.recipe.title, c.recipe.cuisine)],
-            translation_llm=translation_llm,
-        )
         rows = [
             (entry.date, candidate, _plan_uses_expiring(entry))
             for entry, candidate in zip(entries, candidates)
         ]
-        text = render_plan(rows, lang=user.lang, names=names)
+        view = await views.plan(
+            session, rows, user=user, translation_llm=translation_llm
+        )
+        text = view.text
         if had_active:
             text = f"{text}\n{t('plan.superseded', user.lang)}"
         assert plan.id is not None
@@ -1758,17 +1725,17 @@ def _plan_entry_rows(session, plan_id: int):
 
 async def _render_plan_message(session, *, plan, lang, translation_llm):
     entries, candidates = _plan_entry_rows(session, plan.id)
-    names = await _translate_for_render(
-        session,
-        lang=lang,
-        texts=[text for c in candidates for text in (c.recipe.title, c.recipe.cuisine)],
-        translation_llm=translation_llm,
-    )
     rows = [
         (entry.date, candidate, _plan_uses_expiring(entry))
         for entry, candidate in zip(entries, candidates)
     ]
-    text = render_plan(rows, lang=lang, names=names)
+    view = await views.plan(
+        session,
+        rows,
+        user=SimpleNamespace(lang=lang),
+        translation_llm=translation_llm,
+    )
+    text = view.text
     keyboard = to_aiogram_keyboard(
         build_plan_keyboard(
             plan.id, [(entry.day_index, entry.date) for entry in entries], lang=lang
@@ -2083,10 +2050,11 @@ async def handle_photo(
             },
         )
         user_lang = user.lang
-        names = await _translate_for_render(
+        view = await views.ingest_reply(
             session,
-            lang=user_lang,
-            texts=list(summary.inserted_item_names),
+            summary,
+            user=user,
+            today=today,
             translation_llm=translation_llm,
         )
         keyboard = (
@@ -2101,7 +2069,7 @@ async def handle_photo(
         sent = await finish_progress(
             progress,
             msg,
-            render_ingest_reply(summary, today=today, lang=user_lang, names=names),
+            view.text,
             keyboard,
         )
 
@@ -2134,7 +2102,7 @@ async def handle_photo(
                 today=today,
                 refined_ids=refined,
                 lang=user_lang,
-                names=names,
+                names=view.names,
             )
             try:
                 await bot.edit_message_text(
@@ -2287,17 +2255,16 @@ async def handle_cook_callback(
             except (TypeError, ValueError):
                 cards = []
             assert cook.id is not None
-            names = await _translate_for_render(
+            view = await views.cook_result(
                 session,
-                lang=user.lang,
-                texts=_cook_card_texts(cards),
+                cards,
+                user=user,
+                show_alternatives=True,
                 translation_llm=translation_llm,
             )
             await _safe_edit_cb(
                 cb,
-                render_cook_result(
-                    cards, show_alternatives=True, lang=user.lang, names=names
-                ),
+                view.text,
                 to_aiogram_keyboard(
                     build_cook_result_keyboard(
                         cook.id,
@@ -2378,17 +2345,16 @@ async def handle_cook_callback(
                 if not cards:
                     await _safe_edit_cb(cb, t("cook.no_more", user.lang))
                 else:
-                    names = await _translate_for_render(
+                    view = await views.cook_result(
                         session,
-                        lang=user.lang,
-                        texts=_cook_card_texts(cards),
+                        cards,
+                        user=user,
+                        show_alternatives=False,
                         translation_llm=translation_llm,
                     )
                     await _safe_edit_cb(
                         cb,
-                        render_cook_result(
-                            cards, show_alternatives=False, lang=user.lang, names=names
-                        ),
+                        view.text,
                         to_aiogram_keyboard(
                             build_cook_result_keyboard(
                                 cook.id,
@@ -2677,15 +2643,14 @@ async def run_cook_and_render(
             return
 
         mark_status(session, cook=cook, status="done")
-        names = await _translate_for_render(
+        view = await views.cook_result(
             session,
-            lang=user.lang,
-            texts=_cook_card_texts(cards),
+            cards,
+            user=user,
+            show_alternatives=False,
             translation_llm=translation_llm,
         )
-        text = render_cook_result(
-            cards, show_alternatives=False, lang=user.lang, names=names
-        )
+        text = view.text
         keyboard = (
             to_aiogram_keyboard(
                 build_cook_result_keyboard(
@@ -2738,11 +2703,6 @@ async def handle_item_callback(
                 return
             await refresh()
 
-        def item_names(item) -> dict:
-            return _cached_names_for_render(
-                session, lang=user.lang, texts=[item.raw_name]
-            )
-
         if action.kind == "list":
             await dispatch_answer(cb)
             await refresh_for_origin()
@@ -2773,10 +2733,12 @@ async def handle_item_callback(
                 item_id=item_id, days=new_days, today=today,
             )
             await dispatch_answer(cb, "updated")
-            names = item_names(item)
+            view = views.correct_menu_cached(
+                session, item, lang=user.lang, today=today
+            )
             await edit_or_resend(
                 cb,
-                render_correct_menu(item, today=today, lang=user.lang, names=names),
+                view.text,
                 to_aiogram_keyboard(build_correct_menu_keyboard(item_id, lang=user.lang)),
             )
             return
@@ -2792,7 +2754,9 @@ async def handle_item_callback(
 
         if action.kind == "ctext":
             await dispatch_answer(cb)
-            names = item_names(item)
+            names = views.cached_names(
+                session, lang=user.lang, texts=[item.raw_name]
+            )
             display_name = names.get(item.raw_name, item.raw_name)
             prompt = t(
                 "correct.freetext_prompt", user.lang,
@@ -2809,11 +2773,13 @@ async def handle_item_callback(
 
         # Pure view changes: acknowledge, then render the requested screen.
         await dispatch_answer(cb)
-        names = item_names(item)
         if action.kind == "open":
+            view = views.item_card_cached(
+                session, item, lang=user.lang, today=today
+            )
             await edit_or_resend(
                 cb,
-                render_item_card(item, today=today, lang=user.lang, names=names),
+                view.text,
                 to_aiogram_keyboard(
                     build_item_card_keyboard(
                         item,
@@ -2823,15 +2789,19 @@ async def handle_item_callback(
                 ),
             )
         elif action.kind == "corr":
+            view = views.correct_menu_cached(
+                session, item, lang=user.lang, today=today
+            )
             await edit_or_resend(
                 cb,
-                render_correct_menu(item, today=today, lang=user.lang, names=names),
+                view.text,
                 to_aiogram_keyboard(build_correct_menu_keyboard(item_id, lang=user.lang)),
             )
         elif action.kind == "rm":
+            view = views.remove_confirm_cached(session, item, lang=user.lang)
             await edit_or_resend(
                 cb,
-                render_remove_confirm(item, lang=user.lang, names=names),
+                view.text,
                 to_aiogram_keyboard(build_remove_confirm_keyboard(item_id, lang=user.lang)),
             )
 
@@ -2949,10 +2919,10 @@ async def handle_callback(
                 now=now_provider(user.tz),
             )
             remaining = list_pending(session, household_id=user.household_id)
-            shop_names = await _translate_for_render(
+            view = await views.shopping(
                 session,
-                lang=user.lang,
-                texts=[i.name_raw for i in remaining],
+                remaining,
+                user=user,
                 translation_llm=translation_llm,
             )
             keyboard = (
@@ -2966,7 +2936,7 @@ async def handle_callback(
             )
             try:
                 await cb.message.edit_text(
-                    render_shopping_list(remaining, lang=user.lang, names=shop_names),
+                    view.text,
                     reply_markup=keyboard,
                 )
             except Exception as exc:
@@ -2987,24 +2957,14 @@ async def handle_callback(
                 session, household_id=user.household_id, saved=saved, today=today
             )
             recipe = recipe_from_saved(saved)
-            recook_texts = [
-                recipe.title,
-                recipe.cuisine,
-                recipe.method_gist,
-                *(i.name for i in recipe.ingredients),
-                *shopping,
-            ]
-            recook_names = await _translate_for_render(
+            view = await views.recook(
                 session,
-                lang=user.lang,
-                texts=recook_texts,
+                recipe,
+                shopping_items=shopping,
+                user=user,
                 translation_llm=translation_llm,
             )
-            await cb.message.answer(
-                render_recook(
-                    recipe, shopping=shopping, lang=user.lang, names=recook_names
-                )
-            )
+            await cb.message.answer(view.text)
             await cb.answer("here's the plan")
             return
 
@@ -3013,24 +2973,19 @@ async def handle_callback(
             if not rows:
                 await cb.answer("nothing due")
                 return
-            row_names = _cached_names_for_render(
-                session,
-                lang=user.lang,
-                texts=[i.raw_name for i in rows],
-            )
-            rendered = render_digest(
-                rows, today=today, lang=user.lang, names=row_names, cap=None
+            view = views.digest_cached(
+                session, rows, lang=user.lang, today=today, cap=None
             )
             keyboard = to_aiogram_keyboard(
                 build_digest_keyboard(
-                    rendered.rendered_items,
+                    view.rendered_items,
                     has_more=False,
                     today=today,
                     lang=user.lang,
-                    names=row_names,
+                    names=view.names,
                 )
             )
-            await _safe_edit_cb(cb, rendered.text, keyboard)
+            await _safe_edit_cb(cb, view.text, keyboard)
             await cb.answer()
             return
 
@@ -3278,22 +3233,19 @@ async def _refresh_digest_message(
 ) -> None:
     remaining = list_digest_due(session, household_id=household_id, today=today)
     if remaining:
-        names = _cached_names_for_render(
-            session,
-            lang=lang,
-            texts=[i.raw_name for i in remaining],
+        view = views.digest_cached(
+            session, remaining, lang=lang, today=today
         )
-        rendered = render_digest(remaining, today=today, lang=lang, names=names)
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
-                rendered.rendered_items,
-                has_more=rendered.has_more,
+                view.rendered_items,
+                has_more=view.has_more,
                 today=today,
                 lang=lang,
-                names=names,
+                names=view.names,
             )
         )
-        await edit_or_resend(cb, rendered.text, keyboard)
+        await edit_or_resend(cb, view.text, keyboard)
         return
     await edit_or_resend(cb, t("digest.pantry_clear", lang))
 
@@ -3308,41 +3260,22 @@ async def _refresh_pantry_message(
         today=today,
     )
     if remaining:
-        names = _cached_names_for_render(
-            session,
-            lang=lang,
-            texts=[i.raw_name for i in remaining],
+        view = views.digest_cached(
+            session, remaining, lang=lang, today=today, cap=None
         )
-        rendered = render_digest(remaining, today=today, lang=lang, names=names, cap=None)
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
-                rendered.rendered_items,
+                view.rendered_items,
                 has_more=False,
                 today=today,
                 lang=lang,
-                names=names,
+                names=view.names,
                 back_to="all",
             )
         )
-        await edit_or_resend(cb, rendered.text, keyboard)
+        await edit_or_resend(cb, view.text, keyboard)
         return
     await edit_or_resend(cb, t("pantry.all_clear", lang))
-
-
-def to_aiogram_keyboard(rows: list[list[CallbackButton]]) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text=button.text, url=button.url)
-                if button.url
-                else InlineKeyboardButton(
-                    text=button.text, callback_data=button.callback_data
-                )
-                for button in row
-            ]
-            for row in rows
-        ]
-    )
 
 
 # The command roster: each row is (command name, handler, the injected deps the
@@ -3484,54 +3417,127 @@ def build_dispatcher(
             F.text & ~F.text.startswith("/") & ~F.reply_to_message,
         )
 
-    async def on_callback(callback):
-        if (callback.data or "").startswith("help:"):
-            await handle_help_callback(callback, session_factory=session_factory)
-            return
-        if (callback.data or "").startswith("plan:"):
+    callback_registry = CallbackRegistry()
+
+    @callback_registry.register("help")
+    async def _help_route(_request, context):
+        async def run():
+            await handle_help_callback(
+                context.callback, session_factory=context.session_factory
+            )
+            return None
+
+        return CallbackResult(deferred=run)
+
+    @callback_registry.register("plan_swap", "plan_shop", "plan_cancel")
+    async def _plan_route(_request, context):
+        async def run():
             await handle_plan_callback(
-                callback,
-                session_factory=session_factory,
-                now_provider=now_provider,
-                clients=clients,
-                recipe_sources=recipe_sources,
-                translation_llm=translation_llm,
+                context.callback,
+                session_factory=context.session_factory,
+                now_provider=context.now_provider,
+                clients=context.clients,
+                recipe_sources=context.recipe_sources,
+                translation_llm=context.translation_llm,
             )
-            return
-        if (callback.data or "").startswith(
-            ("cookpick:", "cookalt:", "cookmore:", "cookmore2:", "cookadj:")
-        ):
-            if not clients.cook_configured:
-                await callback.answer(
-                    "cook is not configured yet", show_alert=False
-                )
-                return
+            return None
+
+        return CallbackResult(deferred=run)
+
+    @callback_registry.register(
+        "cook_pick", "cook_alt", "cook_more", "cook_adjust", "cook_more_opts"
+    )
+    async def _cook_route(_request, context):
+        if not context.clients.cook_configured:
+            return CallbackResult(ack="cook is not configured yet")
+
+        async def run():
             await handle_cook_callback(
-                callback,
-                session_factory=session_factory,
-                now_provider=now_provider,
-                clients=clients,
-                spawn=asyncio.create_task,
-                bot=bot,
-                translation_llm=translation_llm,
-                recipe_sources=recipe_sources,
+                context.callback,
+                session_factory=context.session_factory,
+                now_provider=context.now_provider,
+                clients=context.clients,
+                spawn=context.spawn,
+                bot=context.bot,
+                translation_llm=context.translation_llm,
+                recipe_sources=context.recipe_sources,
             )
-            return
-        if (callback.data or "").startswith("item:"):
+            return None
+
+        return CallbackResult(deferred=run)
+
+    @callback_registry.register(
+        "item_open",
+        "item_list",
+        "item_corr",
+        "item_nudge",
+        "item_ctext",
+        "item_rm",
+        "item_rmok",
+    )
+    async def _item_route(_request, context):
+        async def run():
             await handle_item_callback(
-                callback,
-                session_factory=session_factory,
-                now_provider=now_provider,
-                translation_llm=translation_llm,
+                context.callback,
+                session_factory=context.session_factory,
+                now_provider=context.now_provider,
+                translation_llm=context.translation_llm,
             )
+            return None
+
+        return CallbackResult(deferred=run)
+
+    @callback_registry.register(
+        "ate",
+        "toss",
+        "snooze2",
+        "freeze",
+        "fridge",
+        "show_all",
+        "apply",
+        "cancel",
+        "undo_receipt",
+        "undo_add",
+        "cook_like",
+        "cook_dislike",
+        "cook_save",
+        "cook_shop",
+        "shop_done",
+        "fav_cook",
+    )
+    async def _action_route(_request, context):
+        async def run():
+            await handle_callback(
+                context.callback,
+                session_factory=context.session_factory,
+                now_provider=context.now_provider,
+                clients=context.clients,
+                translation_llm=context.translation_llm,
+            )
+            return None
+
+        return CallbackResult(deferred=run)
+
+    assert callback_registry.routes == EXPECTED_CALLBACK_ROUTES
+
+    async def on_callback(callback):
+        try:
+            request = parse_callback_request(callback.data or "")
+        except CommandError:
+            await dispatch_answer(callback, "unrecognized action")
             return
-        await handle_callback(
-            callback,
+        context = CallbackContext(
+            callback=callback,
             session_factory=session_factory,
             now_provider=now_provider,
             clients=clients,
             translation_llm=translation_llm,
+            bot=bot,
+            spawn=asyncio.create_task,
+            recipe_sources=recipe_sources,
         )
+        result = await callback_registry.dispatch(request, context)
+        await apply_callback_result(callback, result)
 
     async def on_error(event) -> bool:
         exc = event.exception

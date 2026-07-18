@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.callback_dispatch import answer, edit_or_resend
+from app.callback_dispatch import CallbackResult, View, answer, apply, edit_or_resend
 
 
 def _cb():
@@ -63,3 +63,36 @@ async def test_answer_swallows_failure():
     cb = SimpleNamespace(answer=AsyncMock(side_effect=Exception("expired")))
     await answer(cb, "toast")  # must not raise
     cb.answer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_apply_answers_before_running_deferred_work_and_rendering():
+    cb = _cb()
+    events = []
+    cb.answer.side_effect = lambda *args, **kwargs: events.append("answer")
+    cb.message.edit_text.side_effect = lambda *args, **kwargs: events.append("edit")
+
+    async def deferred():
+        events.append("deferred")
+        return View("done", keyboard="kb")
+
+    await apply(cb, CallbackResult(ack="working", deferred=deferred))
+
+    assert events == ["answer", "deferred", "edit"]
+
+
+@pytest.mark.asyncio
+async def test_apply_supports_ack_only_and_direct_deferred_effects():
+    cb = _cb()
+    called = False
+
+    async def deferred():
+        nonlocal called
+        called = True
+        return None
+
+    await apply(cb, CallbackResult(ack="saved", deferred=deferred))
+
+    assert called is True
+    cb.answer.assert_awaited_once_with("saved", show_alert=False)
+    cb.message.edit_text.assert_not_awaited()

@@ -10,12 +10,12 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.base import JobLookupError
 from sqlmodel import Session, select
 
-from app.bot import to_aiogram_keyboard
+import app.views as views
 from app.models import PantryItem, User
 from app.pantry_service import list_digest_due
 from app.pending_service import sweep_expired
-from app.renderer import build_digest_keyboard, render_digest
-from app.translation_service import translate_texts
+from app.renderer import build_digest_keyboard
+from app.telegram_ui import to_aiogram_keyboard
 
 
 log = logging.getLogger(__name__)
@@ -62,19 +62,19 @@ async def send_digest_once(
             session.add(user)
             session.commit()
             return False
-        names: dict[str, str] = {}
-        if user.lang != "en" and translation_llm is not None:
-            names = await translate_texts(
-                session, [i.raw_name for i in payload.items],
-                lang=user.lang, llm=translation_llm,
-            )
-        rendered = render_digest(payload.items, today=today, lang=user.lang, names=names)
+        rendered = await views.digest(
+            session,
+            payload.items,
+            user=user,
+            today=today,
+            translation_llm=translation_llm,
+        )
         keyboard = build_digest_keyboard(
             rendered.rendered_items,
             has_more=rendered.has_more,
             today=today,
             lang=user.lang,
-            names=names,
+            names=rendered.names,
         )
         await bot.send_message(
             chat_id=payload.user.chat_id,

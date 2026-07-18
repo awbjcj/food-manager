@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal, Optional, Sequence, cast
+from typing import Literal, Optional, Sequence, TypeAlias, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.i18n import LANGS
@@ -372,6 +372,56 @@ def parse_item_callback(data: str) -> ItemAction:
                 raise CommandError(f"bad item id {parts[2]!r}") from exc
         raise CommandError(f"bad item callback {data!r}")
     raise CommandError(f"unknown item kind {kind!r}")
+
+
+ItemRoute = Literal[
+    "item_open",
+    "item_list",
+    "item_corr",
+    "item_nudge",
+    "item_ctext",
+    "item_rm",
+    "item_rmok",
+]
+CallbackRoute: TypeAlias = Verb | ItemRoute | Literal["help"]
+
+
+@dataclass(frozen=True)
+class ActionCallbackRequest:
+    action: CallbackAction
+
+    @property
+    def route(self) -> Verb:
+        return self.action.verb
+
+
+@dataclass(frozen=True)
+class ItemCallbackRequest:
+    action: ItemAction
+
+    @property
+    def route(self) -> ItemRoute:
+        return cast(ItemRoute, f"item_{self.action.kind}")
+
+
+@dataclass(frozen=True)
+class HelpCallbackRequest:
+    topic: str
+    route: Literal["help"] = "help"
+
+
+CallbackRequest: TypeAlias = (
+    ActionCallbackRequest | ItemCallbackRequest | HelpCallbackRequest
+)
+
+
+def parse_callback_request(data: str) -> CallbackRequest:
+    """Parse every callback family while preserving the existing leaf parsers."""
+    if data.startswith("help:"):
+        return HelpCallbackRequest(topic=data.partition(":")[2])
+    if data.startswith("item:"):
+        return ItemCallbackRequest(action=parse_item_callback(data))
+    return ActionCallbackRequest(action=parse_callback(data))
 
 
 def parse_pantry_arg(args: Sequence[str]) -> Literal["all", "digest"] | int:

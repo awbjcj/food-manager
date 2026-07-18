@@ -13,8 +13,29 @@ module fixes was each handler swallowing edit failures and acknowledging late):
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from typing import Awaitable, Callable
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class View:
+    text: str
+    keyboard: object | None = None
+
+
+DeferredCallback = Callable[[], Awaitable[View | None]]
+
+
+@dataclass(frozen=True)
+class CallbackResult:
+    """Immediate acknowledgement plus work that is safe to run after it."""
+
+    ack: str | None = None
+    alert: bool = False
+    view: View | None = None
+    deferred: DeferredCallback | None = None
 
 
 def is_not_modified(exc: Exception) -> bool:
@@ -56,3 +77,16 @@ async def edit_or_resend(cb, text: str, keyboard=None) -> None:
         log.warning(
             "callback_resend_failed", extra={"error_class": type(exc).__name__}
         )
+
+
+async def apply(cb, result: CallbackResult) -> None:
+    """Acknowledge first, then run deferred work and render its resulting view."""
+    if result.ack is not None:
+        await answer(cb, result.ack, show_alert=result.alert)
+    view = result.view
+    if result.deferred is not None:
+        deferred_view = await result.deferred()
+        if deferred_view is not None:
+            view = deferred_view
+    if view is not None:
+        await edit_or_resend(cb, view.text, view.keyboard)

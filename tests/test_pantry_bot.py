@@ -1,4 +1,5 @@
 """Tests for the interactive /pantry command."""
+
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -6,6 +7,8 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
+import app.callbacks.actions as action_callbacks
+import app.callbacks.items as item_callbacks
 from app.models import Household, NameTranslation, PantryItem, User
 from tests.fakes import FakeTranslationLLM
 
@@ -60,7 +63,9 @@ def _cb(data: str):
     return cb
 
 
-def _active_item(session_factory, *, expires_in_days: int = 3, status: str = "active") -> int:
+def _active_item(
+    session_factory, *, expires_in_days: int = 3, status: str = "active"
+) -> int:
     today = date(2026, 6, 14)
     with session_factory() as db:
         user = db.get(User, 1)
@@ -89,18 +94,16 @@ def _active_item(session_factory, *, expires_in_days: int = 3, status: str = "ac
 
 
 def _keyboard_data(markup) -> list[str]:
-    return [
-        button.callback_data
-        for row in markup.inline_keyboard
-        for button in row
-    ]
+    return [button.callback_data for row in markup.inline_keyboard for button in row]
 
 
 @pytest.mark.asyncio
 async def test_item_list_all_callback_refreshes_full_pantry(session_factory):
     cb = _cb("item:list:all")
 
-    with patch.object(bot_mod, "_refresh_pantry_message", new_callable=AsyncMock) as refresh:
+    with patch.object(
+        item_callbacks, "_refresh_pantry_message", new_callable=AsyncMock
+    ) as refresh:
         await bot_mod.handle_item_callback(
             cb,
             session_factory=session_factory,
@@ -114,7 +117,9 @@ async def test_item_list_all_callback_refreshes_full_pantry(session_factory):
 async def test_item_list_callback_refreshes_digest(session_factory):
     cb = _cb("item:list")
 
-    with patch.object(bot_mod, "_refresh_digest_message", new_callable=AsyncMock) as refresh:
+    with patch.object(
+        item_callbacks, "_refresh_digest_message", new_callable=AsyncMock
+    ) as refresh:
         await bot_mod.handle_item_callback(
             cb,
             session_factory=session_factory,
@@ -140,7 +145,9 @@ async def test_item_open_all_renders_card_with_full_pantry_back_button(session_f
 
 
 @pytest.mark.asyncio
-async def test_item_open_callback_does_not_call_translation_llm_on_cache_miss(session_factory):
+async def test_item_open_callback_does_not_call_translation_llm_on_cache_miss(
+    session_factory,
+):
     item_id = _active_item(session_factory)
     with session_factory() as db:
         user = db.get(User, 1)
@@ -192,8 +199,12 @@ async def test_full_pantry_item_action_refreshes_full_pantry(session_factory):
     cb = _cb(f"act:ate:{item_id}:all")
 
     with (
-        patch.object(bot_mod, "_refresh_pantry_message", new_callable=AsyncMock) as pantry_refresh,
-        patch.object(bot_mod, "_refresh_digest_message", new_callable=AsyncMock) as digest_refresh,
+        patch.object(
+            action_callbacks, "_refresh_pantry_message", new_callable=AsyncMock
+        ) as pantry_refresh,
+        patch.object(
+            action_callbacks, "_refresh_digest_message", new_callable=AsyncMock
+        ) as digest_refresh,
     ):
         await bot_mod.handle_callback(
             cb,

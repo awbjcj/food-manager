@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+import logging
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+
+from app.commands import (
+    CommandError,
+    parse_callback,
+)
+from app.client_set import PerUserClients
+from app.i18n import t
+import app.plan_service as plan_service_mod
+import app.handler_support as handler_support
+from app.plan_service import aggregate_shopping, swap_day
+from app.shopping_service import add_missing
+from app.models import Household, MealPlan
+from app.callback_dispatch import (
+    answer as dispatch_answer,
+    edit_or_resend,
+)
+from app.profile_service import profile_from_household
+
+from app.handlers.plan import (
+    _plan_source,
+    _plan_entry_rows,
+    _render_plan_message,
+)
+
+
+log = logging.getLogger(__name__)
+
+
+_authorized_callback_user = handler_support.authorized_callback_user
+
+
+async def handle_plan_callback(
+    cb,
+    *,
+    session_factory,
+    now_provider,
+    clients: PerUserClients = PerUserClients(),
+    recipe_sources=(),
+    translation_llm=None,
+) -> None:
+    try:
+        action = parse_callback(cb.data or "")
+    except CommandError:
+        await dispatch_answer(cb, "unrecognized action")
+        return
+    if (
+        action.verb not in ("plan_swap", "plan_shop", "plan_cancel")
+        or action.item_id is None
+    ):
+        await dispatch_answer(cb, "unrecognized action")
+        return
+
+    with session_factory() as session:
+        user = _authorized_callback_user(session, cb.from_user.id)
+        if user is None:
+            await dispatch_answer(cb, "not authorized")
+            return
+        plan = session.get(MealPlan, action.item_id)
+        if (
+            plan is None
+            or plan.household_id != user.household_id
+            or plan.status != "active"
+        ):
+            await dispatch_answer(cb, t("plan.expired", user.lang))
+            return
+        today = now_provider(user.tz).date()
+
+        if action.verb == "plan_cancel":
+            plan.status = "cancelled"
+            session.add(plan)
+            session.commit()
+            await dispatch_answer(cb)
+            await edit_or_resend(cb, t("plan.cancelled", user.lang))
+            return
+
+        if action.verb == "plan_shop":
+            entries, _candidates = _plan_entry_rows(session, plan.id)
+            missing_names = aggregate_shopping(entries)
+            if not missing_names:
+                await dispatch_answer(cb, t("plan.shopping_none", user.lang))
+                return
+            result = add_missing(
+                session,
+                household_id=user.household_id,
+                ingredients=[SimpleNamespace(name=n) for n in missing_names],
+                now=datetime.now(timezone.utc),
+            )
+            if not result.added:
+                await dispatch_answer(cb, t("plan.shopping_none", user.lang))
+            else:
+                await dispatch_answer(
+                    cb, t("plan.shopping_added", user.lang, n=len(result.added))
+                )
+            return
+
+        # plan_swap
+        entries, _candidates = _plan_entry_rows(session, plan.id)
+        entry = next((e for e in entries if e.day_index == action.option_index), None)
+        if entry is None:
+            await dispatch_answer(cb, "unrecognized action")
+            return
+        household = session.get(Household, user.household_id)
+        if household is None:
+            await dispatch_answer(cb, "couldn't load your household profile")
+            return
+        profile = profile_from_household(household)
+        source = _plan_source(recipe_sources, clients, user)
+        await dispatch_answer(cb)
+        try:
+            updated = await swap_day(
+                session,
+                plan=plan,
+                entry=entry,
+                profile=profile,
+                source=source,
+                today=today,
+                cost_ceiling_micros=plan_service_mod.PLAN_COST_CEILING_MICROS,
+            )
+        except Exception as exc:  # noqa: BLE001 - swap must never break the bot
+            log.warning("plan_swap_failed", extra={"error_class": type(exc).__name__})
+            updated = None
+        if updated is None:
+            await edit_or_resend(cb, t("plan.no_swap", user.lang))
+            return
+        text, keyboard = await _render_plan_message(
+            session, plan=plan, lang=user.lang, translation_llm=translation_llm
+        )
+        await edit_or_resend(cb, text, keyboard)

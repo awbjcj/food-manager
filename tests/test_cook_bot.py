@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock
 from sqlmodel import SQLModel, Session, create_engine
 
 import app.bot as bot_mod
+import app.callbacks.cook as cook_callbacks
+import app.handler_support as handler_support
 from app.client_set import PerUserClients
 from app.bot import handle_cook, handle_cook_callback, run_cook_and_render
 from app.cook.models import (
@@ -28,8 +30,14 @@ def _engine_with_user():
         db.commit()
         db.refresh(household)
         assert household.id is not None
-        db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
-                    created_at=datetime.now(timezone.utc)))
+        db.add(
+            User(
+                telegram_id=1,
+                chat_id=1,
+                household_id=household.id,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
         db.commit()
     return engine
 
@@ -109,13 +117,16 @@ def _seed_cook(engine, **overrides):
 
 
 def test_cook_first_round_creates_session_and_asks_meal_type(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     msg = _Msg()
-    asyncio.run(handle_cook(
-        msg, session_factory=lambda: Session(engine),
-        now_provider=lambda tz: datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc),
-    ))
+    asyncio.run(
+        handle_cook(
+            msg,
+            session_factory=lambda: Session(engine),
+            now_provider=lambda tz: datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc),
+        )
+    )
     msg.answer.assert_awaited()
     assert msg.answer.await_args is not None
     keyboard = msg.answer.await_args.kwargs["reply_markup"]
@@ -127,19 +138,27 @@ def test_cook_first_round_creates_session_and_asks_meal_type(monkeypatch):
 
 
 def test_cook_pick_advances_cuisine_to_purpose_then_ready_once(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    asyncio.run(handle_cook(_Msg(), session_factory=lambda: Session(engine),
-                            now_provider=_NOW))
+    asyncio.run(
+        handle_cook(_Msg(), session_factory=lambda: Session(engine), now_provider=_NOW)
+    )
     with Session(engine) as db:
         cook_id = db.exec(__import__("sqlmodel").select(CookSession)).all()[0].id
 
     spawn, spawned = _recording_spawn()
 
     meal_cb = _Cb(f"cookpick:{cook_id}:meal:0")
-    asyncio.run(handle_cook_callback(
-        meal_cb, session_factory=lambda: Session(engine),
-        now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
+    asyncio.run(
+        handle_cook_callback(
+            meal_cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
         assert cook is not None
@@ -156,9 +175,16 @@ def test_cook_pick_advances_cuisine_to_purpose_then_ready_once(monkeypatch):
     assert f"cookmore:{cook_id}:cuisine_full" in quick_callbacks
 
     cuisine_cb = _Cb(f"cookpick:{cook_id}:cuisine:0")
-    asyncio.run(handle_cook_callback(
-        cuisine_cb, session_factory=lambda: Session(engine),
-        now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
+    asyncio.run(
+        handle_cook_callback(
+            cuisine_cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
         assert cook is not None
@@ -174,9 +200,16 @@ def test_cook_pick_advances_cuisine_to_purpose_then_ready_once(monkeypatch):
         for button in row
     )
 
-    asyncio.run(handle_cook_callback(
-        _Cb(f"cookpick:{cook_id}:purpose:0"), session_factory=lambda: Session(engine),
-        now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
+    asyncio.run(
+        handle_cook_callback(
+            _Cb(f"cookpick:{cook_id}:purpose:0"),
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
         assert cook is not None
@@ -184,49 +217,70 @@ def test_cook_pick_advances_cuisine_to_purpose_then_ready_once(monkeypatch):
         assert cook.status == "ready"
     assert len(spawned) == 1
 
-    asyncio.run(handle_cook_callback(
-        _Cb(f"cookpick:{cook_id}:purpose:0"), session_factory=lambda: Session(engine),
-        now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
+    asyncio.run(
+        handle_cook_callback(
+            _Cb(f"cookpick:{cook_id}:purpose:0"),
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
     assert len(spawned) == 1
 
 
 def test_more_cuisines_selection_uses_the_full_list_index(monkeypatch):
     from app.bot import SPOONACULAR_CUISINES
 
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    asyncio.run(handle_cook(
-        _Msg(), session_factory=lambda: Session(engine), now_provider=_NOW
-    ))
+    asyncio.run(
+        handle_cook(_Msg(), session_factory=lambda: Session(engine), now_provider=_NOW)
+    )
     with Session(engine) as db:
         cook_id = db.exec(__import__("sqlmodel").select(CookSession)).one().id
 
     spawn, spawned = _recording_spawn()
-    asyncio.run(handle_cook_callback(
-        _Cb(f"cookpick:{cook_id}:meal:0"),
-        session_factory=lambda: Session(engine), now_provider=_NOW,
-        spawn=spawn, bot=None, **_fakes(),
-    ))
+    asyncio.run(
+        handle_cook_callback(
+            _Cb(f"cookpick:{cook_id}:meal:0"),
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
 
     expand_cb = _Cb(f"cookmore:{cook_id}:cuisine_full")
-    asyncio.run(handle_cook_callback(
-        expand_cb, session_factory=lambda: Session(engine), now_provider=_NOW,
-        spawn=spawn, bot=None, **_fakes(),
-    ))
+    asyncio.run(
+        handle_cook_callback(
+            expand_cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
     assert expand_cb.message.edit_text.await_args is not None
     keyboard = expand_cb.message.edit_text.await_args.kwargs["reply_markup"]
     full_callbacks = [
-        button.callback_data
-        for row in keyboard.inline_keyboard
-        for button in row
+        button.callback_data for row in keyboard.inline_keyboard for button in row
     ]
     assert f"cookpick:{cook_id}:cuisine_full:7" in full_callbacks
 
-    asyncio.run(handle_cook_callback(
-        _Cb(f"cookpick:{cook_id}:cuisine_full:7"),
-        session_factory=lambda: Session(engine), now_provider=_NOW,
-        spawn=spawn, bot=None, **_fakes(),
-    ))
+    asyncio.run(
+        handle_cook_callback(
+            _Cb(f"cookpick:{cook_id}:cuisine_full:7"),
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
 
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
@@ -238,16 +292,22 @@ def test_more_cuisines_selection_uses_the_full_list_index(monkeypatch):
 
 
 def test_adjust_resets_choices_but_preserves_selected_item_ids(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     cook_id = _seed_cook(engine)
     cb = _Cb(f"cookadj:{cook_id}")
     spawn, spawned = _recording_spawn()
 
-    asyncio.run(handle_cook_callback(
-        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
-        spawn=spawn, bot=None, **_fakes(),
-    ))
+    asyncio.run(
+        handle_cook_callback(
+            cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
 
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
@@ -262,28 +322,41 @@ def test_adjust_resets_choices_but_preserves_selected_item_ids(monkeypatch):
     assert cb.message.edit_text.await_args is not None
     keyboard = cb.message.edit_text.await_args.kwargs["reply_markup"]
     callbacks = [
-        button.callback_data
-        for row in keyboard.inline_keyboard
-        for button in row
+        button.callback_data for row in keyboard.inline_keyboard for button in row
     ]
     assert f"cookmore:{cook_id}:cuisine_full" in callbacks
 
 
 def test_cook_stale_meal_tap_after_round_one_does_not_pick_cuisine(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    asyncio.run(handle_cook(_Msg(), session_factory=lambda: Session(engine),
-                            now_provider=_NOW))
+    asyncio.run(
+        handle_cook(_Msg(), session_factory=lambda: Session(engine), now_provider=_NOW)
+    )
     with Session(engine) as db:
         cook_id = db.exec(__import__("sqlmodel").select(CookSession)).all()[0].id
 
     spawn, spawned = _recording_spawn()
-    asyncio.run(handle_cook_callback(
-        _Cb(f"cookpick:{cook_id}:meal:0"), session_factory=lambda: Session(engine),
-        now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
-    asyncio.run(handle_cook_callback(
-        _Cb(f"cookpick:{cook_id}:meal:0"), session_factory=lambda: Session(engine),
-        now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
+    asyncio.run(
+        handle_cook_callback(
+            _Cb(f"cookpick:{cook_id}:meal:0"),
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
+    asyncio.run(
+        handle_cook_callback(
+            _Cb(f"cookpick:{cook_id}:meal:0"),
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
 
     assert spawned == []
     with Session(engine) as db:
@@ -295,20 +368,35 @@ def test_cook_stale_meal_tap_after_round_one_does_not_pick_cuisine(monkeypatch):
 
 
 def test_cook_legacy_stale_meal_tap_after_round_one_does_not_pick_cuisine(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    asyncio.run(handle_cook(_Msg(), session_factory=lambda: Session(engine),
-                            now_provider=_NOW))
+    asyncio.run(
+        handle_cook(_Msg(), session_factory=lambda: Session(engine), now_provider=_NOW)
+    )
     with Session(engine) as db:
         cook_id = db.exec(__import__("sqlmodel").select(CookSession)).all()[0].id
 
     spawn, spawned = _recording_spawn()
-    asyncio.run(handle_cook_callback(
-        _Cb(f"cookpick:{cook_id}:meal:0"), session_factory=lambda: Session(engine),
-        now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
-    asyncio.run(handle_cook_callback(
-        _Cb(f"cookpick:{cook_id}:0"), session_factory=lambda: Session(engine),
-        now_provider=_NOW, spawn=spawn, bot=None, **_fakes()))
+    asyncio.run(
+        handle_cook_callback(
+            _Cb(f"cookpick:{cook_id}:meal:0"),
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
+    asyncio.run(
+        handle_cook_callback(
+            _Cb(f"cookpick:{cook_id}:0"),
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
 
     assert spawned == []
     with Session(engine) as db:
@@ -319,51 +407,69 @@ def test_cook_legacy_stale_meal_tap_after_round_one_does_not_pick_cuisine(monkey
         assert cook.status == "collecting"
 
 
-def test_cook_first_round_edit_failure_does_not_commit_meal_type(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+def test_cook_first_round_edit_failure_resends_and_commits_meal_type(monkeypatch):
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    asyncio.run(handle_cook(_Msg(), session_factory=lambda: Session(engine),
-                            now_provider=_NOW))
+    asyncio.run(
+        handle_cook(_Msg(), session_factory=lambda: Session(engine), now_provider=_NOW)
+    )
     with Session(engine) as db:
         cook_id = db.exec(__import__("sqlmodel").select(CookSession)).all()[0].id
 
     cb = _Cb(f"cookpick:{cook_id}:meal:0")
     cb.message.edit_text.side_effect = RuntimeError("edit failed")
     spawn, spawned = _recording_spawn()
-    asyncio.run(handle_cook_callback(
-        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
-        spawn=spawn, bot=None, **_fakes()))
+    asyncio.run(
+        handle_cook_callback(
+            cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
 
-    cb.answer.assert_awaited_with("couldn't update this cook session - try /cook again")
+    cb.message.answer.assert_awaited_once()
+    cb.answer.assert_awaited_with()
     assert spawned == []
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
         assert cook is not None
-        assert cook.meal_type is None
+        assert cook.meal_type == "Dinner"
         assert cook.status == "collecting"
 
 
 def test_cook_pick_expires_collecting_session_without_spawning(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     with Session(engine) as db:
         now = _NOW("America/Detroit").replace(tzinfo=None)
-        db.add(CookSession(
-            household_id=1,
-            status="collecting",
-            chat_id=1,
-            selected_item_ids="[]",
-            created_at=now - timedelta(minutes=20),
-            expires_at=now - timedelta(minutes=1),
-        ))
+        db.add(
+            CookSession(
+                household_id=1,
+                status="collecting",
+                chat_id=1,
+                selected_item_ids="[]",
+                created_at=now - timedelta(minutes=20),
+                expires_at=now - timedelta(minutes=1),
+            )
+        )
         db.commit()
         cook_id = db.exec(__import__("sqlmodel").select(CookSession)).all()[0].id
 
     cb = _Cb(f"cookpick:{cook_id}:meal:0")
     spawn, spawned = _recording_spawn()
-    asyncio.run(handle_cook_callback(
-        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
-        spawn=spawn, bot=None, **_fakes()))
+    asyncio.run(
+        handle_cook_callback(
+            cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
 
     cb.answer.assert_awaited_with("this cook session expired - start a new /cook")
     assert spawned == []
@@ -374,19 +480,25 @@ def test_cook_pick_expires_collecting_session_without_spawning(monkeypatch):
 
 
 def test_expired_done_session_blocks_more_without_searching(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     run_more = AsyncMock(return_value=[])
-    monkeypatch.setattr(bot_mod, "run_cook_more", run_more, raising=False)
+    monkeypatch.setattr(cook_callbacks, "run_cook_more", run_more)
     engine = _engine_with_user()
     now = _NOW("America/Detroit").replace(tzinfo=None)
     cook_id = _seed_cook(engine, expires_at=now - timedelta(seconds=1))
     cb = _Cb(f"cookmore2:{cook_id}")
     spawn, spawned = _recording_spawn()
 
-    asyncio.run(handle_cook_callback(
-        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
-        spawn=spawn, bot=None, **_fakes(),
-    ))
+    asyncio.run(
+        handle_cook_callback(
+            cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
 
     run_more.assert_not_awaited()
     assert spawned == []
@@ -395,21 +507,27 @@ def test_expired_done_session_blocks_more_without_searching(monkeypatch):
 
 
 def test_more_tap_shows_error_and_restores_done_when_search_raises(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
 
     async def failing_run_cook_more(*args, **kwargs):
         raise RuntimeError("source exploded")
 
-    monkeypatch.setattr(bot_mod, "run_cook_more", failing_run_cook_more, raising=False)
+    monkeypatch.setattr(cook_callbacks, "run_cook_more", failing_run_cook_more)
     engine = _engine_with_user()
     cook_id = _seed_cook(engine)
     cb = _Cb(f"cookmore2:{cook_id}")
     spawn, spawned = _recording_spawn()
 
-    asyncio.run(handle_cook_callback(
-        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
-        spawn=spawn, bot=None, **_fakes(),
-    ))
+    asyncio.run(
+        handle_cook_callback(
+            cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
 
     assert spawned == []
     cb.message.edit_text.assert_awaited()
@@ -420,7 +538,7 @@ def test_more_tap_shows_error_and_restores_done_when_search_raises(monkeypatch):
 
 
 def test_double_more_tap_claims_done_session_for_only_one_search(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     cook_id = _seed_cook(engine)
     entered = asyncio.Event()
@@ -434,23 +552,33 @@ def test_double_more_tap_claims_done_session_for_only_one_search(monkeypatch):
         await release.wait()
         return []
 
-    monkeypatch.setattr(
-        bot_mod, "run_cook_more", fake_run_cook_more, raising=False
-    )
+    monkeypatch.setattr(cook_callbacks, "run_cook_more", fake_run_cook_more)
     first = _Cb(f"cookmore2:{cook_id}")
     second = _Cb(f"cookmore2:{cook_id}")
     spawn, spawned = _recording_spawn()
 
     async def double_tap():
-        first_task = asyncio.create_task(handle_cook_callback(
-            first, session_factory=lambda: Session(engine), now_provider=_NOW,
-            spawn=spawn, bot=None, **_fakes(),
-        ))
+        first_task = asyncio.create_task(
+            handle_cook_callback(
+                first,
+                session_factory=lambda: Session(engine),
+                now_provider=_NOW,
+                spawn=spawn,
+                bot=None,
+                **_fakes(),
+            )
+        )
         await asyncio.wait_for(entered.wait(), timeout=1)
-        second_task = asyncio.create_task(handle_cook_callback(
-            second, session_factory=lambda: Session(engine), now_provider=_NOW,
-            spawn=spawn, bot=None, **_fakes(),
-        ))
+        second_task = asyncio.create_task(
+            handle_cook_callback(
+                second,
+                session_factory=lambda: Session(engine),
+                now_provider=_NOW,
+                spawn=spawn,
+                bot=None,
+                **_fakes(),
+            )
+        )
         await asyncio.sleep(0)
         release.set()
         await asyncio.gather(first_task, second_task)
@@ -466,13 +594,20 @@ def test_double_more_tap_claims_done_session_for_only_one_search(monkeypatch):
 
 
 def test_cook_callback_rejects_unauthorized(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     cb = _Cb("cookpick:1:0", user_id=999)
     spawn, spawned = _recording_spawn()
-    asyncio.run(handle_cook_callback(
-        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
-        spawn=spawn, bot=None, **_fakes()))
+    asyncio.run(
+        handle_cook_callback(
+            cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
     cb.answer.assert_awaited_with("not authorized", show_alert=False)
     assert spawned == []
 
@@ -481,7 +616,7 @@ def test_cook_alt_still_works_on_a_done_session_older_than_the_collect_ttl(monke
     # A "done" cook's expires_at is never extended past its original 10-minute
     # collecting-round TTL, so "Show alternatives" must stay available on an
     # old done session (only More/Adjust are gated by that timestamp).
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     cook_id = _seed_cook(
         engine,
@@ -490,10 +625,16 @@ def test_cook_alt_still_works_on_a_done_session_older_than_the_collect_ttl(monke
     cb = _Cb(f"cookalt:{cook_id}")
     spawn, spawned = _recording_spawn()
 
-    asyncio.run(handle_cook_callback(
-        cb, session_factory=lambda: Session(engine), now_provider=_NOW,
-        spawn=spawn, bot=None, **_fakes(),
-    ))
+    asyncio.run(
+        handle_cook_callback(
+            cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
 
     cb.answer.assert_awaited_with("showing alternatives")
     with Session(engine) as db:
@@ -503,45 +644,95 @@ def test_cook_alt_still_works_on_a_done_session_older_than_the_collect_ttl(monke
 
 
 def test_run_cook_and_render_completes_and_edits(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     today_dt = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
     today = today_dt.date()
     with Session(engine) as db:
         for i in range(4):
-            db.add(PantryItem(
-                household_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
-                category="produce", qty=1.0, purchased_on=today, shelf_life_days=2,
-                shelf_life_source="llm", ingest_shelf_life_source="llm",
-                expires_on=today + timedelta(days=2), status="active",
-                created_via="receipt", created_at=datetime.now(timezone.utc)))
+            db.add(
+                PantryItem(
+                    household_id=1,
+                    raw_name=f"item{i}",
+                    normalized_name=f"item{i}",
+                    category="produce",
+                    qty=1.0,
+                    purchased_on=today,
+                    shelf_life_days=2,
+                    shelf_life_source="llm",
+                    ingest_shelf_life_source="llm",
+                    expires_on=today + timedelta(days=2),
+                    status="active",
+                    created_via="receipt",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
         now = today_dt.replace(tzinfo=None)
-        db.add(CookSession(household_id=1, status="ready", chat_id=1, meal_type="Dinner",
-                           cuisine="Italian", selected_item_ids="[]", message_id=99,
-                           created_at=now, expires_at=now + timedelta(minutes=10)))
+        db.add(
+            CookSession(
+                household_id=1,
+                status="ready",
+                chat_id=1,
+                meal_type="Dinner",
+                cuisine="Italian",
+                selected_item_ids="[]",
+                message_id=99,
+                created_at=now,
+                expires_at=now + timedelta(minutes=10),
+            )
+        )
         db.commit()
         cook_id = db.exec(__import__("sqlmodel").select(CookSession)).all()[0].id
 
     selection = FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5))
-    recipe = FakeRecipeLLM(canned=(RecipeCandidates(candidates=[
-        RecipeCandidate(title="Safe", cuisine="italian", source_url="u",
+    recipe = FakeRecipeLLM(
+        canned=(
+            RecipeCandidates(
+                candidates=[
+                    RecipeCandidate(
+                        title="Safe",
+                        cuisine="italian",
+                        source_url="u",
                         ingredients=[
                             RecipeIngredient(name="item0"),
                             RecipeIngredient(name="pasta"),
                         ],
-                        method_gist="x", deliciousness=0.6)]), 9))
-    nutrition = FakeNutritionLLM(canned=(NutritionScores(scores=[
-        NutritionScore(health_score=80, effort="easy", est_minutes=20, rationale="ok")]), 3))
+                        method_gist="x",
+                        deliciousness=0.6,
+                    )
+                ]
+            ),
+            9,
+        )
+    )
+    nutrition = FakeNutritionLLM(
+        canned=(
+            NutritionScores(
+                scores=[
+                    NutritionScore(
+                        health_score=80, effort="easy", est_minutes=20, rationale="ok"
+                    )
+                ]
+            ),
+            3,
+        )
+    )
     bot = type("B", (), {"edit_message_text": AsyncMock()})()
 
-    asyncio.run(run_cook_and_render(
-        lambda: Session(engine), user_id=1, household_id=1, user_tz="America/Detroit",
-        cook_id=cook_id,
-        clients=PerUserClients.for_tests(
-            selection=selection, recipe=recipe, nutrition=nutrition
-        ),
-        now_provider=lambda tz: today_dt, bot=bot,
-    ))
+    asyncio.run(
+        run_cook_and_render(
+            lambda: Session(engine),
+            user_id=1,
+            household_id=1,
+            user_tz="America/Detroit",
+            cook_id=cook_id,
+            clients=PerUserClients.for_tests(
+                selection=selection, recipe=recipe, nutrition=nutrition
+            ),
+            now_provider=lambda tz: today_dt,
+            bot=bot,
+        )
+    )
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
         assert cook is not None

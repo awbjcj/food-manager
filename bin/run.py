@@ -27,7 +27,7 @@ from anthropic import AsyncAnthropic
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-import app.bot as bot_mod
+import app.handler_support as handler_support
 import app.cook.service as cook_service_mod
 from app.alerts import OwnerAlerter
 from app.client_set import PerUserClients
@@ -420,8 +420,8 @@ async def _amain(settings: Settings) -> None:
             "text_model": _text_models.get(settings.llm_provider, "n/a"),
         },
     )
-    bot_mod.DEFAULT_LLM_PROVIDER = settings.llm_provider
-    bot_mod.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
+    handler_support.DEFAULT_LLM_PROVIDER = settings.llm_provider
+    handler_support.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
     cook_service_mod.COOK_COST_CEILING_MICROS = settings.cook_cost_ceiling_micros
     plan_service_mod.PLAN_COST_CEILING_MICROS = settings.plan_cost_ceiling_micros
 

@@ -321,7 +321,7 @@ def test_authorize_rejects_stranger_without_invite(session):
 # --------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_handle_invite_replies_with_link_and_code(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     bot = MagicMock()
     bot.get_me = AsyncMock(return_value=MagicMock(username="PantryBot"))
     msg = _msg("/invite", user_id=1)
@@ -335,7 +335,7 @@ async def test_handle_invite_replies_with_link_and_code(session, monkeypatch):
 @pytest.mark.asyncio
 async def test_handle_invite_by_non_owner_member(session, monkeypatch):
     # Policy: any member may invite (not just the owner).
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     session.add(User(telegram_id=2, chat_id=22, household_id=1,
                      role="member", created_at=_now()))
     session.commit()
@@ -350,7 +350,7 @@ async def test_handle_invite_by_non_owner_member(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_invite_family_creates_reusable(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     bot = MagicMock()
     bot.get_me = AsyncMock(return_value=MagicMock(username="PantryBot"))
     msg = _msg("/invite family", user_id=1)
@@ -362,7 +362,7 @@ async def test_handle_invite_family_creates_reusable(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_invite_rejects_bad_mode(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     bot = MagicMock()
     bot.get_me = AsyncMock(return_value=MagicMock(username="PantryBot"))
     msg = _msg("/invite everyone", user_id=1)
@@ -373,7 +373,7 @@ async def test_handle_invite_rejects_bad_mode(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_join_notifies_existing_members(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     session.add(User(telegram_id=2, chat_id=22, household_id=1,
                      role="member", created_at=_now()))
     session.commit()
@@ -390,7 +390,7 @@ async def test_handle_join_notifies_existing_members(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_join_redeems_invite(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     inv = create_invite(session, household_id=1, created_by=1, now=_now())
     created = MagicMock()
     msg = _msg(f"/join {inv.token}", user_id=2, chat_id=22)
@@ -404,7 +404,7 @@ async def test_handle_join_redeems_invite(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_join_bad_code_reports_invalid(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _msg("/join bogus", user_id=2, chat_id=22)
     await handle_join(msg, session_factory=lambda: session)
     assert "invalid" in _reply(msg).lower()
@@ -413,7 +413,7 @@ async def test_handle_join_bad_code_reports_invalid(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_join_expired_token_reports_invalid(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     inv = create_invite(
         session, household_id=1, created_by=1, now=_now() - timedelta(hours=48)
     )
@@ -425,7 +425,7 @@ async def test_handle_join_expired_token_reports_invalid(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_join_already_member_reports(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     inv = create_invite(session, household_id=1, created_by=1, now=_now())
     # owner (already a member) tries to /join their own household
     msg = _msg(f"/join {inv.token}", user_id=1)
@@ -435,7 +435,7 @@ async def test_handle_join_already_member_reports(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_start_with_token_redeems(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     inv = create_invite(session, household_id=1, created_by=1, now=_now())
     created = MagicMock()
     msg = _msg(f"/start {inv.token}", user_id=3, chat_id=33)
@@ -449,7 +449,7 @@ async def test_handle_start_with_token_redeems(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_household_lists_members(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     session.add(User(telegram_id=2, chat_id=22, household_id=1,
                      role="member", created_at=_now()))
     session.commit()
@@ -462,7 +462,7 @@ async def test_handle_household_lists_members(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_household_solo_owner_marks_you(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _msg("/household", user_id=1)
     await handle_household(msg, session_factory=lambda: session)
     reply = _reply(msg)
@@ -473,7 +473,7 @@ async def test_handle_household_solo_owner_marks_you(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_leave_member_unschedules(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     session.add(User(telegram_id=2, chat_id=22, household_id=1,
                      role="member", created_at=_now()))
     session.commit()
@@ -486,7 +486,7 @@ async def test_handle_leave_member_unschedules(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_leave_owner_blocked(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     unschedule = MagicMock()
     msg = _msg("/leave", user_id=1)
     await handle_leave(msg, session_factory=lambda: session, unschedule=unschedule)
@@ -497,7 +497,7 @@ async def test_handle_leave_owner_blocked(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_remove_owner_removes_member(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     session.add(User(telegram_id=2, chat_id=22, household_id=1,
                      role="member", created_at=_now()))
     session.commit()
@@ -510,7 +510,7 @@ async def test_handle_remove_owner_removes_member(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_remove_non_owner_rejected(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     session.add(User(telegram_id=2, chat_id=22, household_id=1,
                      role="member", created_at=_now()))
     session.add(User(telegram_id=3, chat_id=33, household_id=1,

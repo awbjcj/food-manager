@@ -142,7 +142,7 @@ def test_authorize_and_get_user(session):
 
 @pytest.mark.asyncio
 async def test_handlers_smoke(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
 
     def factory() -> Session:
         return session
@@ -174,7 +174,7 @@ async def test_handlers_smoke(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_llm_shows_and_switches_provider(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     llm = LLMProviderSelector(
         {
             "anthropic": FakeLLMClient(canned=LLMResult(parse=ParseResult(items=[]))),
@@ -210,7 +210,7 @@ async def test_handle_llm_shows_and_switches_provider(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_handle_llm_rejects_unconfigured_provider(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     llm = LLMProviderSelector(
         {"anthropic": FakeLLMClient(canned=LLMResult(parse=ParseResult(items=[])))},
         "anthropic",
@@ -230,7 +230,7 @@ async def test_handle_llm_rejects_unconfigured_provider(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_act_ate_callback_edits_digest_in_place(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     eaten_id = _add_item(session, name="Milk", days=2).id
     _add_item(session, name="Bread", days=3)
@@ -251,7 +251,7 @@ async def test_act_ate_callback_edits_digest_in_place(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_act_callback_clears_digest_when_no_items_remain(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     last_id = _add_item(session, name="Last Milk", days=1).id
     cb = _cb(f"act:ate:{last_id}")
@@ -268,7 +268,7 @@ async def test_act_callback_clears_digest_when_no_items_remain(session, monkeypa
 
 @pytest.mark.asyncio
 async def test_act_callback_refreshes_digest_when_already_eaten(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     already_id = _add_item(session, name="Stale", days=2, status="eaten").id
     cb = _cb(f"act:ate:{already_id}")
@@ -285,7 +285,7 @@ async def test_act_callback_refreshes_digest_when_already_eaten(session, monkeyp
 
 @pytest.mark.asyncio
 async def test_act_freeze_callback_extends_expiry(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     item = _add_item(session, name="Chicken", days=2)
     cb = _cb(f"act:freeze:{item.id}")
@@ -308,7 +308,7 @@ async def test_act_freeze_callback_extends_expiry(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_act_fridge_callback_chills_and_extends_expiry(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     item = _add_item(session, name="Chicken", days=2)
     cb = _cb(f"act:fridge:{item.id}")
@@ -330,7 +330,7 @@ async def test_act_fridge_callback_chills_and_extends_expiry(session, monkeypatc
 
 @pytest.mark.asyncio
 async def test_show_all_callback_edits_due_items_in_place(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     for idx in range(25):
         _add_item(session, name=f"Item {idx}", days=2)
@@ -355,7 +355,7 @@ async def test_show_all_callback_edits_due_items_in_place(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_item_open_renders_card(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     item_id = _add_item(session, name="Milk", days=1).id
     assert item_id is not None
@@ -373,7 +373,7 @@ async def test_item_open_renders_card(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_item_nudge_extends_expiry(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     item = _add_item(session, name="Milk", days=7)
     item_id = item.id
@@ -392,7 +392,7 @@ async def test_item_nudge_extends_expiry(session, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_item_rmok_removes_and_refreshes(session, monkeypatch):
-    monkeypatch.setattr("app.bot.ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     today = date(2026, 5, 26)
     item_id = _add_item(session, name="Milk", days=1).id
     assert item_id is not None

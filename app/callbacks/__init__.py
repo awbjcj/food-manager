@@ -6,9 +6,7 @@ from app.callbacks.context import CallbackContext
 from app.callbacks.registry import CallbackRegistry, registry
 from app.commands import ItemRoute, Verb
 
-EXPECTED_CALLBACK_ROUTES = frozenset(
-    [*get_args(Verb), *get_args(ItemRoute), "help"]
-)
+EXPECTED_CALLBACK_ROUTES = frozenset([*get_args(Verb), *get_args(ItemRoute), "help"])
 
 __all__ = [
     "CallbackContext",

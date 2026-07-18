@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-import app.bot as bot_mod
+import app.handler_support as handler_support
 from app.bot import (
     handle_favorites,
     handle_list,
@@ -113,7 +113,7 @@ def _set_user_lang(session_factory, lang: str) -> int:
 
 @pytest.mark.asyncio
 async def test_list_renders_zh_names_for_zh_user(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     household_id = _set_user_lang(session_factory, "zh")
     _add_pantry_item(session_factory, household_id, "Milk")
 
@@ -131,7 +131,7 @@ async def test_list_renders_zh_names_for_zh_user(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_list_english_user_unaffected(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     household_id = _set_user_lang(session_factory, "en")
     _add_pantry_item(session_factory, household_id, "Milk")
 
@@ -151,7 +151,7 @@ async def test_list_zh_user_no_translation_llm_falls_back_to_english(
     session_factory, monkeypatch
 ):
     """translation_llm=None must never crash even for non-en users."""
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     household_id = _set_user_lang(session_factory, "zh")
     _add_pantry_item(session_factory, household_id, "Milk")
 
@@ -172,7 +172,7 @@ async def test_list_zh_user_no_translation_llm_falls_back_to_english(
 
 @pytest.mark.asyncio
 async def test_favorites_renders_zh_names_for_zh_user(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     household_id = _set_user_lang(session_factory, "zh")
 
     with session_factory() as db:
@@ -202,7 +202,7 @@ async def test_favorites_renders_zh_names_for_zh_user(session_factory, monkeypat
 
 @pytest.mark.asyncio
 async def test_favorites_english_user_unaffected(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     household_id = _set_user_lang(session_factory, "en")
 
     with session_factory() as db:
@@ -229,7 +229,7 @@ async def test_favorites_english_user_unaffected(session_factory, monkeypatch):
 async def test_favorites_keyboard_button_translated_for_zh_user(
     session_factory, monkeypatch
 ):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     household_id = _set_user_lang(session_factory, "zh")
 
     with session_factory() as db:
@@ -264,7 +264,7 @@ async def test_favorites_keyboard_button_translated_for_zh_user(
 
 @pytest.mark.asyncio
 async def test_shopping_renders_zh_names_for_zh_user(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     household_id = _set_user_lang(session_factory, "zh")
 
     with session_factory() as db:
@@ -293,7 +293,7 @@ async def test_shopping_renders_zh_names_for_zh_user(session_factory, monkeypatc
 
 @pytest.mark.asyncio
 async def test_ingest_reply_renders_zh_name_for_zh_user(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     _set_user_lang(session_factory, "zh")
 
     llm = FakeLLMClient(
@@ -337,7 +337,7 @@ async def test_ingest_reply_renders_zh_name_for_zh_user(session_factory, monkeyp
 
 @pytest.mark.asyncio
 async def test_ingest_reply_english_user_unaffected(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     _set_user_lang(session_factory, "en")
 
     llm = FakeLLMClient(
@@ -457,7 +457,7 @@ def _cook_llms():
 
 @pytest.mark.asyncio
 async def test_cook_result_renders_zh_title_for_zh_user(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     household_id = _set_user_lang(session_factory, "zh")
     cook_id = _seed_ready_cook(session_factory, household_id)
 
@@ -488,7 +488,7 @@ async def test_cook_result_renders_zh_title_for_zh_user(session_factory, monkeyp
 
 @pytest.mark.asyncio
 async def test_cook_result_english_user_unaffected(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     household_id = _set_user_lang(session_factory, "en")
     cook_id = _seed_ready_cook(session_factory, household_id)
 
@@ -519,7 +519,7 @@ async def test_cook_result_english_user_unaffected(session_factory, monkeypatch)
 async def test_photo_sends_progress_ack_then_edits_result(session_factory, monkeypatch):
     from app.i18n import t
 
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     _set_user_lang(session_factory, "en")
 
     llm = FakeLLMClient(

@@ -5,6 +5,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
+import app.handler_support as handler_support
 from app.models import Household, User
 
 
@@ -38,7 +39,7 @@ def _msg(text: str):
 
 
 async def test_lang_sets_and_confirms_in_new_language(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _msg("/lang zh")
     await bot_mod.handle_lang(msg, session_factory=session_factory)
     answer_text = msg.answer.call_args.args[0]
@@ -48,7 +49,7 @@ async def test_lang_sets_and_confirms_in_new_language(session_factory, monkeypat
 
 
 async def test_lang_no_arg_shows_current(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _msg("/lang")
     await bot_mod.handle_lang(msg, session_factory=session_factory)
     answer_text = msg.answer.call_args.args[0]
@@ -56,7 +57,7 @@ async def test_lang_no_arg_shows_current(session_factory, monkeypatch):
 
 
 async def test_lang_rejects_unknown(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _msg("/lang klingon")
     await bot_mod.handle_lang(msg, session_factory=session_factory)
     answer_text = msg.answer.call_args.args[0]
@@ -66,7 +67,7 @@ async def test_lang_rejects_unknown(session_factory, monkeypatch):
 
 
 async def test_help_zh_returns_translated_text(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     # Set user lang to zh first
     with session_factory() as db:
         user = db.get(User, 1)
@@ -85,7 +86,7 @@ async def test_help_zh_returns_translated_text(session_factory, monkeypatch):
 
 
 async def test_start_zh_returns_translated_text(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     # Set user lang to zh first
     with session_factory() as db:
         user = db.get(User, 1)

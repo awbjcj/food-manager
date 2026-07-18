@@ -5,6 +5,8 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
+import app.handler_support as handler_support
+import app.handlers.meta as meta_handlers
 from app.client_set import PerUserClients
 from app.models import Household, PantryItem, User
 from app.nl_intent import NLIntent
@@ -103,7 +105,7 @@ def _final_text(msg) -> str:
 
 @pytest.mark.asyncio
 async def test_unknown_intent_replies_hint(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _nl_msg("blah blah")
     await bot_mod.handle_nl_message(
         msg,
@@ -116,7 +118,7 @@ async def test_unknown_intent_replies_hint(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_failure_degrades_to_hint(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _nl_msg("hello")
     await bot_mod.handle_nl_message(
         msg,
@@ -129,7 +131,7 @@ async def test_agent_failure_degrades_to_hint(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_commands_and_empty_text_are_ignored(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     for text in ("/typo", ""):
         msg = _nl_msg(text)
         await bot_mod.handle_nl_message(
@@ -142,14 +144,16 @@ async def test_commands_and_empty_text_are_ignored(session_factory, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_dispatch_failure_degrades_to_hint_not_a_crash(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+async def test_dispatch_failure_degrades_to_hint_not_a_crash(
+    session_factory, monkeypatch
+):
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     item_id = _seed_item(session_factory, "yogurt")
 
     def failing_mark_eaten(*args, **kwargs):
         raise RuntimeError("db exploded")
 
-    monkeypatch.setattr(bot_mod, "mark_eaten", failing_mark_eaten)
+    monkeypatch.setattr(meta_handlers, "mark_eaten", failing_mark_eaten)
     msg = _nl_msg("ate the yogurt")
     await bot_mod.handle_nl_message(
         msg,
@@ -166,7 +170,7 @@ async def test_dispatch_failure_degrades_to_hint_not_a_crash(session_factory, mo
 
 @pytest.mark.asyncio
 async def test_mark_unique_match_applies(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     item_id = _seed_item(session_factory, "yogurt")
     msg = _nl_msg("ate the yogurt")
     await bot_mod.handle_nl_message(
@@ -184,7 +188,7 @@ async def test_mark_unique_match_applies(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_mark_ambiguous_shows_picker(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     a = _seed_item(session_factory, "whole milk")
     b = _seed_item(session_factory, "oat milk")
     msg = _nl_msg("finished the milk")
@@ -204,7 +208,7 @@ async def test_mark_ambiguous_shows_picker(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_mark_no_match_replies_not_found(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _nl_msg("ate the caviar")
     await bot_mod.handle_nl_message(
         msg,
@@ -219,13 +223,13 @@ async def test_mark_no_match_replies_not_found(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_add_routes_raw_text_to_add_flow(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     captured = {}
 
     async def fake_add_flow(msg, **kwargs):
         captured.update(kwargs)
 
-    monkeypatch.setattr(bot_mod, "_run_add_flow", fake_add_flow)
+    monkeypatch.setattr(meta_handlers, "_run_add_flow", fake_add_flow)
     msg = _nl_msg("bought milk and two avocados")
     clients = PerUserClients.for_tests(text="TEXT_LLM")
     await bot_mod.handle_nl_message(
@@ -241,7 +245,7 @@ async def test_add_routes_raw_text_to_add_flow(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_shelf_life_question_answers(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _nl_msg("how long does whole milk keep?")
     await bot_mod.handle_nl_message(
         msg,
@@ -256,7 +260,7 @@ async def test_shelf_life_question_answers(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pantry_query_renders_digest_view(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     _seed_item(session_factory, "spinach")  # seeded due within the 7-day window
     msg = _nl_msg("what's expiring?")
     await bot_mod.handle_nl_message(
@@ -270,7 +274,7 @@ async def test_pantry_query_renders_digest_view(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pantry_query_empty_replies_clear(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _nl_msg("what's in my pantry?")
     await bot_mod.handle_nl_message(
         msg,
@@ -285,7 +289,7 @@ async def test_pantry_query_empty_replies_clear(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_start_sends_ready_then_tour(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _nl_msg("/start")
     await bot_mod.handle_start(
         msg, session_factory=session_factory, on_user_created=lambda user: None
@@ -297,7 +301,7 @@ async def test_start_sends_ready_then_tour(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_help_shows_overview_with_topic_buttons(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     msg = _nl_msg("/help")
     await bot_mod.handle_help(msg, session_factory=session_factory)
     text = msg.answer.await_args.args[0]

@@ -10,6 +10,7 @@ module fixes was each handler swallowing edit failures and acknowledging late):
    because the content is identical. "Not modified" is success; any other failure
    falls back to sending the view as a fresh message so the flow never dead-ends.
 """
+
 from __future__ import annotations
 
 import logging
@@ -52,7 +53,7 @@ async def answer(cb, text: str = "", *, show_alert: bool = False) -> None:
         log.warning("callback_answer_failed", extra={"error_class": type(exc).__name__})
 
 
-async def edit_or_resend(cb, text: str, keyboard=None) -> None:
+async def edit_or_resend(cb, text: str, keyboard=None) -> bool:
     """Render the next view in place, falling back to a fresh message.
 
     Treats an identical-content edit as success and a genuine edit failure as a
@@ -60,23 +61,23 @@ async def edit_or_resend(cb, text: str, keyboard=None) -> None:
     """
     message = getattr(cb, "message", None)
     if message is None:
-        return
+        return False
     try:
         await message.edit_text(text, reply_markup=keyboard)
-        return
+        return True
     except Exception as exc:  # noqa: BLE001 - classified below
         if is_not_modified(exc):
-            return
+            return True
         log.info(
             "callback_edit_resend",
             extra={"error_class": type(exc).__name__},
         )
     try:
         await message.answer(text, reply_markup=keyboard)
+        return True
     except Exception as exc:  # noqa: BLE001 - last resort
-        log.warning(
-            "callback_resend_failed", extra={"error_class": type(exc).__name__}
-        )
+        log.warning("callback_resend_failed", extra={"error_class": type(exc).__name__})
+        return False
 
 
 async def apply(cb, result: CallbackResult) -> None:

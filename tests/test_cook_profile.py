@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock
 import sqlalchemy as sa
 from sqlmodel import SQLModel, Session, create_engine
 
-import app.bot as bot_mod
+import app.handler_support as handler_support
 from app.bot import handle_prefs
 from app.client_set import PerUserClients
 from app.models import Household, User
@@ -160,7 +160,7 @@ class _Msg:
 
 
 def test_handle_prefs_no_args_shows_profile(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
@@ -177,7 +177,7 @@ def test_handle_prefs_no_args_shows_profile(monkeypatch):
 
 
 def test_handle_prefs_with_sentence_updates(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:

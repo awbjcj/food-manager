@@ -5,6 +5,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.bot as bot_mod
+import app.handler_support as handler_support
 from app.client_set import PerUserClients
 from app.correction_service import CorrectPayload, correct_payload_to_json
 from app.llm import CorrectionDiff, ProposedAddItem
@@ -116,7 +117,7 @@ def _pending_correct(session_factory) -> tuple[int, int]:
 
 @pytest.mark.asyncio
 async def test_handle_correct_creates_pending_and_sends_diff(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     item_id = _item(session_factory)
     fake = FakeTextLLMClient(canned_correct=(
         CorrectionDiff(
@@ -152,7 +153,7 @@ async def test_handle_correct_creates_pending_and_sends_diff(session_factory, mo
 
 @pytest.mark.asyncio
 async def test_handle_correct_null_diff_does_not_create_pending(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     item_id = _item(session_factory)
     fake = FakeTextLLMClient(canned_correct=(
         CorrectionDiff(cache_action="leave", rationale="no change", confidence=0.5),
@@ -174,7 +175,7 @@ async def test_handle_correct_null_diff_does_not_create_pending(session_factory,
 
 @pytest.mark.asyncio
 async def test_correct_reply_routes_to_proposal(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     item_id = _item(session_factory)
     fake = FakeTextLLMClient(canned_correct=(
         CorrectionDiff(
@@ -210,7 +211,7 @@ async def test_correct_reply_routes_to_proposal(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_correct_reply_ignores_non_marked_reply(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     fake = FakeTextLLMClient()
     msg = _reply_msg("actually heavy cream", reply_to_text="ordinary bot response")
 
@@ -229,7 +230,7 @@ async def test_correct_reply_ignores_non_marked_reply(session_factory, monkeypat
 
 @pytest.mark.asyncio
 async def test_handle_add_sends_one_pending_message_per_item(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     fake = FakeTextLLMClient(canned_add=([
         ProposedAddItem(
             name="Oat Milk",
@@ -272,7 +273,7 @@ async def test_handle_add_sends_one_pending_message_per_item(session_factory, mo
 
 @pytest.mark.asyncio
 async def test_apply_and_cancel_callbacks(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     pending_id, item_id = _pending_correct(session_factory)
 
     await bot_mod.handle_callback(
@@ -300,7 +301,7 @@ async def test_apply_and_cancel_callbacks(session_factory, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_apply_expired_pending_refuses_mutation(session_factory, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     pending_id, item_id = _pending_correct(session_factory)
     with session_factory() as db:
         pending = db.get(PendingCorrection, pending_id)

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlmodel import SQLModel, Session, create_engine
 
 import app.bot as bot_mod
+import app.handler_support as handler_support
 from app.client_set import PerUserClients
 from app.refine_service import _accrue_receipt_cost
 from app.cache import get_cached
@@ -166,7 +167,7 @@ async def test_refine_skips_low_confidence_keeps_estimate(session):
 
 @pytest.mark.asyncio
 async def test_handle_photo_spawns_refine_and_edits_message(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
 
     # In-memory DB with a seeded user
     engine = create_engine("sqlite:///:memory:")

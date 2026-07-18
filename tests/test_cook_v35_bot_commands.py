@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock
 
 from sqlmodel import Session, SQLModel, create_engine
 
-import app.bot as bot_mod
+import app.handler_support as handler_support
 from app.bot import handle_favorites, handle_shopping
 from app.cook.models import RecipeCandidate, RecipeIngredient
 from app.cook.favorites_service import save_candidate
@@ -40,7 +40,7 @@ def _NOW(tz):
 
 
 def test_shopping_lists_pending_with_buttons(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     with Session(engine) as db:
         add_missing(db, household_id=1, ingredients=[RecipeIngredient(name="Eggs")], now=_NOW("x"))
@@ -49,7 +49,7 @@ def test_shopping_lists_pending_with_buttons(monkeypatch):
 
 
 def test_shopping_handler_renders_items(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     with Session(engine) as db:
         add_missing(db, household_id=1, ingredients=[RecipeIngredient(name="Eggs")], now=_NOW("x"))
@@ -65,7 +65,7 @@ def test_shopping_handler_renders_items(monkeypatch):
 
 
 def test_favorites_handler_renders_saved(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     with Session(engine) as db:
         save_candidate(db, household_id=1, candidate=RecipeCandidate(
@@ -84,7 +84,7 @@ def test_favorites_handler_renders_saved(monkeypatch):
 
 
 def test_favorites_empty_state(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     msg = _Msg(text="/favorites")
     asyncio.run(handle_favorites(msg, session_factory=lambda: Session(engine)))

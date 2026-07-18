@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
-import app.bot as bot_mod
+import app.handler_support as handler_support
 from app.bot import handle_callback, run_cook_and_render
 from app.client_set import PerUserClients
 from app.cook.models import (
@@ -80,7 +80,7 @@ def _add_done_cook(engine, candidates):
 
 
 def test_feedback_callback_records_liked(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     cook_id = _add_done_cook(engine, [_scored()])
     asyncio.run(handle_callback(
@@ -93,7 +93,7 @@ def test_feedback_callback_records_liked(monkeypatch):
 
 
 def test_feedback_callback_on_expired_session_is_rejected(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     now = datetime(2026, 5, 30, 12, 0)
     with Session(engine) as db:
@@ -112,7 +112,7 @@ def test_feedback_callback_on_expired_session_is_rejected(monkeypatch):
 
 
 def test_save_callback_creates_favorite(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     cook_id = _add_done_cook(engine, [_scored()])
     cb = _Cb(f"cooksave:{cook_id}")
@@ -125,7 +125,7 @@ def test_save_callback_creates_favorite(monkeypatch):
 
 
 def test_shop_callback_adds_missing_against_pantry(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     today = date(2026, 5, 30)
     with Session(engine) as db:
@@ -145,7 +145,7 @@ def test_shop_callback_adds_missing_against_pantry(monkeypatch):
 
 
 def test_shopdone_callback_checks_off(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     now = datetime(2026, 5, 30, 12, 0)
     with Session(engine) as db:
@@ -161,7 +161,7 @@ def test_shopdone_callback_checks_off(monkeypatch):
 
 
 def test_favcook_callback_replies_with_recipe(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     now = datetime(2026, 5, 30, 12, 0)
     with Session(engine) as db:
@@ -179,7 +179,7 @@ def test_favcook_callback_replies_with_recipe(monkeypatch):
 
 
 def test_result_keyboard_attached_on_render(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     today_dt = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
     today = today_dt.date()
@@ -224,7 +224,7 @@ def test_result_keyboard_attached_on_render(monkeypatch):
 
 
 def test_no_result_keyboard_when_no_recipe_found(monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
     today_dt = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
     today = today_dt.date()

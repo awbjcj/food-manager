@@ -11,6 +11,7 @@ from app.renderer import (
     render_undo_result,
 )
 import app.bot as bot_mod
+import app.handler_support as handler_support
 
 
 def test_parse_undo_receipt_and_add():
@@ -233,7 +234,7 @@ def _cb(data: str, *, user_id: int = 1):
 
 @pytest.mark.asyncio
 async def test_handle_callback_undo_receipt(handler_engine, monkeypatch):
-    monkeypatch.setattr(bot_mod, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     now = datetime.now(timezone.utc)
 
     # Insert a receipt and an active item referencing it

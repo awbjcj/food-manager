@@ -5,6 +5,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.bot as bot_mod
+from app.client_set import PerUserClients
 from app.correction_service import CorrectPayload, correct_payload_to_json
 from app.llm import CorrectionDiff, ProposedAddItem
 from app.models import Household, PantryItem, PendingCorrection, User
@@ -133,7 +134,7 @@ async def test_handle_correct_creates_pending_and_sends_diff(session_factory, mo
         msg,
         session_factory=session_factory,
         now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
-        text_llm=fake,
+        clients=PerUserClients.for_tests(text=fake),
     )
 
     assert "Proposed correction" in msg.answer.await_args.args[0]
@@ -163,7 +164,7 @@ async def test_handle_correct_null_diff_does_not_create_pending(session_factory,
         msg,
         session_factory=session_factory,
         now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
-        text_llm=fake,
+        clients=PerUserClients.for_tests(text=fake),
     )
 
     msg.answer.assert_awaited_with("no changes detected")
@@ -194,7 +195,7 @@ async def test_correct_reply_routes_to_proposal(session_factory, monkeypatch):
         msg,
         session_factory=session_factory,
         now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
-        text_llm=fake,
+        clients=PerUserClients.for_tests(text=fake),
     )
 
     assert fake.correct_calls[0]["user_text"] == "actually heavy cream"
@@ -217,7 +218,7 @@ async def test_correct_reply_ignores_non_marked_reply(session_factory, monkeypat
         msg,
         session_factory=session_factory,
         now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
-        text_llm=fake,
+        clients=PerUserClients.for_tests(text=fake),
     )
 
     msg.answer.assert_not_awaited()
@@ -257,7 +258,7 @@ async def test_handle_add_sends_one_pending_message_per_item(session_factory, mo
         msg,
         session_factory=session_factory,
         now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
-        text_llm=fake,
+        clients=PerUserClients.for_tests(text=fake),
     )
 
     assert msg.answer.await_count == 3

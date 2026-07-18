@@ -5,6 +5,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
+from app.client_set import PerUserClients
 from app.models import Household, PantryItem, User
 from app.nl_intent import NLIntent
 
@@ -109,7 +110,6 @@ async def test_unknown_intent_replies_hint(session_factory, monkeypatch):
         session_factory=session_factory,
         now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
         intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="unknown")),
-        text_llm=None,
     )
     assert "didn't catch that" in _final_text(msg)
 
@@ -123,7 +123,6 @@ async def test_agent_failure_degrades_to_hint(session_factory, monkeypatch):
         session_factory=session_factory,
         now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
         intent_agent=FakeIntentAgentSelector(error=RuntimeError("provider down")),
-        text_llm=None,
     )
     assert "didn't catch that" in _final_text(msg)
 
@@ -138,7 +137,6 @@ async def test_commands_and_empty_text_are_ignored(session_factory, monkeypatch)
             session_factory=session_factory,
             now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
             intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="unknown")),
-            text_llm=None,
         )
         msg.answer.assert_not_awaited()
 
@@ -160,7 +158,6 @@ async def test_dispatch_failure_degrades_to_hint_not_a_crash(session_factory, mo
         intent_agent=FakeIntentAgentSelector(
             intent=NLIntent(kind="mark", mark_action="ate", item_name="yogurt")
         ),
-        text_llm=None,
     )
     assert "didn't catch that" in _final_text(msg)
     with session_factory() as db:
@@ -179,7 +176,6 @@ async def test_mark_unique_match_applies(session_factory, monkeypatch):
         intent_agent=FakeIntentAgentSelector(
             intent=NLIntent(kind="mark", mark_action="ate", item_name="yogurt")
         ),
-        text_llm=None,
     )
     assert "Ate" in _final_text(msg)
     with session_factory() as db:
@@ -199,7 +195,6 @@ async def test_mark_ambiguous_shows_picker(session_factory, monkeypatch):
         intent_agent=FakeIntentAgentSelector(
             intent=NLIntent(kind="mark", mark_action="ate", item_name="milk")
         ),
-        text_llm=None,
     )
     assert "Which one?" in _final_text(msg)
     with session_factory() as db:  # nothing applied
@@ -218,7 +213,6 @@ async def test_mark_no_match_replies_not_found(session_factory, monkeypatch):
         intent_agent=FakeIntentAgentSelector(
             intent=NLIntent(kind="mark", mark_action="ate", item_name="caviar")
         ),
-        text_llm=None,
     )
     assert "couldn't find" in _final_text(msg).lower()
 
@@ -233,15 +227,16 @@ async def test_add_routes_raw_text_to_add_flow(session_factory, monkeypatch):
 
     monkeypatch.setattr(bot_mod, "_run_add_flow", fake_add_flow)
     msg = _nl_msg("bought milk and two avocados")
+    clients = PerUserClients.for_tests(text="TEXT_LLM")
     await bot_mod.handle_nl_message(
         msg,
         session_factory=session_factory,
         now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
         intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="add")),
-        text_llm="TEXT_LLM",
+        clients=clients,
     )
     assert captured["raw_text"] == "bought milk and two avocados"
-    assert captured["text_llm"] == "TEXT_LLM"
+    assert captured["clients"] is clients
 
 
 @pytest.mark.asyncio
@@ -255,7 +250,6 @@ async def test_shelf_life_question_answers(session_factory, monkeypatch):
         intent_agent=FakeIntentAgentSelector(
             intent=NLIntent(kind="shelf_life_question", food="whole milk")
         ),
-        text_llm=None,
     )
     assert "7" in _final_text(msg)
 
@@ -270,7 +264,6 @@ async def test_pantry_query_renders_digest_view(session_factory, monkeypatch):
         session_factory=session_factory,
         now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
         intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="pantry_query")),
-        text_llm=None,
     )
     assert "spinach" in _final_text(msg)
 
@@ -284,7 +277,6 @@ async def test_pantry_query_empty_replies_clear(session_factory, monkeypatch):
         session_factory=session_factory,
         now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
         intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="pantry_query")),
-        text_llm=None,
     )
     from app.i18n import t
 

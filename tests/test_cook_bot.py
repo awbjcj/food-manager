@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 from sqlmodel import SQLModel, Session, create_engine
 
 import app.bot as bot_mod
+from app.client_set import PerUserClients
 from app.bot import handle_cook, handle_cook_callback, run_cook_and_render
 from app.cook.models import (
     NutritionScore,
@@ -69,9 +70,11 @@ def _recording_spawn():
 
 def _fakes():
     return dict(
-        selection_llm=FakeSelectionLLM(),
-        recipe_llm=FakeRecipeLLM(),
-        nutrition_llm=FakeNutritionLLM(),
+        clients=PerUserClients.for_tests(
+            selection=FakeSelectionLLM(),
+            recipe=FakeRecipeLLM(),
+            nutrition=FakeNutritionLLM(),
+        )
     )
 
 
@@ -534,7 +537,9 @@ def test_run_cook_and_render_completes_and_edits(monkeypatch):
     asyncio.run(run_cook_and_render(
         lambda: Session(engine), user_id=1, household_id=1, user_tz="America/Detroit",
         cook_id=cook_id,
-        selection_llm=selection, recipe_llm=recipe, nutrition_llm=nutrition,
+        clients=PerUserClients.for_tests(
+            selection=selection, recipe=recipe, nutrition=nutrition
+        ),
         now_provider=lambda tz: today_dt, bot=bot,
     ))
     with Session(engine) as db:
@@ -555,15 +560,17 @@ def test_dispatcher_routes_every_v49_cook_prefix_with_static_sources(monkeypatch
     dispatcher = bot_mod.build_dispatcher(
         bot=object(),  # type: ignore[arg-type]
         session_factory=lambda: None,  # type: ignore[arg-type,return-value]
-        llm=object(),  # type: ignore[arg-type]
-        text_llm=object(),  # type: ignore[arg-type]
-        profile_llm=object(),  # type: ignore[arg-type]
+        clients=PerUserClients.for_tests(
+            image=object(),
+            text=object(),
+            profile=object(),
+            selection=object(),
+            recipe=object(),
+            nutrition=object(),
+        ),
         now_provider=_NOW,
         on_user_created=lambda user: None,
         reschedule=lambda user: None,
-        selection_llm=object(),
-        recipe_llm=object(),
-        nutrition_llm=object(),
         recipe_sources=(static_source,),
     )
     registered = dispatcher.callback_query.handlers[0].callback

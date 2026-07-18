@@ -13,6 +13,7 @@ from app.bot import (
     handle_shopping,
     run_cook_and_render,
 )
+from app.client_set import PerUserClients
 from app.cook.models import (
     NutritionScore,
     NutritionScores,
@@ -326,7 +327,7 @@ async def test_ingest_reply_renders_zh_name_for_zh_user(session_factory, monkeyp
         msg,
         session_factory=session_factory,
         now_provider=_now,
-        llm=llm,
+        clients=PerUserClients.for_tests(image=llm),
         photo_downloader=AsyncMock(return_value=b"jpg"),
         translation_llm=fake,
     )
@@ -369,7 +370,7 @@ async def test_ingest_reply_english_user_unaffected(session_factory, monkeypatch
         msg,
         session_factory=session_factory,
         now_provider=_now,
-        llm=llm,
+        clients=PerUserClients.for_tests(image=llm),
         photo_downloader=AsyncMock(return_value=b"jpg"),
     )
     text = msg.answer.call_args.args[0]
@@ -474,9 +475,9 @@ async def test_cook_result_renders_zh_title_for_zh_user(session_factory, monkeyp
         household_id=household_id,
         user_tz="America/Detroit",
         cook_id=cook_id,
-        selection_llm=selection,
-        recipe_llm=recipe,
-        nutrition_llm=nutrition,
+        clients=PerUserClients.for_tests(
+            selection=selection, recipe=recipe, nutrition=nutrition
+        ),
         now_provider=_now,
         bot=bot,
         translation_llm=fake,
@@ -504,9 +505,9 @@ async def test_cook_result_english_user_unaffected(session_factory, monkeypatch)
         household_id=household_id,
         user_tz="America/Detroit",
         cook_id=cook_id,
-        selection_llm=selection,
-        recipe_llm=recipe,
-        nutrition_llm=nutrition,
+        clients=PerUserClients.for_tests(
+            selection=selection, recipe=recipe, nutrition=nutrition
+        ),
         now_provider=_now,
         bot=bot,
     )
@@ -552,7 +553,7 @@ async def test_photo_sends_progress_ack_then_edits_result(session_factory, monke
         msg,
         session_factory=session_factory,
         now_provider=_now,
-        llm=llm,
+        clients=PerUserClients.for_tests(image=llm),
         photo_downloader=AsyncMock(return_value=b"jpg"),
     )
 

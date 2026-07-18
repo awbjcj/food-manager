@@ -10,6 +10,7 @@ from sqlmodel import SQLModel, Session, create_engine
 
 import app.bot as bot_mod
 from app.bot import handle_prefs
+from app.client_set import PerUserClients
 from app.models import Household, User
 from app.profile_service import (
     FoodProfile,
@@ -167,7 +168,9 @@ def test_handle_prefs_no_args_shows_profile(monkeypatch):
     msg = _Msg("/prefs")
     fake = FakeProfileLLMClient(canned=(FoodProfile(), None))
     asyncio.run(handle_prefs(
-        msg, session_factory=lambda: Session(engine), profile_llm=fake,
+        msg,
+        session_factory=lambda: Session(engine),
+        clients=PerUserClients.for_tests(profile=fake),
     ))
     assert "food profile" in msg.answer.call_args[0][0].lower()
     assert fake.calls == []
@@ -182,7 +185,9 @@ def test_handle_prefs_with_sentence_updates(monkeypatch):
     msg = _Msg("/prefs I'm vegan")
     fake = FakeProfileLLMClient(canned=(FoodProfile(diet="vegan"), None))
     asyncio.run(handle_prefs(
-        msg, session_factory=lambda: Session(engine), profile_llm=fake,
+        msg,
+        session_factory=lambda: Session(engine),
+        clients=PerUserClients.for_tests(profile=fake),
     ))
     assert fake.calls[0]["sentence"] == "I'm vegan"
     assert "vegan" in msg.answer.call_args[0][0]

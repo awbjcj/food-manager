@@ -7,6 +7,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.bot as bot_mod
 from app.bot import handle_callback, run_cook_and_render
+from app.client_set import PerUserClients
 from app.cook.models import (
     NutritionScore,
     NutritionScores,
@@ -209,8 +210,11 @@ def test_result_keyboard_attached_on_render(monkeypatch):
     asyncio.run(run_cook_and_render(
         lambda: Session(engine), user_id=1, household_id=1, user_tz="America/Detroit",
         cook_id=cook_id,
-        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
-        recipe_llm=recipe, nutrition_llm=nutrition,
+        clients=PerUserClients.for_tests(
+            selection=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
+            recipe=recipe,
+            nutrition=nutrition,
+        ),
         now_provider=lambda tz: today_dt, bot=bot))
     assert edit_mock.await_args is not None
     kwargs = edit_mock.await_args.kwargs
@@ -248,8 +252,11 @@ def test_no_result_keyboard_when_no_recipe_found(monkeypatch):
     asyncio.run(run_cook_and_render(
         lambda: Session(engine), user_id=1, household_id=1, user_tz="America/Detroit",
         cook_id=cook_id,
-        selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
-        recipe_llm=recipe, nutrition_llm=nutrition,
+        clients=PerUserClients.for_tests(
+            selection=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
+            recipe=recipe,
+            nutrition=nutrition,
+        ),
         now_provider=lambda tz: today_dt, bot=bot))
     assert edit_mock.await_args is not None
     kwargs = edit_mock.await_args.kwargs

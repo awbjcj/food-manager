@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlmodel import SQLModel, Session, create_engine
 
 import app.bot as bot_mod
+from app.client_set import PerUserClients
 from app.refine_service import _accrue_receipt_cost
 from app.cache import get_cached
 from app.correction_service import propose_add
@@ -236,9 +237,8 @@ async def test_handle_photo_spawns_refine_and_edits_message(monkeypatch):
         msg,
         session_factory=session_factory,
         now_provider=now_provider,
-        llm=llm,
+        clients=PerUserClients.for_tests(image=llm, search=search),
         photo_downloader=photo_downloader,
-        search=search,
         spawn=spawn,
         bot=stub_bot,
     )

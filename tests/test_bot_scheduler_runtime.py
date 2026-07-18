@@ -7,6 +7,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.backup import BackupError, pre_migration_backup
+from app.client_set import PerUserClients
 from app.bot import (
     authorize_and_get_user,
     build_dispatcher,
@@ -193,8 +194,7 @@ async def test_handle_llm_shows_and_switches_provider(session, monkeypatch):
     await handle_llm(
         status,
         session_factory=lambda: session,
-        llm=llm,
-        text_llm=text_llm,
+        clients=PerUserClients.for_tests(image=llm, text=text_llm),
     )
     assert "LLM provider: anthropic" in status.answer.await_args.args[0]
 
@@ -202,8 +202,7 @@ async def test_handle_llm_shows_and_switches_provider(session, monkeypatch):
     await handle_llm(
         switch,
         session_factory=lambda: session,
-        llm=llm,
-        text_llm=text_llm,
+        clients=PerUserClients.for_tests(image=llm, text=text_llm),
     )
     assert session.get(User, 1).llm_provider == "openai"
     assert "set to openai" in switch.answer.await_args.args[0]
@@ -222,8 +221,7 @@ async def test_handle_llm_rejects_unconfigured_provider(session, monkeypatch):
     await handle_llm(
         msg,
         session_factory=lambda: session,
-        llm=llm,
-        text_llm=text_llm,
+        clients=PerUserClients.for_tests(image=llm, text=text_llm),
     )
 
     assert session.get(User, 1).llm_provider == "anthropic"
@@ -416,12 +414,14 @@ def test_build_dispatcher_imports_and_registers():
     dispatcher = build_dispatcher(
         bot=fake_bot,
         session_factory=lambda: MagicMock(),
-        llm=fake_llm,
-        text_llm=FakeTextLLMClient(),
-        profile_llm=FakeProfileLLMClient(),
         now_provider=lambda tz: datetime.now(timezone.utc),
         on_user_created=lambda user: None,
         reschedule=lambda user: None,
+        clients=PerUserClients.for_tests(
+            image=fake_llm,
+            text=FakeTextLLMClient(),
+            profile=FakeProfileLLMClient(),
+        ),
     )
     assert dispatcher is not None
 
@@ -436,6 +436,8 @@ def test_build_llm_clients_includes_profile_llm():
         LLM_PROVIDER="anthropic",
         ANTHROPIC_API_KEY="anthropic-key",
         OPENAI_API_KEY=None,
+        GEMINI_API_KEY=None,
+        DEEPSEEK_API_KEY=None,
     )
     bundle = _build_llm_clients(settings)
 

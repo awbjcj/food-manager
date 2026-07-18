@@ -30,6 +30,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import app.bot as bot_mod
 import app.cook.service as cook_service_mod
 from app.alerts import OwnerAlerter
+from app.client_set import PerUserClients
 from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
 from app.cook.recipe_source import SpoonacularSource, TheMealDbSource
@@ -385,6 +386,16 @@ async def _amain(settings: Settings) -> None:
         TheMealDbSource(http=recipe_http),
     ]
     bundle = _build_llm_clients(settings)
+    clients = PerUserClients.create(
+        image=bundle.image,
+        text=bundle.text,
+        profile=bundle.profile,
+        selection=bundle.selection,
+        recipe=bundle.recipe,
+        nutrition=bundle.nutrition,
+        search=bundle.search,
+        translation=bundle.translation,
+    )
     intent_agent = _build_intent_agents(settings)
     composer = _build_week_composers(settings)
     # Per-provider model names so the log reflects the configured provider
@@ -446,13 +457,7 @@ async def _amain(settings: Settings) -> None:
     dispatcher = build_dispatcher(
         bot=bot,
         session_factory=session_factory,
-        llm=bundle.image,
-        text_llm=bundle.text,
-        profile_llm=bundle.profile,
-        search=bundle.search,
-        selection_llm=bundle.selection,
-        recipe_llm=bundle.recipe,
-        nutrition_llm=bundle.nutrition,
+        clients=clients,
         now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
         on_user_created=reschedule,
         reschedule=reschedule,

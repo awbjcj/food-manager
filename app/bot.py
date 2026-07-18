@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
-from typing import AsyncIterator, Awaitable, Callable, Optional, cast
+from typing import AsyncIterator, Awaitable, Callable, Optional
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -33,6 +33,7 @@ from app.commands import (
     parse_snooze_args,
     parse_tz,
 )
+from app.client_set import PerUserClients
 from app.i18n import DEFAULT_LANG, LANGS, t
 from app.correction_service import (
     NullDiff,
@@ -70,12 +71,7 @@ from app.plan_service import NotEnoughItemsToPlan, aggregate_shopping, build_pla
 from app.week_composer import DaySpec
 from app.shopping_service import add_missing, check_off, list_pending
 from app.ingest_service import DuplicateReceipt, ingest_photo
-from app.llm import (
-    LLMClient,
-    LLMProviderNotConfigured,
-    ProfileUpdateLLMClient,
-    TextLLMClient,
-)
+from app.llm import LLMProviderNotConfigured
 from app.providers import ALL_PROVIDERS, supports
 from app.household_service import (
     provision_solo_household,
@@ -99,7 +95,7 @@ from app.refine_service import run_receipt_refine
 from app.cache import get_cached
 from app.normalization import normalize
 from app.shelf_life_defaults import lookup_default
-from app.shelf_life_search import ShelfLifeSearchClient, resolve_search_days
+from app.shelf_life_search import resolve_search_days
 from app.storage_state import shelf_life_origin
 from app.callback_dispatch import answer as dispatch_answer, edit_or_resend
 from app.nl_intent import MAX_CONTEXT_NAMES, match_items
@@ -289,36 +285,13 @@ def _require_today(today: date | None) -> date:
     return today
 
 
-def _available_llm_providers(
-    llm: LLMClient, text_llm: TextLLMClient
-) -> tuple[str, ...]:
+def _available_llm_providers(clients: PerUserClients) -> tuple[str, ...]:
     # A provider is selectable if it can serve the core text tasks (corrections,
     # /add, profile, cook, translation) — the floor every provider must meet.
     # Image extraction and web search fall back to a capable provider when the
     # chosen one lacks them, so they are not required for selectability. (The
     # ``llm`` image selector is accepted for call-site symmetry.)
-    return tuple(sorted(getattr(text_llm, "available_providers", ("anthropic",))))
-
-
-def _select_llm_client(llm: LLMClient, provider: str) -> LLMClient:
-    selector = getattr(llm, "for_provider", None)
-    if callable(selector):
-        return cast(LLMClient, selector(provider))
-    return llm
-
-
-def _select_text_llm_client(text_llm: TextLLMClient, provider: str) -> TextLLMClient:
-    selector = getattr(text_llm, "for_provider", None)
-    if callable(selector):
-        return cast(TextLLMClient, selector(provider))
-    return text_llm
-
-
-def _select_profile_llm(
-    profile_llm: "ProfileUpdateLLMClient", provider: str
-) -> "ProfileUpdateLLMClient":
-    selector = getattr(profile_llm, "for_provider", None)
-    return cast("ProfileUpdateLLMClient", selector(provider)) if callable(selector) else profile_llm
+    return clients.available_text_providers
 
 
 async def _translate_for_render(session, *, lang, texts, translation_llm):
@@ -343,8 +316,8 @@ def _cook_card_texts(cards) -> list[str]:
     return texts
 
 
-def _render_llm_status(user: User, llm: LLMClient, text_llm: TextLLMClient) -> str:
-    available = _available_llm_providers(llm, text_llm)
+def _render_llm_status(user: User, clients: PerUserClients) -> str:
+    available = _available_llm_providers(clients)
     lines = [
         f"LLM provider: {user.llm_provider}",
         f"Available: {', '.join(available) if available else 'none'}",
@@ -917,13 +890,12 @@ async def _run_add_flow(
     user,
     today,
     raw_text: str,
-    text_llm: TextLLMClient,
-    search: ShelfLifeSearchClient | None,
+    clients: PerUserClients,
     progress,
 ) -> None:
     try:
-        selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
-        selected_search = _select_search(search, user.llm_provider)
+        selected_text_llm = clients.text(user)
+        selected_search = clients.search(user)
         proposals, _ = await propose_add(
             session,
             llm=selected_text_llm,
@@ -996,9 +968,8 @@ async def handle_add(
     *,
     session_factory: _SessionFactory,
     now_provider: NowProvider,
-    text_llm: TextLLMClient,
+    clients: PerUserClients,
     on_user_created: Callable[[User], None] = _noop_user_created,
-    search: ShelfLifeSearchClient | None = None,
 ) -> None:
     async with _request(
         msg,
@@ -1020,8 +991,7 @@ async def handle_add(
             user=user,
             today=today,
             raw_text=parts[1].strip(),
-            text_llm=text_llm,
-            search=search,
+            clients=clients,
             progress=progress,
         )
 
@@ -1032,8 +1002,7 @@ async def handle_nl_message(
     session_factory,
     now_provider,
     intent_agent,
-    text_llm,
-    search: ShelfLifeSearchClient | None = None,
+    clients: PerUserClients = PerUserClients(),
     on_user_created: Callable[[User], None] = _noop_user_created,
     translation_llm=None,
 ) -> None:
@@ -1082,8 +1051,7 @@ async def handle_nl_message(
                 text=text,
                 intent=intent,
                 pantry=pantry,
-                text_llm=text_llm,
-                search=search,
+                clients=clients,
                 translation_llm=translation_llm,
                 progress=progress,
             )
@@ -1099,7 +1067,7 @@ async def handle_nl_message(
             await finish_progress(progress, msg, t("nl.hint", user.lang))
 
 
-async def _apply_mark(session, *, user, item_id, action, today, search):
+async def _apply_mark(session, *, user, item_id, action, today, clients):
     if action == "ate":
         return mark_eaten(
             session, household_id=user.household_id, item_id=item_id, today=today
@@ -1117,13 +1085,13 @@ async def _apply_mark(session, *, user, item_id, action, today, search):
         household_id=user.household_id,
         item_id=item_id,
         today=today,
-        search=_select_search(search, user.llm_provider),
+        search=clients.search(user),
     )
 
 
 async def _dispatch_nl_intent(
     msg, *, session, user, today, text, intent, pantry,
-    text_llm, search, translation_llm, progress,
+    clients, translation_llm, progress,
 ) -> None:
     if intent.kind == "mark" and intent.mark_action and intent.item_name:
         matches = match_items(intent.item_name, pantry)
@@ -1152,7 +1120,7 @@ async def _dispatch_nl_intent(
             item_id=item.id,
             action=intent.mark_action,
             today=today,
-            search=search,
+            clients=clients,
         )
         key = f"nl.done.{intent.mark_action}" if result.applied else "nl.already_done"
         await finish_progress(progress, msg, t(key, user.lang, name=item.raw_name))
@@ -1166,8 +1134,7 @@ async def _dispatch_nl_intent(
             user=user,
             today=today,
             raw_text=text,
-            text_llm=text_llm,
-            search=search,
+            clients=clients,
             progress=None,
         )
         return
@@ -1177,7 +1144,7 @@ async def _dispatch_nl_intent(
             household_id=user.household_id,
             food=intent.food,
             lang=user.lang,
-            search=_select_search(search, user.llm_provider),
+            search=clients.search(user),
         )
         await finish_progress(progress, msg, answer)
         return
@@ -1369,12 +1336,12 @@ async def _propose_and_send_correction(
     item: PantryItem,
     user_text: str,
     today: date,
-    text_llm: TextLLMClient,
+    clients: PerUserClients,
 ) -> None:
     assert item.id is not None
     item_id = item.id
     try:
-        selected_text_llm = _select_text_llm_client(text_llm, user.llm_provider)
+        selected_text_llm = clients.text(user)
         payload, cost = await propose_correct(
             session,
             llm=selected_text_llm,
@@ -1446,7 +1413,7 @@ async def handle_correct(
     *,
     session_factory,
     now_provider,
-    text_llm: TextLLMClient,
+    clients: PerUserClients,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
     async with _request(
@@ -1481,7 +1448,7 @@ async def handle_correct(
             item=item,
             user_text=parts[2].strip(),
             today=today,
-            text_llm=text_llm,
+            clients=clients,
         )
 
 
@@ -1490,7 +1457,7 @@ async def handle_correct_reply(
     *,
     session_factory,
     now_provider,
-    text_llm: TextLLMClient,
+    clients: PerUserClients,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
     marker_text = getattr(getattr(msg, "reply_to_message", None), "text", None)
@@ -1525,7 +1492,7 @@ async def handle_correct_reply(
             item=item,
             user_text=user_text,
             today=today,
-            text_llm=text_llm,
+            clients=clients,
         )
 
 
@@ -1657,15 +1624,20 @@ def _plan_uses_expiring(entry: MealPlanEntry) -> bool:
         return False
 
 
-def _plan_source(recipe_sources, recipe_llm, nutrition_llm, provider: str) -> ChainedRecipeSource:
-    selected_recipe_llm = _select_cook(recipe_llm, provider)
-    selected_nutrition_llm = _select_cook(nutrition_llm, provider)
+def _plan_source(
+    recipe_sources, clients: PerUserClients, user: User
+) -> ChainedRecipeSource:
+    recipe_llm = clients.recipe_if_configured(user)
+    nutrition_llm = clients.nutrition_if_configured(user)
+    llm_sources = (
+        [LlmRecipeSource(recipe_llm=recipe_llm, nutrition_llm=nutrition_llm)]
+        if recipe_llm is not None and nutrition_llm is not None
+        else []
+    )
     return ChainedRecipeSource(
         [
             *recipe_sources,
-            LlmRecipeSource(
-                recipe_llm=selected_recipe_llm, nutrition_llm=selected_nutrition_llm
-            ),
+            *llm_sources,
         ]
     )
 
@@ -1676,10 +1648,8 @@ async def handle_plan(
     session_factory: _SessionFactory,
     now_provider: NowProvider,
     composer,
+    clients: PerUserClients = PerUserClients(),
     recipe_sources=(),
-    recipe_llm=None,
-    nutrition_llm=None,
-    search: ShelfLifeSearchClient | None = None,
     on_user_created: Callable[[User], None] = _noop_user_created,
     translation_llm=None,
 ) -> None:
@@ -1716,7 +1686,7 @@ async def handle_plan(
             is not None
         )
         selected_composer = composer.for_provider(user.llm_provider)
-        source = _plan_source(recipe_sources, recipe_llm, nutrition_llm, user.llm_provider)
+        source = _plan_source(recipe_sources, clients, user)
         try:
             plan, entries = await build_plan(
                 session,
@@ -1812,9 +1782,8 @@ async def handle_plan_callback(
     *,
     session_factory,
     now_provider,
+    clients: PerUserClients = PerUserClients(),
     recipe_sources=(),
-    recipe_llm=None,
-    nutrition_llm=None,
     translation_llm=None,
 ) -> None:
     try:
@@ -1876,7 +1845,7 @@ async def handle_plan_callback(
             await dispatch_answer(cb, "couldn't load your household profile")
             return
         profile = profile_from_household(household)
-        source = _plan_source(recipe_sources, recipe_llm, nutrition_llm, user.llm_provider)
+        source = _plan_source(recipe_sources, clients, user)
         await dispatch_answer(cb)
         try:
             updated = await swap_day(
@@ -1904,8 +1873,7 @@ async def handle_llm(
     msg,
     *,
     session_factory,
-    llm: LLMClient,
-    text_llm: TextLLMClient,
+    clients: PerUserClients,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
     async with _request(
@@ -1922,9 +1890,9 @@ async def handle_llm(
             await msg.answer(str(exc))
             return
         if provider is None:
-            await msg.answer(_render_llm_status(user, llm, text_llm))
+            await msg.answer(_render_llm_status(user, clients))
             return
-        available = _available_llm_providers(llm, text_llm)
+        available = _available_llm_providers(clients)
         if provider not in available:
             await msg.answer(
                 f"LLM provider {provider!r} is not configured. "
@@ -1941,7 +1909,7 @@ async def handle_prefs(
     msg,
     *,
     session_factory,
-    profile_llm: ProfileUpdateLLMClient,
+    clients: PerUserClients,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
     async with _request(
@@ -1961,7 +1929,7 @@ async def handle_prefs(
             await msg.answer(render_profile(profile_from_household(household), lang=user.lang))
             return
         try:
-            selected = _select_profile_llm(profile_llm, user.llm_provider)
+            selected = clients.profile(user)
             profile, _ = await update_profile_from_sentence(
                 session, llm=selected, household=household, sentence=parts[1].strip(),
             )
@@ -2044,10 +2012,9 @@ async def handle_photo(
     *,
     session_factory,
     now_provider,
-    llm: LLMClient,
+    clients: PerUserClients,
     photo_downloader: Callable[[str], Awaitable[bytes]],
     on_user_created: Callable[[User], None] = _noop_user_created,
-    search: ShelfLifeSearchClient | None = None,
     spawn=None,
     bot=None,
     translation_llm=None,
@@ -2071,8 +2038,8 @@ async def handle_photo(
         )
         progress = await start_progress(msg, t("progress.reading_receipt", user.lang))
         try:
-            selected_llm = _select_llm_client(llm, user.llm_provider)
-            selected_search = _select_search(search, user.llm_provider)
+            selected_llm = clients.image(user)
+            selected_search = clients.search(user)
             summary = await ingest_photo(
                 session,
                 selected_llm,
@@ -2239,26 +2206,6 @@ def _cuisine_round_keyboard(
     return rows
 
 
-def _select_cook(client, provider: str):
-    selector = getattr(client, "for_provider", None)
-    return selector(provider) if callable(selector) else client
-
-
-def _select_search(
-    search: ShelfLifeSearchClient | None, provider: str
-) -> ShelfLifeSearchClient | None:
-    """Resolve the per-user web-search client (with capability fallback).
-
-    ``search`` may be a ``SearchProviderSelector``, a bare client, or None (in
-    tests); only the selector exposes ``for_provider``, so the others pass
-    through unchanged.
-    """
-    selector = getattr(search, "for_provider", None)
-    if callable(selector):
-        return cast(ShelfLifeSearchClient, selector(provider))
-    return search
-
-
 async def _safe_edit_cb(cb, text: str, keyboard=None) -> bool:
     try:
         await cb.message.edit_text(text, reply_markup=keyboard)
@@ -2289,9 +2236,7 @@ async def handle_cook_callback(
     *,
     session_factory: _SessionFactory,
     now_provider: NowProvider,
-    selection_llm,
-    recipe_llm,
-    nutrition_llm,
+    clients: PerUserClients,
     spawn,
     bot,
     translation_llm=None,
@@ -2404,10 +2349,8 @@ async def handle_cook_callback(
                     else:
                         profile = profile_from_household(household)
                         today = now_provider(user.tz).date()
-                        selected_recipe_llm = _select_cook(recipe_llm, user.llm_provider)
-                        selected_nutrition_llm = _select_cook(
-                            nutrition_llm, user.llm_provider
-                        )
+                        selected_recipe_llm = clients.recipe(user)
+                        selected_nutrition_llm = clients.nutrition(user)
                         source = ChainedRecipeSource(
                             [
                                 *recipe_sources,
@@ -2648,9 +2591,7 @@ async def handle_cook_callback(
             household_id=household_id,
             user_tz=user_tz,
             cook_id=cook_id,
-            selection_llm=selection_llm,
-            recipe_llm=recipe_llm,
-            nutrition_llm=nutrition_llm,
+            clients=clients,
             now_provider=now_provider,
             bot=bot,
             translation_llm=translation_llm,
@@ -2666,9 +2607,7 @@ async def run_cook_and_render(
     household_id: int,
     user_tz: str,
     cook_id: int,
-    selection_llm,
-    recipe_llm,
-    nutrition_llm,
+    clients: PerUserClients,
     now_provider: NowProvider,
     bot,
     translation_llm=None,
@@ -2697,9 +2636,9 @@ async def run_cook_and_render(
         chat_id = cook.chat_id
         message_id = cook.message_id
         today = now_provider(user_tz).date()
-        selected_selection_llm = _select_cook(selection_llm, user.llm_provider)
-        selected_recipe_llm = _select_cook(recipe_llm, user.llm_provider)
-        selected_nutrition_llm = _select_cook(nutrition_llm, user.llm_provider)
+        selected_selection_llm = clients.selection(user)
+        selected_recipe_llm = clients.recipe(user)
+        selected_nutrition_llm = clients.nutrition(user)
         source = ChainedRecipeSource([
             *recipe_sources,
             LlmRecipeSource(
@@ -2902,8 +2841,8 @@ async def handle_callback(
     *,
     session_factory,
     now_provider,
+    clients: PerUserClients = PerUserClients(),
     translation_llm=None,
-    search: ShelfLifeSearchClient | None = None,
 ) -> None:
     try:
         action = parse_callback(cb.data)
@@ -3170,7 +3109,7 @@ async def handle_callback(
                     item_id=item_id,
                     state="frozen" if action.verb == "freeze" else "fridge",
                     today=today,
-                    search=_select_search(search, user.llm_provider),
+                    search=clients.search(user),
                 )
             else:
                 await dispatch_answer(cb, "unrecognized action")
@@ -3424,12 +3363,12 @@ _MESSAGE_COMMANDS: tuple[tuple[str, Callable[..., Awaitable[None]], tuple[str, .
     ("digest_at", handle_digest_at, ("session_factory", "reschedule")),
     ("list", handle_list, ("session_factory", "now_provider", "on_user_created", "translation_llm")),
     ("pantry", handle_pantry, ("session_factory", "now_provider", "on_user_created", "translation_llm")),
-    ("add", handle_add, ("session_factory", "now_provider", "text_llm", "on_user_created", "search")),
+    ("add", handle_add, ("session_factory", "now_provider", "clients", "on_user_created")),
     ("ate", handle_ate, ("session_factory", "now_provider", "on_user_created")),
     ("toss", handle_toss, ("session_factory", "now_provider", "on_user_created")),
     ("delete", handle_delete, ("session_factory", "now_provider", "on_user_created")),
     ("snooze", handle_snooze, ("session_factory", "now_provider", "on_user_created")),
-    ("correct", handle_correct, ("session_factory", "now_provider", "text_llm", "on_user_created")),
+    ("correct", handle_correct, ("session_factory", "now_provider", "clients", "on_user_created")),
     ("stats", handle_stats, ("session_factory", "now_provider", "on_user_created")),
     ("cook", handle_cook, ("session_factory", "now_provider", "on_user_created")),
     (
@@ -3439,18 +3378,16 @@ _MESSAGE_COMMANDS: tuple[tuple[str, Callable[..., Awaitable[None]], tuple[str, .
             "session_factory",
             "now_provider",
             "composer",
+            "clients",
             "recipe_sources",
-            "recipe_llm",
-            "nutrition_llm",
-            "search",
             "on_user_created",
             "translation_llm",
         ),
     ),
     ("shopping", handle_shopping, ("session_factory", "now_provider", "on_user_created", "translation_llm")),
     ("favorites", handle_favorites, ("session_factory", "on_user_created", "translation_llm")),
-    ("llm", handle_llm, ("session_factory", "llm", "text_llm", "on_user_created")),
-    ("prefs", handle_prefs, ("session_factory", "profile_llm", "on_user_created")),
+    ("llm", handle_llm, ("session_factory", "clients", "on_user_created")),
+    ("prefs", handle_prefs, ("session_factory", "clients", "on_user_created")),
     ("help", handle_help, ("session_factory", "on_user_created")),
 )
 
@@ -3459,17 +3396,11 @@ def build_dispatcher(
     *,
     bot: Bot,
     session_factory: _SessionFactory,
-    llm: LLMClient,
-    text_llm: TextLLMClient,
-    profile_llm: ProfileUpdateLLMClient,
+    clients: PerUserClients,
     now_provider: NowProvider,
     on_user_created: Callable[[User], None],
     reschedule: Callable[[User], None],
     unschedule: Callable[[int], None] = lambda _telegram_id: None,
-    search: ShelfLifeSearchClient | None = None,
-    selection_llm=None,
-    recipe_llm=None,
-    nutrition_llm=None,
     translation_llm=None,
     alerter=None,
     recipe_sources=(),
@@ -3493,10 +3424,7 @@ def build_dispatcher(
         "on_user_created": on_user_created,
         "reschedule": reschedule,
         "unschedule": unschedule,
-        "llm": llm,
-        "text_llm": text_llm,
-        "profile_llm": profile_llm,
-        "search": search,
+        "clients": clients,
         "translation_llm": translation_llm,
         "intent_agent": intent_agent,
         "bot": bot,
@@ -3504,8 +3432,6 @@ def build_dispatcher(
         "spawn": asyncio.create_task,
         "composer": composer,
         "recipe_sources": recipe_sources,
-        "recipe_llm": recipe_llm,
-        "nutrition_llm": nutrition_llm,
     }
 
     def _bind(handler, *dep_names):
@@ -3524,7 +3450,7 @@ def build_dispatcher(
             handle_correct_reply,
             "session_factory",
             "now_provider",
-            "text_llm",
+            "clients",
             "on_user_created",
         ),
         F.text & F.reply_to_message,
@@ -3534,10 +3460,9 @@ def build_dispatcher(
             handle_photo,
             "session_factory",
             "now_provider",
-            "llm",
+            "clients",
             "photo_downloader",
             "on_user_created",
-            "search",
             "spawn",
             "bot",
             "translation_llm",
@@ -3552,8 +3477,7 @@ def build_dispatcher(
                 "session_factory",
                 "now_provider",
                 "intent_agent",
-                "text_llm",
-                "search",
+                "clients",
                 "on_user_created",
                 "translation_llm",
             ),
@@ -3569,16 +3493,15 @@ def build_dispatcher(
                 callback,
                 session_factory=session_factory,
                 now_provider=now_provider,
+                clients=clients,
                 recipe_sources=recipe_sources,
-                recipe_llm=recipe_llm,
-                nutrition_llm=nutrition_llm,
                 translation_llm=translation_llm,
             )
             return
         if (callback.data or "").startswith(
             ("cookpick:", "cookalt:", "cookmore:", "cookmore2:", "cookadj:")
         ):
-            if selection_llm is None or recipe_llm is None or nutrition_llm is None:
+            if not clients.cook_configured:
                 await callback.answer(
                     "cook is not configured yet", show_alert=False
                 )
@@ -3587,9 +3510,7 @@ def build_dispatcher(
                 callback,
                 session_factory=session_factory,
                 now_provider=now_provider,
-                selection_llm=selection_llm,
-                recipe_llm=recipe_llm,
-                nutrition_llm=nutrition_llm,
+                clients=clients,
                 spawn=asyncio.create_task,
                 bot=bot,
                 translation_llm=translation_llm,
@@ -3608,8 +3529,8 @@ def build_dispatcher(
             callback,
             session_factory=session_factory,
             now_provider=now_provider,
+            clients=clients,
             translation_llm=translation_llm,
-            search=search,
         )
 
     async def on_error(event) -> bool:

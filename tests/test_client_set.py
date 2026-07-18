@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+from dataclasses import dataclass
 
 from app.client_set import PerUserClients, resolve
 
@@ -19,8 +19,13 @@ class _BareFake:
     pass
 
 
-def _user(provider="anthropic"):
-    return SimpleNamespace(llm_provider=provider)
+@dataclass(frozen=True)
+class _User:
+    llm_provider: str = "anthropic"
+
+
+def _user(provider="anthropic") -> _User:
+    return _User(llm_provider=provider)
 
 
 def test_resolve_routes_selectors_and_passes_bare_clients_through():

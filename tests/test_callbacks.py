@@ -8,9 +8,27 @@ from app.client_set import PerUserClients
 from app.commands import parse_callback_request
 
 
+class _CallbackUser:
+    @property
+    def id(self) -> int:
+        return 1
+
+
+class _Callback:
+    data: str | None = None
+    message: object | None = None
+
+    @property
+    def from_user(self) -> _CallbackUser:
+        return _CallbackUser()
+
+    async def answer(self, text: str = "", *, show_alert: bool = False) -> object:
+        return None
+
+
 def _context():
     return CallbackContext(
-        callback=object(),
+        callback=_Callback(),
         session_factory=lambda: None,  # type: ignore[arg-type,return-value]
         now_provider=lambda _tz: datetime(2026, 7, 17),
         clients=PerUserClients.for_tests(),

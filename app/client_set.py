@@ -12,14 +12,16 @@ from app.translation_llm import TranslationLLMClient
 
 
 class UserProvider(Protocol):
-    llm_provider: str
+    @property
+    def llm_provider(self) -> str: ...
 
 
 T = TypeVar("T")
+T_co = TypeVar("T_co", covariant=True)
 
 
-class ClientSelector(Protocol[T]):
-    def for_provider(self, provider: str) -> T: ...
+class ClientSelector(Protocol[T_co]):
+    def for_provider(self, provider: str) -> T_co: ...
 
 
 ClientSource: TypeAlias = T | ClientSelector[T]

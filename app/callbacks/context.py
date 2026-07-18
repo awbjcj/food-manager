@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Awaitable, Callable, Protocol, Sequence
+from typing import Any, Callable, Coroutine, Protocol, Sequence
 
+from aiogram import Bot
 from sqlmodel import Session
 
 from app.client_set import PerUserClients
@@ -14,24 +15,23 @@ from app.translation_llm import TranslationLLMClient
 
 
 class CallbackUser(Protocol):
-    id: int
+    @property
+    def id(self) -> int: ...
 
 
 class CallbackQuery(Protocol):
     data: str | None
-    from_user: CallbackUser
     message: object | None
+
+    @property
+    def from_user(self) -> CallbackUser: ...
 
     async def answer(self, text: str = "", *, show_alert: bool = False) -> object: ...
 
 
-class BotClient(Protocol):
-    async def edit_message_text(self, **kwargs) -> object: ...
-
-
 SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
-Spawn = Callable[[Awaitable[object]], object]
+Spawn = Callable[[Coroutine[Any, Any, object]], object]
 
 
 @dataclass(frozen=True)
@@ -41,6 +41,6 @@ class CallbackContext:
     now_provider: NowProvider
     clients: PerUserClients
     translation_llm: TranslationLLMClient | None = None
-    bot: BotClient | None = None
+    bot: Bot | None = None
     spawn: Spawn | None = None
     recipe_sources: Sequence[RecipeSource] = field(default_factory=tuple)

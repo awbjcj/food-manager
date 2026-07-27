@@ -11,26 +11,26 @@ version = "0.1.0"
 description = "Single-user grocery pantry + expiry-reminder Telegram bot"
 requires-python = ">=3.12"
 dependencies = [
-    "aiogram>=3.10,<4.0",
-    "anthropic>=0.39,<1.0",
-    "openai>=2.11,<3.0",
+    "aiogram>=3.30.0,<4.0",
+    "anthropic>=0.120.0,<1.0",
+    "openai>=2.48.0,<3.0",
     "google-genai>=1.0,<2.0",
-    "apscheduler>=3.10,<4.0",
-    "alembic>=1.13,<2.0",
+    "apscheduler>=3.11.3,<4.0",
+    "alembic>=1.18.5,<2.0",
     "pydantic>=2.7,<3.0",
-    "pydantic-settings>=2.4,<3.0",
-    "sqlmodel>=0.0.22",
+    "pydantic-settings>=2.14.2,<3.0",
+    "sqlmodel>=0.0.39",
     "httpx>=0.28.1",
-    "agno>=2.7.2",
+    "agno>=2.8.5",
 ]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.3",
+    "pytest>=9.1.1",
     "pytest-asyncio>=0.24",
     "pytest-mock>=3.14",
     "freezegun>=1.5",
-    "ruff>=0.15.15",
+    "ruff>=0.16.0",
     "pyright>=1.1.411",
     "pip-audit>=2.10.1",
 ]

@@ -65,6 +65,15 @@ uv run python bin/run.py
 # Run all tests
 uv run pytest
 
+# Run the same static checks used by CI
+uv run ruff check app tests bin migrations
+uv run pyright app bin
+
+# Audit runtime dependencies pinned in uv.lock
+uv export --no-dev --no-emit-project --no-hashes --output-file requirements-audit.txt
+uv run pip-audit --requirement requirements-audit.txt --strict --progress-spinner off
+rm requirements-audit.txt
+
 # Run a single test file
 uv run pytest tests/test_core_services.py
 
@@ -74,12 +83,19 @@ uv run pytest tests/test_core_services.py::test_shelf_life_defaults
 
 ## Deploy to Railway
 
-1. `railway init` (or import the repo in the Railway dashboard).
+1. Create or import the project in Railway, then connect the service source to
+   `awbjcj/food-manager` on the `master` branch with automatic deploys enabled.
 2. Add a persistent volume named `food-data` mounted at `/data`.
-3. Set environment variables matching `.env.example`.
-4. Push: `git push railway main`.
+3. Set Railway service variables matching `.env.example`.
+4. Push or merge to `master`. Railway builds and deploys the new revision
+   automatically; GitHub Actions runs the independent CI quality gates.
 
 The container runs `bin/run.py` which backs up the database, runs Alembic migrations, registers per-user digest cron jobs, then starts long-polling.
+
+For a rollback, use the Railway service's **Deployments** view to restore a
+previous successful deployment. This intentionally does not downgrade SQLite
+migrations; restore a database backup separately if a migration itself must be
+reverted.
 
 ## Bot commands
 

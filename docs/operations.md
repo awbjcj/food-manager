@@ -6,6 +6,25 @@ re-sends a digest missed during downtime. The layers below cover hard process
 death (OOM, unhandled exit, host reboot) — run exactly one instance; two pollers
 on one token conflict.
 
+## GitHub Actions and Railway
+
+`.github/workflows/ci.yml` runs on pull requests and pushes to `master`, plus a
+weekly schedule. It enforces Ruff, Pyright, an empty-database Alembic upgrade,
+the full test suite, Python and Docker builds, and a locked-dependency audit.
+It is CI-only: Railway is connected directly to `master` and handles every
+deployment.
+
+Protect `master` and require the `Quality gates`, `Build artifacts`, and
+`Dependency audit` checks before merge. That prevents Railway's automatic
+deployment from receiving a merged revision that has not passed CI. Do not put
+Railway, provider, or Telegram production credentials in GitHub Actions; they
+belong in Railway service variables.
+
+For rollback, use Railway's **Deployments** view to restore a previous
+successful deployment. This is a code rollback: Alembic is not downgraded
+automatically. `bin/run.py` creates a SQLite backup before migrations; restore
+that backup deliberately when a schema rollback is required.
+
 ## systemd (Linux)
 
 `/etc/systemd/system/food-manager.service`:

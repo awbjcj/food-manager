@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional, Protocol
+from typing import Protocol
 
 from pydantic import BaseModel
 
@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 class TranslationLLMClient(Protocol):
     async def translate(
         self, *, texts: list[str], lang: str
-    ) -> tuple[list[str], Optional[int]]:
+    ) -> tuple[list[str], int | None]:
         """Return translations in the same order as `texts`, plus cost micros."""
         ...
 
@@ -50,7 +50,7 @@ class AnthropicTranslationLLMClient:
         self._sdk = sdk
         self._model = model
 
-    async def translate(self, *, texts: list[str], lang: str) -> tuple[list[str], Optional[int]]:
+    async def translate(self, *, texts: list[str], lang: str) -> tuple[list[str], int | None]:
         message = await self._sdk.messages.create(
             model=self._model,
             max_tokens=1024,
@@ -59,7 +59,7 @@ class AnthropicTranslationLLMClient:
         )
         data = json.loads(_extract_json_text(message))
         if not isinstance(data, list):
-            raise ValueError("translation response was not a JSON array")
+            raise ValueError("translation response was not a JSON array")  # noqa: TRY004 - JSON-shape contract, not a type check
         return [str(x) for x in data], _cost_micros(message, self._model)
 
 
@@ -68,7 +68,7 @@ class OpenAITranslationLLMClient:
         self._sdk = sdk
         self._model = model
 
-    async def translate(self, *, texts: list[str], lang: str) -> tuple[list[str], Optional[int]]:
+    async def translate(self, *, texts: list[str], lang: str) -> tuple[list[str], int | None]:
         response = await self._sdk.responses.parse(
             model=self._model,
             input=[

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Coroutine, Protocol, Sequence
+from typing import Any, Protocol
 
 from aiogram import Bot
 from sqlmodel import Session

@@ -1,14 +1,13 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from app.models import PantryItem
 from app.renderer import DIGEST_CAP, render_digest, render_item_card, render_list
 from app.views import digest, item_card, pantry_list
 from tests.fakes import FakeTranslationLLM
-
 
 TODAY = date(2026, 7, 17)
 
@@ -34,7 +33,7 @@ def _item(index: int, name: str) -> PantryItem:
         ingest_shelf_life_source="llm",
         expires_on=TODAY + timedelta(days=2),
         created_via="manual",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 

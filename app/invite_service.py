@@ -12,8 +12,7 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from sqlmodel import Session, select
 
@@ -56,7 +55,7 @@ class CannotRemoveSelf(InviteError):
 def _utc_naive(value: datetime) -> datetime:
     """Normalize to naive UTC so comparisons match SQLite-stored datetimes."""
     if value.tzinfo is not None:
-        value = value.astimezone(timezone.utc).replace(tzinfo=None)
+        value = value.astimezone(UTC).replace(tzinfo=None)
     return value
 
 
@@ -73,7 +72,7 @@ def create_invite(
     created_by: int,
     now: datetime,
     ttl_hours: int = INVITE_TTL_HOURS,
-    max_uses: Optional[int] = 1,
+    max_uses: int | None = 1,
 ) -> InviteResult:
     """Issue a fresh invite for ``household_id``.
 

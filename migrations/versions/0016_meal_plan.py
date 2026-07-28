@@ -1,11 +1,10 @@
 """Meal plan tables (v5.2)."""
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0016_meal_plan"
-down_revision: Union[str, None] = "0015_user_last_digest"
+down_revision: str | None = "0015_user_last_digest"
 branch_labels = None
 depends_on = None
 

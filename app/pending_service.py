@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
 from sqlmodel import Session, select
 
 from app.models import PendingCorrection
-
 
 PENDING_TTL_MINUTES = 10
 
@@ -18,7 +16,7 @@ class PendingNotPending(Exception):
 def utc_naive(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value
-    return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 def create_pending(
@@ -26,10 +24,10 @@ def create_pending(
     *,
     household_id: int,
     action_type: str,
-    item_id: Optional[int],
+    item_id: int | None,
     proposed_json: str,
-    snapshot_json: Optional[str],
-    cost_micros_usd: Optional[int],
+    snapshot_json: str | None,
+    cost_micros_usd: int | None,
     chat_id: int,
     now: datetime,
 ) -> PendingCorrection:
@@ -55,7 +53,7 @@ def create_pending(
 
 def load_pending(
     session: Session, *, household_id: int, pending_id: int
-) -> Optional[PendingCorrection]:
+) -> PendingCorrection | None:
     pending = session.get(PendingCorrection, pending_id)
     if pending is None or pending.household_id != household_id:
         return None
@@ -93,7 +91,7 @@ def expire_for_item(
     *,
     household_id: int,
     item_id: int,
-    exclude_pending_id: Optional[int] = None,
+    exclude_pending_id: int | None = None,
 ) -> int:
     query = select(PendingCorrection).where(
         PendingCorrection.household_id == household_id,

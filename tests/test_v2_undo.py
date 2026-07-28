@@ -1,17 +1,19 @@
-import pytest
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
-from sqlmodel import SQLModel, Session, create_engine
-from app.models import Household, PantryItem, Receipt, User
+
+import pytest
+from sqlmodel import Session, SQLModel, create_engine
+
+import app.bot as bot_mod
+from app import handler_support
 from app.commands import CallbackAction, CommandError, parse_callback
+from app.models import Household, PantryItem, Receipt, User
 from app.pantry_service import UndoResult
 from app.renderer import (
-    build_undo_keyboard,
     build_undo_add_keyboard,
+    build_undo_keyboard,
     render_undo_result,
 )
-import app.bot as bot_mod
-import app.handler_support as handler_support
 
 
 def test_parse_undo_receipt_and_add():
@@ -36,12 +38,12 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
-        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(UTC)))
         db.commit()
         yield db
 
@@ -86,7 +88,7 @@ def _ritem(
         snoozed_until=snoozed_until,
         created_via="receipt",
         source_receipt_id=receipt_id,
-        created_at=created_at or datetime.now(timezone.utc),
+        created_at=created_at or datetime.now(UTC),
     )
     session.add(item)
     session.commit()
@@ -95,7 +97,7 @@ def _ritem(
 
 
 def test_undo_receipt_full_removes_all_and_deletes_receipt(session):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     r = _receipt(session, scanned_at=now)
     a = _ritem(session, r.id, "A")
     b = _ritem(session, r.id, "B")
@@ -115,7 +117,7 @@ def test_undo_receipt_full_removes_all_and_deletes_receipt(session):
 
 
 def test_undo_receipt_partial_keeps_receipt(session):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     r = _receipt(session, scanned_at=now)
     a = _ritem(session, r.id, "A")
     eaten = _ritem(session, r.id, "B", status="eaten")
@@ -132,7 +134,7 @@ def test_undo_receipt_partial_keeps_receipt(session):
 
 
 def test_undo_receipt_expired_after_ttl(session):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     r = _receipt(session, scanned_at=now - timedelta(minutes=11))
     _ritem(session, r.id, "A")
     assert r.id is not None
@@ -144,7 +146,7 @@ def test_undo_receipt_expired_after_ttl(session):
 
 
 def test_undo_add_single_item(session):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     item = _ritem(session, None, "Solo", created_at=now)
     from app.pantry_service import undo_add
 
@@ -160,7 +162,7 @@ def test_undo_add_explicit_expiry_is_undoable(session):
     # A manual /add with an explicit expiry is born shelf_life_source=
     # "user_correction"; its own Undo button must still remove it (regression:
     # it used to be wrongly reported as "skipped (corrected)").
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     item = _ritem(session, None, "Solo", source="user_correction", created_at=now)
     from app.pantry_service import undo_add
 
@@ -173,7 +175,7 @@ def test_undo_add_explicit_expiry_is_undoable(session):
 
 
 def test_undo_add_skips_eaten(session):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     item = _ritem(session, None, "Solo", status="eaten", created_at=now)
     from app.pantry_service import undo_add
 
@@ -211,12 +213,12 @@ def handler_engine():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
-        db.add(User(telegram_id=1, chat_id=99, household_id=household.id, created_at=datetime.now(timezone.utc)))
+        db.add(User(telegram_id=1, chat_id=99, household_id=household.id, created_at=datetime.now(UTC)))
         db.commit()
     return engine
 
@@ -235,7 +237,7 @@ def _cb(data: str, *, user_id: int = 1):
 @pytest.mark.asyncio
 async def test_handle_callback_undo_receipt(handler_engine, monkeypatch):
     monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     # Insert a receipt and an active item referencing it
     with Session(handler_engine) as setup_db:
@@ -280,7 +282,7 @@ async def test_handle_callback_undo_receipt(handler_engine, monkeypatch):
     await bot_mod.handle_callback(
         cb,
         session_factory=lambda: Session(handler_engine),
-        now_provider=lambda tz: datetime(2026, 5, 29, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 5, 29, tzinfo=UTC),
     )
 
     # edit_text should have been called with a message containing "Undone"

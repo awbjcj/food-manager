@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, date, datetime
 
 from sqlmodel import Session
 
+from app import handler_support, views
+from app.client_set import PerUserClients
 from app.commands import (
     CommandError,
     parse_correct_reply_marker,
@@ -14,8 +16,6 @@ from app.commands import (
     parse_pantry_arg,
     parse_snooze_args,
 )
-from app.client_set import PerUserClients
-from app.i18n import t
 from app.correction_service import (
     NullDiff,
     ProposeCorrectError,
@@ -25,12 +25,9 @@ from app.correction_service import (
     propose_add,
     propose_correct,
 )
-import app.handler_support as handler_support
-import app.views as views
+from app.i18n import t
 from app.llm import LLMProviderNotConfigured
 from app.models import PantryItem, User
-from app.telegram_ui import to_aiogram_keyboard
-from app.progress import clear_progress, finish_progress, start_progress
 from app.pantry_service import (
     ListFilter,
     NotOwnerOrMissing,
@@ -47,6 +44,7 @@ from app.pending_service import (
     mark_cancelled,
     set_message_id,
 )
+from app.progress import clear_progress, finish_progress, start_progress
 from app.renderer import (
     build_apply_cancel_keyboard,
     build_digest_keyboard,
@@ -55,7 +53,7 @@ from app.renderer import (
     render_correction_diff,
     render_stats,
 )
-
+from app.telegram_ui import to_aiogram_keyboard
 
 _SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
@@ -223,7 +221,7 @@ async def _run_add_flow(
             f"LLM provider {user.llm_provider!r} is not configured. Use /llm.",
         )
         return
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - /add must never crash the bot
         log.warning(
             "add_propose_failed",
             extra={
@@ -252,7 +250,7 @@ async def _run_add_flow(
             snapshot_json=None,
             cost_micros_usd=proposal.cost_share,
             chat_id=msg.chat.id,
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
         assert pending.id is not None
         text = render_add_diff(
@@ -263,7 +261,7 @@ async def _run_add_flow(
         )
         try:
             sent = await msg.answer(text, reply_markup=keyboard)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - message send is best-effort
             log.warning(
                 "add_send_failed",
                 extra={"pending_id": pending.id, "error_class": type(exc).__name__},
@@ -493,7 +491,7 @@ async def _propose_and_send_correction(
     except ProposeCorrectError as exc:
         await msg.answer(str(exc))
         return
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - /correct must never crash the bot
         log.warning(
             "correction_propose_failed",
             extra={
@@ -514,7 +512,7 @@ async def _propose_and_send_correction(
         snapshot_json=item_snapshot_to_json(item),
         cost_micros_usd=cost,
         chat_id=msg.chat.id,
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     assert pending.id is not None
     text = render_correction_diff(
@@ -529,7 +527,7 @@ async def _propose_and_send_correction(
     )
     try:
         sent = await msg.answer(text, reply_markup=keyboard)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - message send is best-effort
         log.warning(
             "correct_send_failed",
             extra={"pending_id": pending.id, "error_class": type(exc).__name__},
@@ -647,7 +645,7 @@ async def handle_stats(
         stats = compute_stats(
             session,
             household_id=user.household_id,
-            now=now.astimezone(timezone.utc),
+            now=now.astimezone(UTC),
         )
         await msg.answer(render_stats(stats, lang=user.lang))
 

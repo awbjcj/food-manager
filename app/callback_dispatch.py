@@ -14,8 +14,8 @@ module fixes was each handler swallowing edit failures and acknowledging late):
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable
 
 log = logging.getLogger(__name__)
 

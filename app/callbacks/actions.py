@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import json as _json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-
+from app import handler_support, views
+from app.callback_dispatch import (
+    answer as dispatch_answer,
+)
+from app.callback_dispatch import (
+    edit_or_resend,
+)
+from app.callbacks.items import _refresh_digest_message, _refresh_pantry_message
+from app.callbacks.pending import _handle_pending_callback
+from app.client_set import EMPTY_CLIENTS, PerUserClients
 from app.commands import (
     CommandError,
     parse_callback,
 )
-from app.client_set import PerUserClients
 from app.cook import (
     ScoredCandidate,
     load_cook_session,
@@ -20,21 +28,13 @@ from app.cook import (
     save_candidate,
     set_feedback,
 )
-import app.handler_support as handler_support
-import app.views as views
-from app.shopping_service import add_missing, check_off, list_pending
-from app.telegram_ui import to_aiogram_keyboard
-from app.callback_dispatch import (
-    answer as dispatch_answer,
-    edit_or_resend,
-)
 from app.pantry_service import (
     NotOwnerOrMissing,
     active_pantry_names,
-    move_to_storage,
     list_digest_due,
     mark_eaten,
     mark_tossed,
+    move_to_storage,
     snooze_item,
     undo_add,
     undo_receipt,
@@ -44,9 +44,8 @@ from app.renderer import (
     build_shopping_keyboard,
     render_undo_result,
 )
-from app.callbacks.items import _refresh_digest_message, _refresh_pantry_message
-from app.callbacks.pending import _handle_pending_callback
-
+from app.shopping_service import add_missing, check_off, list_pending
+from app.telegram_ui import to_aiogram_keyboard
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +58,7 @@ async def handle_callback(
     *,
     session_factory,
     now_provider,
-    clients: PerUserClients = PerUserClients(),
+    clients: PerUserClients = EMPTY_CLIENTS,
     translation_llm=None,
 ) -> None:
     try:
@@ -256,7 +255,7 @@ async def handle_callback(
         if action.verb in ("undo_receipt", "undo_add"):
             target_id = action.item_id
             assert target_id is not None
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             if action.verb == "undo_receipt":
                 result = undo_receipt(
                     session,

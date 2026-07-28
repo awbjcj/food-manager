@@ -1,13 +1,14 @@
 import asyncio
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
-import app.handler_support as handler_support
+from app import handler_support
 from app.bot import handle_callback, run_cook_and_render
 from app.client_set import PerUserClients
+from app.cook.favorites_service import list_saved
 from app.cook.models import (
     NutritionScore,
     NutritionScores,
@@ -17,8 +18,14 @@ from app.cook.models import (
     ScoredCandidate,
     SelectedItems,
 )
-from app.cook.favorites_service import list_saved
-from app.models import CookSession, Household, PantryItem, SavedRecipe, ShoppingList, User
+from app.models import (
+    CookSession,
+    Household,
+    PantryItem,
+    SavedRecipe,
+    ShoppingList,
+    User,
+)
 from app.shopping_service import list_pending
 from tests.fakes import FakeNutritionLLM, FakeRecipeLLM, FakeSelectionLLM
 
@@ -43,19 +50,19 @@ def _engine_with_user():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
     return engine
 
 
 def _NOW(tz):
-    return datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+    return datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
 
 
 def _scored(title="Pasta", ingredients=("pasta", "tomato"), shopping=("pasta",)):
@@ -69,7 +76,7 @@ def _scored(title="Pasta", ingredients=("pasta", "tomato"), shopping=("pasta",))
 
 
 def _add_done_cook(engine, candidates):
-    now = datetime(2026, 5, 30, 12, 0)
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     with Session(engine) as db:
         db.add(CookSession(
             household_id=1, status="done", chat_id=1, selected_item_ids="[]",
@@ -95,7 +102,7 @@ def test_feedback_callback_records_liked(monkeypatch):
 def test_feedback_callback_on_expired_session_is_rejected(monkeypatch):
     monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    now = datetime(2026, 5, 30, 12, 0)
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     with Session(engine) as db:
         db.add(CookSession(household_id=1, status="expired", chat_id=1,
                            selected_item_ids="[]", created_at=now, expires_at=now))
@@ -133,7 +140,7 @@ def test_shop_callback_adds_missing_against_pantry(monkeypatch):
             household_id=1, raw_name="tomato", normalized_name="tomato", category="produce",
             qty=1.0, purchased_on=today, shelf_life_days=5, shelf_life_source="llm",
             ingest_shelf_life_source="llm", expires_on=date(2026, 6, 5), status="active",
-            created_via="receipt", created_at=datetime.now(timezone.utc)))
+            created_via="receipt", created_at=datetime.now(UTC)))
         db.commit()
     cook_id = _add_done_cook(engine, [_scored(ingredients=("pasta", "tomato"))])
     asyncio.run(handle_callback(
@@ -147,7 +154,7 @@ def test_shop_callback_adds_missing_against_pantry(monkeypatch):
 def test_shopdone_callback_checks_off(monkeypatch):
     monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    now = datetime(2026, 5, 30, 12, 0)
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     with Session(engine) as db:
         db.add(ShoppingList(household_id=1, name_raw="Eggs", name_normalized="eggs",
                             added_at=now))
@@ -163,7 +170,7 @@ def test_shopdone_callback_checks_off(monkeypatch):
 def test_favcook_callback_replies_with_recipe(monkeypatch):
     monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    now = datetime(2026, 5, 30, 12, 0)
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     with Session(engine) as db:
         db.add(SavedRecipe(household_id=1, title="Pasta", cuisine="italian", source_url="u",
                            ingredients_json=json.dumps([{"name": "pasta"}]),
@@ -181,7 +188,7 @@ def test_favcook_callback_replies_with_recipe(monkeypatch):
 def test_result_keyboard_attached_on_render(monkeypatch):
     monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    today_dt = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+    today_dt = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     today = today_dt.date()
     with Session(engine) as db:
         for i in range(4):
@@ -190,7 +197,7 @@ def test_result_keyboard_attached_on_render(monkeypatch):
                 category="produce", qty=1.0, purchased_on=today, shelf_life_days=2,
                 shelf_life_source="llm", ingest_shelf_life_source="llm",
                 expires_on=today + timedelta(days=2), status="active",
-                created_via="receipt", created_at=datetime.now(timezone.utc)))
+                created_via="receipt", created_at=datetime.now(UTC)))
         now = today_dt.replace(tzinfo=None)
         db.add(CookSession(household_id=1, status="ready", chat_id=1, meal_type="Dinner",
                            cuisine="Italian", selected_item_ids="[]", message_id=99,
@@ -226,7 +233,7 @@ def test_result_keyboard_attached_on_render(monkeypatch):
 def test_no_result_keyboard_when_no_recipe_found(monkeypatch):
     monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    today_dt = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+    today_dt = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     today = today_dt.date()
     with Session(engine) as db:
         for i in range(4):
@@ -235,7 +242,7 @@ def test_no_result_keyboard_when_no_recipe_found(monkeypatch):
                 category="produce", qty=1.0, purchased_on=today, shelf_life_days=2,
                 shelf_life_source="llm", ingest_shelf_life_source="llm",
                 expires_on=today + timedelta(days=2), status="active",
-                created_via="receipt", created_at=datetime.now(timezone.utc)))
+                created_via="receipt", created_at=datetime.now(UTC)))
         now = today_dt.replace(tzinfo=None)
         db.add(CookSession(household_id=1, status="ready", chat_id=1, meal_type="Dinner",
                            cuisine="Italian", selected_item_ids="[]", message_id=99,

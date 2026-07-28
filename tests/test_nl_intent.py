@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -76,7 +76,7 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -86,7 +86,7 @@ def session_factory():
                 telegram_id=1,
                 chat_id=1,
                 household_id=household.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db.commit()
@@ -104,7 +104,7 @@ async def test_shelf_life_cache_hit_short_circuits(session_factory):
                 normalized_name="salmon",
                 days=3,
                 confidence=0.9,
-                learned_at=datetime.now(timezone.utc),
+                learned_at=datetime.now(UTC),
             )
         )
         session.commit()

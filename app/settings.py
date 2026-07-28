@@ -1,4 +1,4 @@
-from typing import Any, TypeVar, cast
+from typing import Any, Self, TypeVar, cast
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -83,5 +83,5 @@ class Settings(BaseSettings):
         return self
 
     @classmethod
-    def load(cls: type[SettingsT]) -> SettingsT:
+    def load(cls) -> Self:
         return cast(Any, cls)()

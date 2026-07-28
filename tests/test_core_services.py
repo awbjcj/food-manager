@@ -1,11 +1,11 @@
 import asyncio
 import base64
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import ValidationError
-from sqlmodel import SQLModel, Session, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.cache import get_cached, put_cached, write_user_correction
 from app.db import make_engine, make_session_factory
@@ -14,7 +14,7 @@ from app.ingest_service import (
     compute_shelf_life,
     ingest_photo,
 )
-from app.llm import AnthropicLLMClient, LLMResult, ParseResult, ParsedItem
+from app.llm import AnthropicLLMClient, LLMResult, ParsedItem, ParseResult
 from app.models import CookSession, Household, PantryItem, Receipt, ShelfLifeCache, User
 from app.normalization import ALIASES, normalize
 from app.pantry_service import (
@@ -40,12 +40,12 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
-        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(UTC)))
         db.commit()
         yield db
 
@@ -91,7 +91,7 @@ def test_recipe_api_keys_optional(monkeypatch):
 
 
 def test_cook_session_has_purpose_and_offset(session):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cook = CookSession(
         household_id=1,
         chat_id=1,
@@ -126,7 +126,7 @@ def test_models_insert_and_cache_composite_pk(session):
         photo_file_id="abc",
         purchase_date=date(2026, 5, 26),
         purchase_date_source="receipt",
-        scanned_at=datetime.now(timezone.utc),
+        scanned_at=datetime.now(UTC),
     )
     session.add(receipt)
     session.commit()
@@ -136,7 +136,7 @@ def test_models_insert_and_cache_composite_pk(session):
         days=7,
         category="dairy",
         confidence=0.9,
-        learned_at=datetime.now(timezone.utc),
+        learned_at=datetime.now(UTC),
     )
     session.add(row)
     session.commit()
@@ -167,7 +167,7 @@ def test_cache_user_correction_priority_and_scope(session):
     write_user_correction(session, 1, "whole milk", days=5)
     cached = get_cached(session, 1, "whole milk")
     assert cached is not None and cached.source == "user_correction"
-    session.add(User(telegram_id=2, chat_id=2, household_id=1, created_at=datetime.now(timezone.utc)))
+    session.add(User(telegram_id=2, chat_id=2, household_id=1, created_at=datetime.now(UTC)))
     session.commit()
     assert get_cached(session, 2, "whole milk") is None
 
@@ -289,7 +289,7 @@ def _item(session, name, days_from_today, *, today=date(2026, 5, 26), status="ac
         status=status,
         snoozed_until=snoozed_until,
         created_via=created_via,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     session.add(pantry_item)
     session.commit()
@@ -363,7 +363,7 @@ def test_compute_stats(session):
         photo_file_id="r1",
         purchase_date=today,
         purchase_date_source="receipt",
-        scanned_at=datetime.now(timezone.utc),
+        scanned_at=datetime.now(UTC),
         llm_cost_micros_usd=15000,
     ))
     session.add(Receipt(
@@ -371,7 +371,7 @@ def test_compute_stats(session):
         photo_file_id="r2",
         purchase_date=today,
         purchase_date_source="receipt",
-        scanned_at=datetime.now(timezone.utc),
+        scanned_at=datetime.now(UTC),
         llm_cost_micros_usd=None,
     ))
     _item(session, "active", 1, today=today, created_via="receipt", ingest_source="cache")
@@ -379,7 +379,7 @@ def test_compute_stats(session):
     _item(session, "eaten", 2, today=today, status="eaten")
     _item(session, "tossed", 2, today=today, status="tossed")
     _item(session, "removed", 2, today=today, status="removed")
-    stats = compute_stats(session, household_id=1, now=datetime.now(timezone.utc))
+    stats = compute_stats(session, household_id=1, now=datetime.now(UTC))
     assert stats.receipt_count == 2
     assert stats.tracked_item_count == 4
     assert stats.removed_item_count == 1

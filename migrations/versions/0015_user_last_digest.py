@@ -4,13 +4,12 @@ Revision ID: 0015_user_last_digest
 Revises: 0014_unify_stored_on
 Create Date: 2026-07-08
 """
-from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
 
 revision: str = "0015_user_last_digest"
-down_revision: Union[str, None] = "0014_unify_stored_on"
+down_revision: str | None = "0014_unify_stored_on"
 branch_labels = None
 depends_on = None
 

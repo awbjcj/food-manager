@@ -1,5 +1,7 @@
-from datetime import date, date as _date
+from datetime import date
+from datetime import date as _date
 from types import SimpleNamespace
+
 from app.correction_service import AddPayload, CorrectPayload
 from app.ingest_service import IngestSummary
 from app.pantry_service import Stats, UndoResult
@@ -17,8 +19,8 @@ from app.renderer import (
     render_add_diff,
     render_applied_add,
     render_applied_correction,
-    render_correction_diff,
     render_cook_result,
+    render_correction_diff,
     render_digest,
     render_favorites,
     render_ingest_reply,
@@ -99,23 +101,23 @@ def test_list_unknown_category_falls_back_without_crash():
 
 def _ingest_summary(**kwargs) -> IngestSummary:
     """Build a minimal IngestSummary; override fields via kwargs."""
-    values: dict = dict(
-        receipt_id=1,
-        inserted_food_count=0,
-        inserted_item_ids=[],
-        inserted_item_names=[],
-        inserted_item_expires_on=[],
-        inserted_item_shelf_life_days=[],
-        skipped_non_food_count=0,
-        skipped_low_confidence_count=0,
-        skipped_low_confidence_names=[],
-        low_confidence_inserted_ids=[],
-        skipped_excluded_count=0,
-        skipped_excluded_names=[],
-        purchase_date=date(2026, 5, 26),
-        purchase_date_assumed=False,
-        cost_micros_usd=None,
-    )
+    values: dict = {
+        "receipt_id": 1,
+        "inserted_food_count": 0,
+        "inserted_item_ids": [],
+        "inserted_item_names": [],
+        "inserted_item_expires_on": [],
+        "inserted_item_shelf_life_days": [],
+        "skipped_non_food_count": 0,
+        "skipped_low_confidence_count": 0,
+        "skipped_low_confidence_names": [],
+        "low_confidence_inserted_ids": [],
+        "skipped_excluded_count": 0,
+        "skipped_excluded_names": [],
+        "purchase_date": date(2026, 5, 26),
+        "purchase_date_assumed": False,
+        "cost_micros_usd": None,
+    }
     values.update(kwargs)
     return IngestSummary(**values)  # type: ignore[arg-type]
 
@@ -542,16 +544,16 @@ def test_applied_add_zh():
 # --- render_stats ---
 
 def _make_stats(**kwargs):
-    defaults = dict(
-        receipt_count=5,
-        tracked_item_count=42,
-        removed_item_count=2,
-        cache_hit_percent=72.5,
-        total_cost_micros_usd=92000,
-        avg_cost_micros_usd=18400,
-        unknown_cost_receipt_count=0,
-        waste_rate_percent=18.2,
-    )
+    defaults = {
+        "receipt_count": 5,
+        "tracked_item_count": 42,
+        "removed_item_count": 2,
+        "cache_hit_percent": 72.5,
+        "total_cost_micros_usd": 92000,
+        "avg_cost_micros_usd": 18400,
+        "unknown_cost_receipt_count": 0,
+        "waste_rate_percent": 18.2,
+    }
     defaults.update(kwargs)
     return Stats(**defaults)  # type: ignore[arg-type]
 
@@ -577,14 +579,14 @@ def test_render_stats_zh():
 # --- render_profile ---
 
 def _make_profile(**kwargs):
-    defaults = dict(
-        diet="vegetarian",
-        exclusions=["peanut"],
-        preferred_cuisines=["chinese"],
-        max_cook_minutes=30,
-        household_size=2,
-        note="spicy ok",
-    )
+    defaults = {
+        "diet": "vegetarian",
+        "exclusions": ["peanut"],
+        "preferred_cuisines": ["chinese"],
+        "max_cook_minutes": 30,
+        "household_size": 2,
+        "note": "spicy ok",
+    }
     defaults.update(kwargs)
     return FoodProfile(**defaults)  # type: ignore[arg-type]
 

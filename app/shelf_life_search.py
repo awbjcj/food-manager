@@ -10,7 +10,7 @@ resolution, ingest, pantry) depend on the seam, not on the refinement driver.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Protocol
 
 from app.providers import ProviderSelector
 
@@ -21,14 +21,14 @@ SHELF_LIFE_DAYS_MAX = 730
 
 @dataclass(frozen=True)
 class ShelfLifeSearchResult:
-    days: Optional[int]
+    days: int | None
     confidence: float
-    cost_micros_usd: Optional[int]
+    cost_micros_usd: int | None
 
 
 class ShelfLifeSearchClient(Protocol):
     async def lookup_shelf_life(
-        self, *, name: str, category: Optional[str]
+        self, *, name: str, category: str | None
     ) -> ShelfLifeSearchResult: ...
 
 
@@ -45,14 +45,14 @@ class SearchProviderSelector(ProviderSelector):
     """
 
     async def lookup_shelf_life(
-        self, *, name: str, category: Optional[str]
+        self, *, name: str, category: str | None
     ) -> ShelfLifeSearchResult:
         return await self.for_provider(self._default_provider).lookup_shelf_life(
             name=name, category=category
         )
 
 
-def resolve_search_days(result: ShelfLifeSearchResult) -> Optional[int]:
+def resolve_search_days(result: ShelfLifeSearchResult) -> int | None:
     """The trusted day count from a search result, or None to keep the estimate.
 
     Rejects low-confidence answers and out-of-range day counts so a noisy search

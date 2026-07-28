@@ -1,5 +1,12 @@
 from datetime import date
-from app.renderer import _fmt_date, _urgency_icon, _qty_prefix, render_item_line, render_list
+
+from app.renderer import (
+    _fmt_date,
+    _qty_prefix,
+    _urgency_icon,
+    render_item_line,
+    render_list,
+)
 from tests.test_renderer_commands import _pantry_item  # reuse builder
 
 

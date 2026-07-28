@@ -5,7 +5,6 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Optional
 
 from sqlmodel import Session
 
@@ -28,7 +27,7 @@ from app.shelf_life_search import (  # noqa: F401
 @dataclass(frozen=True)
 class RefineResult:
     updated_ids: list[int]
-    total_cost_micros: Optional[int]
+    total_cost_micros: int | None
 
 
 async def refine_receipt_items(
@@ -39,14 +38,16 @@ async def refine_receipt_items(
     item_ids: list[int],
     today: date,
 ) -> RefineResult:
-    from app.pantry_service import is_untouched  # local import to avoid circular at module level
+    from app.pantry_service import (
+        is_untouched,  # local import to avoid circular at module level
+    )
 
     # Snapshot phase: pick the items eligible at the start and capture the plain
     # values the search needs, so the concurrent phase never touches the Session
     # (SQLAlchemy sessions are not safe to use across concurrent coroutines).
     # Items already touched here are skipped before any search is fired, so they
     # cost nothing.
-    snapshots: list[tuple[int, str, Optional[str]]] = []
+    snapshots: list[tuple[int, str, str | None]] = []
     for item_id in item_ids:
         item = session.get(PantryItem, item_id)
         if item is None or item.household_id != household_id or not is_untouched(item):
@@ -164,8 +165,10 @@ class AnthropicSearchClient(ShelfLifeSearchClient):
         self._model = model
         self._max_uses = max_uses
 
-    async def lookup_shelf_life(self, *, name: str, category: Optional[str]) -> ShelfLifeSearchResult:
-        from app.llm import _PRICE_MICROS_PER_TOKEN_BY_MODEL  # local import avoids cycle
+    async def lookup_shelf_life(self, *, name: str, category: str | None) -> ShelfLifeSearchResult:
+        from app.llm import (
+            _PRICE_MICROS_PER_TOKEN_BY_MODEL,  # local import avoids cycle
+        )
         prompt = f"Item: {name}" + (f" (category: {category})" if category else "")
         try:
             msg = await self._sdk.messages.create(
@@ -176,7 +179,7 @@ class AnthropicSearchClient(ShelfLifeSearchClient):
                         "max_uses": self._max_uses}],
                 messages=[{"role": "user", "content": prompt}],
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - search must degrade to unknown, not crash
             log.warning("search_transport_failed", extra={"error_class": type(exc).__name__})
             return ShelfLifeSearchResult(days=None, confidence=0.0, cost_micros_usd=None)
 
@@ -195,6 +198,6 @@ class AnthropicSearchClient(ShelfLifeSearchClient):
                 days=int(data["days"]), confidence=float(data["confidence"]),
                 cost_micros_usd=cost,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - search must degrade to unknown, not crash
             log.warning("search_parse_failed", extra={"error_class": type(exc).__name__})
             return ShelfLifeSearchResult(days=None, confidence=0.0, cost_micros_usd=cost)

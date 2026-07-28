@@ -5,13 +5,12 @@ Keep these conservative. Real values get learned via /correct.
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass(frozen=True)
 class DefaultEntry:
     days: int
-    category: Optional[str]
+    category: str | None
 
 
 _EXACT: dict[str, DefaultEntry] = {
@@ -29,5 +28,5 @@ _EXACT: dict[str, DefaultEntry] = {
 }
 
 
-def lookup_default(normalized_name: str) -> Optional[DefaultEntry]:
+def lookup_default(normalized_name: str) -> DefaultEntry | None:
     return _EXACT.get(normalized_name)

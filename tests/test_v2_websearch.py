@@ -1,24 +1,24 @@
-import pytest
-from datetime import date, datetime, timezone, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
-from sqlmodel import SQLModel, Session, create_engine
+import pytest
+from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
-import app.handler_support as handler_support
-from app.client_set import PerUserClients
-from app.refine_service import _accrue_receipt_cost
+from app import handler_support
 from app.cache import get_cached
+from app.client_set import PerUserClients
 from app.correction_service import propose_add
-from app.llm import LLMResult, ParseResult, ParsedItem, ProposedAddItem
+from app.llm import LLMResult, ParsedItem, ParseResult, ProposedAddItem
 from app.models import Household, PantryItem, Receipt, User
 from app.pantry_service import compute_stats
 from app.refine_service import (
-    ShelfLifeSearchResult,
-    resolve_search_days,
     SEARCH_MIN_CONFIDENCE,
-    refine_receipt_items,
     AnthropicSearchClient,
+    ShelfLifeSearchResult,
+    _accrue_receipt_cost,
+    refine_receipt_items,
+    resolve_search_days,
 )
 from tests.fakes import FakeLLMClient, FakeSearchClient, FakeTextLLMClient
 
@@ -61,12 +61,12 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
-        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(UTC)))
         db.commit()
         yield db
 
@@ -87,7 +87,7 @@ def _item(session, name, *, days=5, status="active", source="llm", rid=None):
         status=status,
         created_via="receipt",
         source_receipt_id=rid,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     session.add(item)
     session.commit()
@@ -173,13 +173,13 @@ async def test_handle_photo_spawns_refine_and_edits_message(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
     def session_factory():
         return Session(engine)
@@ -232,7 +232,7 @@ async def test_handle_photo_spawns_refine_and_edits_message(monkeypatch):
 
     photo_downloader = AsyncMock(return_value=b"jpg")
     def now_provider(tz):
-        return datetime(2026, 5, 28, tzinfo=timezone.utc)
+        return datetime(2026, 5, 28, tzinfo=UTC)
 
     await bot_mod.handle_photo(
         msg,
@@ -383,13 +383,13 @@ def test_accrued_search_cost_shows_in_stats(session):
         photo_file_id="r1",
         purchase_date=date(2026, 5, 28),
         purchase_date_source="receipt",
-        scanned_at=datetime.now(timezone.utc),
+        scanned_at=datetime.now(UTC),
         llm_cost_micros_usd=1000,
     )
     session.add(r)
     session.commit()
     _accrue_receipt_cost(session, r.id, 300)  # simulate refine search cost
-    stats = compute_stats(session, household_id=1, now=datetime.now(timezone.utc))
+    stats = compute_stats(session, household_id=1, now=datetime.now(UTC))
     assert stats.total_cost_micros_usd == 1300
 
 
@@ -501,7 +501,8 @@ async def test_refine_skips_item_touched_during_search(session):
 
 @pytest.mark.asyncio
 async def test_run_receipt_refine_refreshes_summary_and_accrues_cost():
-    from sqlmodel import SQLModel, Session, create_engine
+    from sqlmodel import Session, SQLModel, create_engine
+
     from app.ingest_service import IngestSummary
     from app.refine_service import run_receipt_refine
 
@@ -510,18 +511,18 @@ async def test_run_receipt_refine_refreshes_summary_and_accrues_cost():
     def factory():
         return Session(engine)
     with factory() as s:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         s.add(household)
         s.commit()
         s.refresh(household)
         assert household.id is not None
-        s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
+        s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(UTC)))
         r = Receipt(
             household_id=household.id,
             photo_file_id="r1",
             purchase_date=date(2026, 5, 28),
             purchase_date_source="receipt",
-            scanned_at=datetime.now(timezone.utc),
+            scanned_at=datetime.now(UTC),
             llm_cost_micros_usd=1000,
         )
         s.add(r)
@@ -542,7 +543,7 @@ async def test_run_receipt_refine_refreshes_summary_and_accrues_cost():
             status="active",
             created_via="receipt",
             source_receipt_id=r.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         s.add(item)
         s.commit()
@@ -591,7 +592,8 @@ async def test_run_receipt_refine_suppresses_edit_when_receipt_undone():
     # If the receipt was fully undone (deleted) by the time the search returns,
     # run_receipt_refine must report nothing refined so the caller does not
     # resurrect the "Undone" message with a live Undo button.
-    from sqlmodel import SQLModel, Session, create_engine
+    from sqlmodel import Session, SQLModel, create_engine
+
     from app.ingest_service import IngestSummary
     from app.refine_service import run_receipt_refine
 
@@ -600,18 +602,18 @@ async def test_run_receipt_refine_suppresses_edit_when_receipt_undone():
     def factory():
         return Session(engine)
     with factory() as s:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         s.add(household)
         s.commit()
         s.refresh(household)
         assert household.id is not None
-        s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
+        s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(UTC)))
         r = Receipt(
             household_id=household.id,
             photo_file_id="r1",
             purchase_date=date(2026, 5, 28),
             purchase_date_source="receipt",
-            scanned_at=datetime.now(timezone.utc),
+            scanned_at=datetime.now(UTC),
             llm_cost_micros_usd=1000,
         )
         s.add(r)
@@ -632,7 +634,7 @@ async def test_run_receipt_refine_suppresses_edit_when_receipt_undone():
             status="active",
             created_via="receipt",
             source_receipt_id=r.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         s.add(item)
         s.commit()
@@ -685,18 +687,18 @@ async def test_run_receipt_refine_accrues_cost_even_when_nothing_refined():
     def factory():
         return Session(engine)
     with factory() as s:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         s.add(household)
         s.commit()
         s.refresh(household)
         assert household.id is not None
-        s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
+        s.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(UTC)))
         r = Receipt(
             household_id=household.id,
             photo_file_id="r1",
             purchase_date=date(2026, 5, 28),
             purchase_date_source="receipt",
-            scanned_at=datetime.now(timezone.utc),
+            scanned_at=datetime.now(UTC),
             llm_cost_micros_usd=1000,
         )
         s.add(r)
@@ -717,7 +719,7 @@ async def test_run_receipt_refine_accrues_cost_even_when_nothing_refined():
             status="active",
             created_via="receipt",
             source_receipt_id=r.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         s.add(item)
         s.commit()

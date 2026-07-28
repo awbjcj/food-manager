@@ -2,23 +2,22 @@ from __future__ import annotations
 
 import logging
 
-
-from app.i18n import t
-import app.handler_support as handler_support
-from app.telegram_ui import to_aiogram_keyboard
+from app import handler_support
 from app.callback_dispatch import (
     answer as dispatch_answer,
+)
+from app.callback_dispatch import (
     edit_or_resend,
 )
-from app.renderer import (
-    CallbackButton,
-)
-
 from app.handlers.meta import (
     HELP_TOPICS,
     _help_topics_keyboard,
 )
-
+from app.i18n import t
+from app.renderer import (
+    CallbackButton,
+)
+from app.telegram_ui import to_aiogram_keyboard
 
 log = logging.getLogger(__name__)
 

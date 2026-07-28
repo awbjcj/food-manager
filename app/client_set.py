@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, TypeAlias, TypeVar, cast
+from typing import Protocol, TypeVar, cast
 
 from app.cook.llm import NutritionLLMClient, RecipeLLMClient, SelectionLLMClient
 from app.llm import LLMClient, ProfileUpdateLLMClient, TextLLMClient
@@ -24,10 +24,10 @@ class ClientSelector(Protocol[T_co]):
     def for_provider(self, provider: str) -> T_co: ...
 
 
-ClientSource: TypeAlias = T | ClientSelector[T]
+type ClientSource[T] = T | ClientSelector[T]
 
 
-def resolve(client: ClientSource[T] | None, provider: str) -> T | None:
+def resolve[T](client: ClientSource[T] | None, provider: str) -> T | None:
     """Resolve selectors by provider while preserving bare clients and ``None``."""
     selector = getattr(client, "for_provider", None)
     if callable(selector):
@@ -35,7 +35,7 @@ def resolve(client: ClientSource[T] | None, provider: str) -> T | None:
     return cast(T | None, client)
 
 
-def _required(client: T | None, capability: str) -> T:
+def _required[T](client: T | None, capability: str) -> T:
     if client is None:
         raise RuntimeError(f"{capability} client is not configured")
     return client
@@ -147,3 +147,6 @@ class PerUserClients:
             client is not None
             for client in (self._selection, self._recipe, self._nutrition)
         )
+
+
+EMPTY_CLIENTS = PerUserClients()

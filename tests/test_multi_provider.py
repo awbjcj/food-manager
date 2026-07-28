@@ -72,14 +72,14 @@ def test_parse_llm_provider_accepts_new_providers():
 # settings.py: validation around a text-only default provider
 # --------------------------------------------------------------------------- #
 def _settings(**overrides):
-    base = dict(
-        TELEGRAM_BOT_TOKEN="token",
-        ALLOWED_TELEGRAM_USER_ID=1,
-        ANTHROPIC_API_KEY=None,
-        OPENAI_API_KEY=None,
-        GEMINI_API_KEY=None,
-        DEEPSEEK_API_KEY=None,
-    )
+    base = {
+        "TELEGRAM_BOT_TOKEN": "token",
+        "ALLOWED_TELEGRAM_USER_ID": 1,
+        "ANTHROPIC_API_KEY": None,
+        "OPENAI_API_KEY": None,
+        "GEMINI_API_KEY": None,
+        "DEEPSEEK_API_KEY": None,
+    }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]
 
@@ -197,7 +197,7 @@ async def test_deepseek_parse_add_happy_path():
 async def test_deepseek_schema_repair_retries_once():
     sdk = FakeOpenAISDK(['not json', '{"item_ids":[1,2],"rationale":"x"}'])
     client = DeepSeekSelectionLLM(sdk, "deepseek-chat")
-    selected, cost = await client.select_items(prompt="pick stuff")
+    selected, _cost = await client.select_items(prompt="pick stuff")
     assert selected.item_ids == [1, 2]
     assert len(sdk.chat.completions.calls) == 2  # one repair round-trip
 

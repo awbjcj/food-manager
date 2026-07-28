@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -11,7 +11,7 @@ def _engine_two_households():
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
         for name in ("A", "B"):
-            db.add(Household(name=name, created_at=datetime.now(timezone.utc)))
+            db.add(Household(name=name, created_at=datetime.now(UTC)))
         db.commit()
     return engine
 
@@ -33,7 +33,7 @@ def test_list_active_is_isolated_per_household():
             expires_on=date(2026, 6, 5),
             status="active",
             created_via="receipt",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         ))
         db.add(PantryItem(
             household_id=2,
@@ -48,7 +48,7 @@ def test_list_active_is_isolated_per_household():
             expires_on=date(2026, 6, 5),
             status="active",
             created_via="receipt",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         ))
         db.commit()
         a = list_active(db, household_id=1, f=ListFilter.default(), today=today)

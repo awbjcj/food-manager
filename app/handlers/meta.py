@@ -1,28 +1,22 @@
 from __future__ import annotations
 
 import logging
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
-
+from app import handler_support, views
+from app.cache import get_cached
+from app.client_set import EMPTY_CLIENTS, PerUserClients
 from app.commands import (
     CommandError,
     parse_llm_provider,
 )
-from app.client_set import PerUserClients
+from app.handlers.pantry import _run_add_flow
 from app.i18n import t
-import app.handler_support as handler_support
-import app.views as views
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import LLMProviderNotConfigured
 from app.models import Household, User
-from app.refine_service import run_receipt_refine
-from app.cache import get_cached
-from app.normalization import normalize
-from app.shelf_life_defaults import lookup_default
-from app.shelf_life_search import resolve_search_days
-from app.telegram_ui import to_aiogram_keyboard
 from app.nl_intent import MAX_CONTEXT_NAMES, match_items
-from app.progress import clear_progress, finish_progress, start_progress
+from app.normalization import normalize
 from app.pantry_service import (
     ListFilter,
     freeze_item,
@@ -32,6 +26,9 @@ from app.pantry_service import (
     mark_tossed,
     snooze_item,
 )
+from app.profile_service import profile_from_household, update_profile_from_sentence
+from app.progress import clear_progress, finish_progress, start_progress
+from app.refine_service import run_receipt_refine
 from app.renderer import (
     CallbackButton,
     build_digest_keyboard,
@@ -39,9 +36,9 @@ from app.renderer import (
     render_ingest_reply,
     render_profile,
 )
-from app.profile_service import profile_from_household, update_profile_from_sentence
-from app.handlers.pantry import _run_add_flow
-
+from app.shelf_life_defaults import lookup_default
+from app.shelf_life_search import resolve_search_days
+from app.telegram_ui import to_aiogram_keyboard
 
 log = logging.getLogger(__name__)
 HELP_TOPICS = ("pantry", "cook", "household", "settings")
@@ -60,7 +57,7 @@ async def handle_nl_message(
     session_factory,
     now_provider,
     intent_agent,
-    clients: PerUserClients = PerUserClients(),
+    clients: PerUserClients = EMPTY_CLIENTS,
     on_user_created: Callable[[User], None] = _noop_user_created,
     translation_llm=None,
 ) -> None:
@@ -314,7 +311,7 @@ async def handle_prefs(
                 f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
             )
             return
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - prefs parsing must never crash the bot
             log.warning(
                 "prefs_update_failed",
                 extra={
@@ -415,7 +412,7 @@ async def handle_photo(
         except DuplicateReceipt:
             await finish_progress(progress, msg, "this receipt was already logged")
             return
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - ingest must never crash the bot
             log.warning(
                 "receipt_ingest_failed",
                 extra={
@@ -502,7 +499,7 @@ async def handle_photo(
                         build_undo_keyboard(receipt_id=receipt_id, lang=user_lang)
                     ),
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - background edit is best-effort
                 log.warning(
                     "refine_edit_failed", extra={"error_class": type(exc).__name__}
                 )

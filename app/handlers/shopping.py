@@ -1,24 +1,22 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable
 
 from sqlmodel import Session
 
+from app import handler_support, views
 from app.cook import (
     list_saved,
 )
-import app.handler_support as handler_support
-import app.views as views
-from app.shopping_service import list_pending
 from app.models import User
-from app.telegram_ui import to_aiogram_keyboard
 from app.renderer import (
     build_favorites_keyboard,
     build_shopping_keyboard,
 )
-
+from app.shopping_service import list_pending
+from app.telegram_ui import to_aiogram_keyboard
 
 _SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]

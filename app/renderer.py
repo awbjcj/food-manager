@@ -4,11 +4,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from app.correction_service import AddPayload, CorrectPayload
 from app.cook import RecipeCandidate, ScoredCandidate
-from app.models import SavedRecipe, ShoppingList
+from app.correction_service import AddPayload, CorrectPayload
+from app.i18n import format_date, t, weekday_abbr
 from app.ingest_service import IngestSummary
-from app.i18n import t, format_date, weekday_abbr
+from app.models import SavedRecipe, ShoppingList
 from app.pantry_service import Stats
 from app.profile_service import FoodProfile
 from app.storage_state import next_storage_options

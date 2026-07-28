@@ -14,7 +14,7 @@ steered by a prompt); Spoonacular/TheMealDB ignore it entirely.
 from __future__ import annotations
 
 from collections import Counter
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from sqlmodel import Session, select
 
@@ -58,7 +58,7 @@ def _similarity(
 
 def affinity(
     *,
-    cuisine: Optional[str],
+    cuisine: str | None,
     ingredient_names: Sequence[str],
     signals: Sequence[FeedbackSignal],
 ) -> float:

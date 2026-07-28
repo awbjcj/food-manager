@@ -7,7 +7,7 @@ shares the same cache -> table -> web-search -> default fallback chain.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 from sqlmodel import Session
 
@@ -167,7 +167,7 @@ async def resolve_storage_days(
     state: StorageState,
     normalized_name: str,
     food_name: str,
-    search: Optional[ShelfLifeSearchClient] = None,
+    search: ShelfLifeSearchClient | None = None,
 ) -> StorageDecision:
     """cache -> curated FoodKeeper table -> web search -> conservative default."""
     config = _STATE_CONFIG[state]
@@ -193,7 +193,7 @@ async def resolve_storage_days(
             result = await search.lookup_shelf_life(
                 name=_search_name(food_name, config.prefix), category=None
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - search is best-effort, falls back to default
             result = None
         days = resolve_search_days(result) if result is not None else None
         if days is not None:
@@ -223,7 +223,7 @@ async def resolve_frozen_days(
     household_id: int,
     normalized_name: str,
     food_name: str,
-    search: Optional[ShelfLifeSearchClient] = None,
+    search: ShelfLifeSearchClient | None = None,
 ) -> StorageDecision:
     return await resolve_storage_days(
         session,

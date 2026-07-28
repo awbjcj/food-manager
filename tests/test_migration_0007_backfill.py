@@ -6,7 +6,7 @@ import subprocess
 def _run_to(db, monkeypatch, revision):
     monkeypatch.setenv("DATABASE_PATH", str(db))
     r = subprocess.run(["uv", "run", "alembic", "upgrade", revision],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stderr
 
 

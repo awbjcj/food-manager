@@ -21,18 +21,18 @@ import asyncio
 import json
 import logging
 from datetime import date
-from typing import Any, Optional
+from typing import Any
 
 from app.cook.llm import NUTRITION_SYSTEM_PROMPT, SELECTION_SYSTEM_PROMPT
 from app.cook.models import NutritionScores, SelectedItems
 from app.llm import (
+    _PRICE_MICROS_PER_TOKEN_BY_MODEL,
     CORRECTION_SYSTEM_PROMPT,
     OPENAI_ADD_SYSTEM_PROMPT,
     PROFILE_SYSTEM_PROMPT,
     CorrectionDiff,
     ProposedAddItem,
     ProposedAddItems,
-    _PRICE_MICROS_PER_TOKEN_BY_MODEL,
 )
 from app.llm_transport import with_transport_retry
 from app.profile_service import FoodProfile
@@ -54,7 +54,7 @@ _DEEPSEEK_TRANSLATE_SYSTEM_PROMPT = (
 )
 
 
-def _chat_cost(response, model: str) -> Optional[int]:
+def _chat_cost(response, model: str) -> int | None:
     """Best-effort cost in micro-USD from Chat Completions ``usage`` tokens."""
     price = _PRICE_MICROS_PER_TOKEN_BY_MODEL.get(model)
     if price is None:
@@ -66,7 +66,7 @@ def _chat_cost(response, model: str) -> Optional[int]:
         in_tokens = getattr(usage, "prompt_tokens", None) or 0
         out_tokens = getattr(usage, "completion_tokens", None) or 0
         return round(in_tokens * price["input"] + out_tokens * price["output"])
-    except Exception:
+    except Exception:  # noqa: BLE001 - cost estimate is best-effort
         return None
 
 
@@ -127,10 +127,10 @@ class DeepSeekTextLLMClient:
         self,
         *,
         item_snapshot: dict[str, Any],
-        cache_snapshot: Optional[dict[str, Any]],
+        cache_snapshot: dict[str, Any] | None,
         user_text: str,
         today: date,
-    ) -> tuple[CorrectionDiff, Optional[int]]:
+    ) -> tuple[CorrectionDiff, int | None]:
         user_msg = json.dumps(
             {
                 "item_snapshot": item_snapshot,
@@ -151,7 +151,7 @@ class DeepSeekTextLLMClient:
         user_text: str,
         today: date,
         tz: str,
-    ) -> tuple[list[ProposedAddItem], Optional[int]]:
+    ) -> tuple[list[ProposedAddItem], int | None]:
         user_msg = json.dumps(
             {"today": today.isoformat(), "tz": tz, "user_text": user_text}
         )
@@ -168,7 +168,7 @@ class DeepSeekProfileLLMClient:
 
     async def parse_profile_update(
         self, *, current: FoodProfile, sentence: str
-    ) -> tuple[FoodProfile, Optional[int]]:
+    ) -> tuple[FoodProfile, int | None]:
         user_msg = json.dumps({"current": current.model_dump(), "sentence": sentence})
 
         def _parse(text: str) -> FoodProfile:
@@ -181,7 +181,7 @@ class DeepSeekSelectionLLM:
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
         self._client = _DeepSeekJSONClient(sdk, model, sleep=sleep)
 
-    async def select_items(self, *, prompt: str) -> tuple[SelectedItems, Optional[int]]:
+    async def select_items(self, *, prompt: str) -> tuple[SelectedItems, int | None]:
         def _parse(text: str) -> SelectedItems:
             return SelectedItems.model_validate(json.loads(text))
 
@@ -192,7 +192,7 @@ class DeepSeekNutritionLLM:
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
         self._client = _DeepSeekJSONClient(sdk, model, sleep=sleep)
 
-    async def score(self, *, prompt: str) -> tuple[NutritionScores, Optional[int]]:
+    async def score(self, *, prompt: str) -> tuple[NutritionScores, int | None]:
         def _parse(text: str) -> NutritionScores:
             return NutritionScores.model_validate(json.loads(text))
 
@@ -205,7 +205,7 @@ class DeepSeekTranslationLLMClient:
 
     async def translate(
         self, *, texts: list[str], lang: str
-    ) -> tuple[list[str], Optional[int]]:
+    ) -> tuple[list[str], int | None]:
         def _parse(text: str) -> list[str]:
             return [str(x) for x in TranslationList.model_validate(json.loads(text)).items]
 

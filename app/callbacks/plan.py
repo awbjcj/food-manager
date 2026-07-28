@@ -1,33 +1,32 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
-
+import app.plan_service as plan_service_mod
+from app import handler_support
+from app.callback_dispatch import (
+    answer as dispatch_answer,
+)
+from app.callback_dispatch import (
+    edit_or_resend,
+)
+from app.client_set import EMPTY_CLIENTS, PerUserClients
 from app.commands import (
     CommandError,
     parse_callback,
 )
-from app.client_set import PerUserClients
-from app.i18n import t
-import app.plan_service as plan_service_mod
-import app.handler_support as handler_support
-from app.plan_service import aggregate_shopping, swap_day
-from app.shopping_service import add_missing
-from app.models import Household, MealPlan
-from app.callback_dispatch import (
-    answer as dispatch_answer,
-    edit_or_resend,
-)
-from app.profile_service import profile_from_household
-
 from app.handlers.plan import (
-    _plan_source,
     _plan_entry_rows,
+    _plan_source,
     _render_plan_message,
 )
-
+from app.i18n import t
+from app.models import Household, MealPlan
+from app.plan_service import aggregate_shopping, swap_day
+from app.profile_service import profile_from_household
+from app.shopping_service import add_missing
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +39,7 @@ async def handle_plan_callback(
     *,
     session_factory,
     now_provider,
-    clients: PerUserClients = PerUserClients(),
+    clients: PerUserClients = EMPTY_CLIENTS,
     recipe_sources=(),
     translation_llm=None,
 ) -> None:
@@ -89,7 +88,7 @@ async def handle_plan_callback(
                 session,
                 household_id=user.household_id,
                 ingredients=[SimpleNamespace(name=n) for n in missing_names],
-                now=datetime.now(timezone.utc),
+                now=datetime.now(UTC),
             )
             if not result.added:
                 await dispatch_answer(cb, t("plan.shopping_none", user.lang))

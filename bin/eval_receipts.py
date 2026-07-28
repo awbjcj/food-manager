@@ -19,7 +19,6 @@ import anthropic
 from app.llm import AnthropicLLMClient
 from app.settings import Settings
 
-
 FIXTURES = Path("tests/fixtures/private_receipts")
 EXPECTED = Path("tests/fixtures/expected")
 

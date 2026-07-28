@@ -1,12 +1,28 @@
 import asyncio
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
-from app.models import CookSession, Household, PantryItem, User
+from app.cook import service as cook_service
+from app.cook.llm import (
+    SCHEMA_REPAIR_INSTRUCTION,
+    AnthropicNutritionLLM,
+    AnthropicRecipeLLM,
+    AnthropicSelectionLLM,
+    OpenAINutritionLLM,
+    OpenAIRecipeLLM,
+    OpenAISelectionLLM,
+)
+from app.cook.logic import (
+    BLEND_WEIGHTS,
+    blended_score,
+    expiry_utilization,
+    shopping_list,
+    violates_exclusions,
+)
 from app.cook.models import (
     NutritionScore,
     NutritionScores,
@@ -19,29 +35,13 @@ from app.cook.models import (
     SelectedItems,
     SourcedRecipe,
 )
-from app.cook.logic import (
-    BLEND_WEIGHTS,
-    blended_score,
-    expiry_utilization,
-    shopping_list,
-    violates_exclusions,
-)
-from app.cook.llm import (
-    AnthropicNutritionLLM,
-    AnthropicRecipeLLM,
-    AnthropicSelectionLLM,
-    OpenAINutritionLLM,
-    OpenAIRecipeLLM,
-    OpenAISelectionLLM,
-    SCHEMA_REPAIR_INSTRUCTION,
-)
 from app.cook.service import (
     COOK_COST_CEILING_MICROS,
     MIN_USABLE_ITEMS,
     NotEnoughItems,
     run_cook,
 )
-from app.cook import service as cook_service
+from app.models import CookSession, Household, PantryItem, User
 from app.profile_service import FoodProfile
 from tests.fakes import FakeNutritionLLM, FakeRecipeLLM, FakeSelectionLLM
 
@@ -50,13 +50,13 @@ def _db_with_items(n, expiry_days):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     db = Session(engine)
-    household = Household(created_at=datetime.now(timezone.utc))
+    household = Household(created_at=datetime.now(UTC))
     db.add(household)
     db.commit()
     db.refresh(household)
     assert household.id is not None
     db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
-                created_at=datetime.now(timezone.utc)))
+                created_at=datetime.now(UTC)))
     today = date(2026, 5, 30)
     for i in range(n):
         db.add(PantryItem(
@@ -65,14 +65,14 @@ def _db_with_items(n, expiry_days):
             shelf_life_days=expiry_days, shelf_life_source="llm",
             ingest_shelf_life_source="llm",
             expires_on=today + timedelta(days=expiry_days),
-            status="active", created_via="receipt", created_at=datetime.now(timezone.utc),
+            status="active", created_via="receipt", created_at=datetime.now(UTC),
         ))
     db.commit()
     return db, today
 
 
 def _cook_row(db):
-    now = datetime(2026, 5, 30, 12, 0).replace(tzinfo=None)
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     row = CookSession(household_id=1, status="ready", chat_id=1, meal_type="dinner",
                       cuisine="italian", selected_item_ids="[]",
                       created_at=now, expires_at=now + timedelta(minutes=10))

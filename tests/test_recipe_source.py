@@ -12,18 +12,17 @@ from app.cook.models import (
     RecipeIngredient,
     SourcedRecipe,
 )
-from app.profile_service import FoodProfile
 from app.cook.recipe_source import (
+    MEAL_TYPE_TO_SPOON,
     ChainedRecipeSource,
     LlmRecipeSource,
-    MEAL_TYPE_TO_SPOON,
     SpoonacularSource,
     TheMealDbSource,
     build_criteria,
     map_spoonacular,
     spoonacular_params,
 )
-
+from app.profile_service import FoodProfile
 
 _CANNED = {
     "results": [

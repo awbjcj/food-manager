@@ -1,12 +1,12 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
-import app.handler_support as handler_support
 import app.handlers.plan as plan_handlers
+from app import handler_support
 from app.cook.models import (
     NutritionScore,
     RecipeCandidate,
@@ -69,7 +69,7 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -79,7 +79,7 @@ def session_factory():
                 telegram_id=1,
                 chat_id=1,
                 household_id=household.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db.commit()
@@ -109,7 +109,7 @@ def _seed_pantry(session_factory, today):
                     expires_on=today + timedelta(days=days),
                     status="active",
                     created_via="receipt",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
         db.commit()
@@ -134,13 +134,13 @@ def _msg(text: str):
 
 
 def _NOW(tz):
-    return datetime(2026, 7, 9, tzinfo=timezone.utc)
+    return datetime(2026, 7, 9, tzinfo=UTC)
 
 
 @pytest.mark.asyncio
 async def test_plan_happy_path_renders_and_persists(session_factory, monkeypatch):
     monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
-    today = datetime(2026, 7, 9).date()
+    today = datetime(2026, 7, 9, tzinfo=UTC).date()
     _seed_pantry(session_factory, today)
     composer = FakeComposerSelector(
         specs=[
@@ -237,7 +237,7 @@ async def test_plan_tiny_pantry_replies_not_enough(session_factory, monkeypatch)
 @pytest.mark.asyncio
 async def test_second_plan_supersedes_first(session_factory, monkeypatch):
     monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
-    today = datetime(2026, 7, 9).date()
+    today = datetime(2026, 7, 9, tzinfo=UTC).date()
     _seed_pantry(session_factory, today)
     composer = FakeComposerSelector(
         specs=[
@@ -311,7 +311,7 @@ class _Cb:
 
 
 async def _build_plan_for_callbacks(session_factory, *, days_specs, pages):
-    today = datetime(2026, 7, 9).date()
+    today = datetime(2026, 7, 9, tzinfo=UTC).date()
     _seed_pantry(session_factory, today)
     composer = FakeComposerSelector(specs=days_specs)
     source = FakeRecipeSource(pages)

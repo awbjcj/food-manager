@@ -10,6 +10,7 @@ def test_alembic_upgrade_creates_all_tables(tmp_path, monkeypatch):
         ["uv", "run", "alembic", "upgrade", "head"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
 

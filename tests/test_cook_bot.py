@@ -1,15 +1,15 @@
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
 import app.callbacks.cook as cook_callbacks
 import app.callbacks.routes as callback_routes
-import app.handler_support as handler_support
-from app.client_set import PerUserClients
+from app import handler_support
 from app.bot import handle_cook, handle_cook_callback, run_cook_and_render
+from app.client_set import PerUserClients
 from app.cook.models import (
     NutritionScore,
     NutritionScores,
@@ -26,7 +26,7 @@ def _engine_with_user():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -36,7 +36,7 @@ def _engine_with_user():
                 telegram_id=1,
                 chat_id=1,
                 household_id=household.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db.commit()
@@ -78,17 +78,17 @@ def _recording_spawn():
 
 
 def _fakes():
-    return dict(
-        clients=PerUserClients.for_tests(
+    return {
+        "clients": PerUserClients.for_tests(
             selection=FakeSelectionLLM(),
             recipe=FakeRecipeLLM(),
             nutrition=FakeNutritionLLM(),
         )
-    )
+    }
 
 
 def _NOW(tz):
-    return datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+    return datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
 
 
 def _seed_cook(engine, **overrides):
@@ -125,7 +125,7 @@ def test_cook_first_round_creates_session_and_asks_meal_type(monkeypatch):
         handle_cook(
             msg,
             session_factory=lambda: Session(engine),
-            now_provider=lambda tz: datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc),
+            now_provider=lambda tz: datetime(2026, 5, 30, 12, 0, tzinfo=UTC),
         )
     )
     msg.answer.assert_awaited()
@@ -624,7 +624,7 @@ def test_cook_alt_still_works_on_a_done_session_older_than_the_collect_ttl(monke
         expires_at=_NOW("America/Detroit").replace(tzinfo=None) - timedelta(hours=2),
     )
     cb = _Cb(f"cookalt:{cook_id}")
-    spawn, spawned = _recording_spawn()
+    spawn, _spawned = _recording_spawn()
 
     asyncio.run(
         handle_cook_callback(
@@ -647,7 +647,7 @@ def test_cook_alt_still_works_on_a_done_session_older_than_the_collect_ttl(monke
 def test_run_cook_and_render_completes_and_edits(monkeypatch):
     monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
-    today_dt = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+    today_dt = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     today = today_dt.date()
     with Session(engine) as db:
         for i in range(4):
@@ -665,7 +665,7 @@ def test_run_cook_and_render_completes_and_edits(monkeypatch):
                     expires_on=today + timedelta(days=2),
                     status="active",
                     created_via="receipt",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
         now = today_dt.replace(tzinfo=None)

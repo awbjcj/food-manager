@@ -1,5 +1,6 @@
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Optional
+from typing import Any
 
 from app.cook.models import NutritionScores, RecipeCandidates, SelectedItems
 from app.llm import CorrectionDiff, LLMClient, LLMResult, ProposedAddItem
@@ -9,8 +10,8 @@ from app.refine_service import ShelfLifeSearchClient, ShelfLifeSearchResult
 
 @dataclass
 class FakeLLMClient(LLMClient):
-    canned: Optional[LLMResult] = None
-    canned_sequence: Optional[Iterator[LLMResult]] = None
+    canned: LLMResult | None = None
+    canned_sequence: Iterator[LLMResult] | None = None
     calls: list[bytes] = field(default_factory=list)
     raise_n_times: int = 0
     _raises: int = 0
@@ -33,10 +34,10 @@ class FakeLLMClient(LLMClient):
 
 @dataclass
 class FakeTextLLMClient:
-    canned_correct: Optional[tuple[CorrectionDiff, Optional[int]]] = None
-    canned_add: Optional[tuple[list[ProposedAddItem], Optional[int]]] = None
-    canned_correct_sequence: Optional[list[tuple[CorrectionDiff, Optional[int]]]] = None
-    canned_add_sequence: Optional[list[tuple[list[ProposedAddItem], Optional[int]]]] = None
+    canned_correct: tuple[CorrectionDiff, int | None] | None = None
+    canned_add: tuple[list[ProposedAddItem], int | None] | None = None
+    canned_correct_sequence: list[tuple[CorrectionDiff, int | None]] | None = None
+    canned_add_sequence: list[tuple[list[ProposedAddItem], int | None]] | None = None
     raise_n_times: int = 0
     _raises: int = 0
     correct_calls: list[dict[str, Any]] = field(default_factory=list)
@@ -70,7 +71,7 @@ class FakeTextLLMClient:
 
 @dataclass
 class FakeProfileLLMClient:
-    canned: Optional[tuple["FoodProfile", Optional[int]]] = None
+    canned: tuple["FoodProfile", int | None] | None = None
     raise_n_times: int = 0
     _raises: int = 0
     calls: list[dict[str, Any]] = field(default_factory=list)
@@ -86,7 +87,7 @@ class FakeProfileLLMClient:
 
 @dataclass
 class FakeSelectionLLM:
-    canned: Optional[tuple[SelectedItems, Optional[int]]] = None
+    canned: tuple[SelectedItems, int | None] | None = None
     raise_n_times: int = 0
     _raises: int = 0
     calls: list[str] = field(default_factory=list)
@@ -102,8 +103,8 @@ class FakeSelectionLLM:
 
 @dataclass
 class FakeRecipeLLM:
-    canned: Optional[tuple[RecipeCandidates, Optional[int]]] = None
-    canned_sequence: Optional[list[tuple[RecipeCandidates, Optional[int]]]] = None
+    canned: tuple[RecipeCandidates, int | None] | None = None
+    canned_sequence: list[tuple[RecipeCandidates, int | None]] | None = None
     raise_n_times: int = 0
     _raises: int = 0
     calls: list[str] = field(default_factory=list)
@@ -121,7 +122,7 @@ class FakeRecipeLLM:
 
 @dataclass
 class FakeNutritionLLM:
-    canned: Optional[tuple[NutritionScores, Optional[int]]] = None
+    canned: tuple[NutritionScores, int | None] | None = None
     raise_n_times: int = 0
     _raises: int = 0
     calls: list[str] = field(default_factory=list)
@@ -138,7 +139,7 @@ class FakeNutritionLLM:
 @dataclass
 class FakeSearchClient(ShelfLifeSearchClient):
     by_name: dict[str, ShelfLifeSearchResult] = field(default_factory=dict)
-    default: Optional[ShelfLifeSearchResult] = None
+    default: ShelfLifeSearchResult | None = None
     calls: list[str] = field(default_factory=list)
 
     async def lookup_shelf_life(self, *, name, category):

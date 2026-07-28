@@ -9,7 +9,7 @@ from app.commands import ItemRoute, Verb
 EXPECTED_CALLBACK_ROUTES = frozenset([*get_args(Verb), *get_args(ItemRoute), "help"])
 
 __all__ = [
+    "EXPECTED_CALLBACK_ROUTES",
     "CallbackContext",
     "CallbackRegistry",
-    "EXPECTED_CALLBACK_ROUTES",
 ]

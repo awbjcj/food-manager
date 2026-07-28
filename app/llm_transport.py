@@ -18,7 +18,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Awaitable, Callable, Optional, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 log = logging.getLogger(__name__)
 
@@ -51,13 +52,13 @@ def is_retryable_transport_error(exc: Exception) -> bool:
     )
 
 
-async def with_transport_retry(
+async def with_transport_retry[T](
     make_call: Callable[[], Awaitable[T]],
     *,
     log_event: str,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     attempts: int = DEFAULT_ATTEMPTS,
-    classify: Optional[Callable[[Exception], bool]] = None,
+    classify: Callable[[Exception], bool] | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> T:
     """Run `make_call`, retrying transient failures with exponential backoff.

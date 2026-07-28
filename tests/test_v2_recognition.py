@@ -1,10 +1,10 @@
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.ingest_service import IngestSummary, ingest_photo
-from app.llm import LLMResult, ParseResult, ParsedItem
+from app.llm import LLMResult, ParsedItem, ParseResult
 from app.models import Household, PantryItem, User
 from app.renderer import render_ingest_reply
 from tests.fakes import FakeLLMClient
@@ -32,7 +32,7 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -41,7 +41,7 @@ def session():
             telegram_id=1,
             chat_id=1,
             household_id=household.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         ))
         db.commit()
         yield db

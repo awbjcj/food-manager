@@ -1,12 +1,12 @@
 import pytest
 
+from app.commands import CommandError, parse_callback
 from app.cook.models import (
     NutritionScore,
     RecipeCandidate,
     RecipeIngredient,
     ScoredCandidate,
 )
-from app.commands import CommandError, parse_callback
 from app.renderer import (
     build_cook_result_keyboard,
     build_cook_round_keyboard,

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
@@ -39,8 +39,8 @@ def session():
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
         households = [
-            Household(created_at=datetime.now(timezone.utc)),
-            Household(created_at=datetime.now(timezone.utc)),
+            Household(created_at=datetime.now(UTC)),
+            Household(created_at=datetime.now(UTC)),
         ]
         db.add_all(households)
         db.commit()
@@ -49,9 +49,9 @@ def session():
         assert households[0].id is not None
         assert households[1].id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=households[0].id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.add(User(telegram_id=2, chat_id=2, household_id=households[1].id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
         yield db
 
@@ -71,7 +71,7 @@ def _item(session: Session, name: str = "Milk", norm: str = "milk") -> PantryIte
         expires_on=date(2026, 6, 2),
         status="active",
         created_via="manual",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     session.add(item)
     session.commit()
@@ -80,7 +80,7 @@ def _item(session: Session, name: str = "Milk", norm: str = "milk") -> PantryIte
 
 
 def test_pending_create_load_terminal_expire_and_sweep(session):
-    now = datetime(2026, 5, 27, 12, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 27, 12, tzinfo=UTC)
     pending = create_pending(
         session,
         household_id=1,
@@ -406,7 +406,7 @@ def test_pantry_mutation_marks_pending_stale_and_stats_include_text_cost(session
         snapshot_json=None,
         cost_micros_usd=300,
         chat_id=1,
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
     create_pending(
         session,
@@ -417,7 +417,7 @@ def test_pantry_mutation_marks_pending_stale_and_stats_include_text_cost(session
         snapshot_json=None,
         cost_micros_usd=None,
         chat_id=1,
-        now=datetime.now(timezone.utc),
+        now=datetime.now(UTC),
     )
 
     assert item.id is not None
@@ -425,7 +425,7 @@ def test_pantry_mutation_marks_pending_stale_and_stats_include_text_cost(session
     session.refresh(pending)
     assert pending.status == "stale"
 
-    stats = compute_stats(session, household_id=1, now=datetime.now(timezone.utc))
+    stats = compute_stats(session, household_id=1, now=datetime.now(UTC))
     assert stats.text_llm.correction_proposal_count == 1
     assert stats.text_llm.correction_cost_micros == 300
     assert stats.text_llm.add_proposal_count == 1

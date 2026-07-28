@@ -6,7 +6,6 @@ from pathlib import Path
 from app.bot import _MESSAGE_COMMANDS
 from app.callbacks import EXPECTED_CALLBACK_ROUTES
 
-
 ROOT = Path(__file__).parents[1]
 
 

@@ -1,11 +1,11 @@
 """Tests that user.lang is threaded into the display handlers."""
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-import app.handler_support as handler_support
+from app import handler_support
 from app.bot import (
     handle_favorites,
     handle_list,
@@ -14,6 +14,7 @@ from app.bot import (
     run_cook_and_render,
 )
 from app.client_set import PerUserClients
+from app.cook.favorites_service import save_candidate
 from app.cook.models import (
     NutritionScore,
     NutritionScores,
@@ -22,7 +23,6 @@ from app.cook.models import (
     RecipeIngredient,
     SelectedItems,
 )
-from app.cook.favorites_service import save_candidate
 from app.llm import LLMResult, ParsedItem, ParseResult
 from app.models import CookSession, Household, PantryItem, User
 from app.shopping_service import add_missing
@@ -44,7 +44,7 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -54,7 +54,7 @@ def session_factory():
                 telegram_id=1,
                 chat_id=99,
                 household_id=household.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db.commit()
@@ -71,7 +71,7 @@ def _msg(text: str):
 
 
 def _now(tz):
-    return datetime(2026, 6, 1, 12, 0, tzinfo=timezone.utc)
+    return datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
 
 
 def _add_pantry_item(session_factory, household_id: int, name: str) -> None:
@@ -90,7 +90,7 @@ def _add_pantry_item(session_factory, household_id: int, name: str) -> None:
             expires_on=date(2026, 6, 14),
             status="active",
             created_via="manual",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(item)
         db.commit()
@@ -399,10 +399,10 @@ def _seed_ready_cook(session_factory, household_id: int) -> int:
                     expires_on=today + timedelta(days=2),
                     status="active",
                     created_via="receipt",
-                    created_at=datetime.now(timezone.utc),
+                    created_at=datetime.now(UTC),
                 )
             )
-        now = datetime(2026, 6, 1, 12, 0)
+        now = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)
         cook = CookSession(
             household_id=household_id,
             status="ready",

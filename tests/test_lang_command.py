@@ -1,8 +1,10 @@
+from datetime import UTC, datetime
+
 import pytest
-from datetime import datetime, timezone
 from sqlmodel import Session, SQLModel, create_engine
-from app.models import User, Household
-from app.commands import parse_lang, CommandError
+
+from app.commands import CommandError, parse_lang
+from app.models import Household, User
 
 
 def _session() -> Session:
@@ -13,13 +15,13 @@ def _session() -> Session:
 
 def test_user_lang_defaults_to_en():
     with _session() as s:
-        hh = Household(created_at=datetime.now(timezone.utc))
+        hh = Household(created_at=datetime.now(UTC))
         s.add(hh)
         s.commit()
         s.refresh(hh)
         assert hh.id is not None
         u = User(telegram_id=1, chat_id=1, household_id=hh.id,
-                 created_at=datetime.now(timezone.utc))
+                 created_at=datetime.now(UTC))
         s.add(u)
         s.commit()
         s.refresh(u)

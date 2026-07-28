@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Optional
 
 from sqlmodel import Session, select
 
 from app.models import CookSession
 from app.pending_service import utc_naive
-
 
 COOK_TTL_MINUTES = 10
 ALLOWED_COOK_STATUSES = {"collecting", "ready", "done", "cancelled", "expired"}
@@ -51,7 +49,7 @@ def create_cook_session(
 
 def load_cook_session(
     session: Session, *, household_id: int, cook_id: int
-) -> Optional[CookSession]:
+) -> CookSession | None:
     row = session.get(CookSession, cook_id)
     if row is None or row.household_id != household_id:
         return None
@@ -65,7 +63,7 @@ def set_message_id(session: Session, *, cook: CookSession, message_id: int) -> N
 
 
 def accrue_cost(
-    session: Session, *, cook: CookSession, add_micros: Optional[int]
+    session: Session, *, cook: CookSession, add_micros: int | None
 ) -> None:
     if not add_micros:
         return

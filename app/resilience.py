@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Awaitable, Callable, Optional
+from collections.abc import Awaitable, Callable
 
 log = logging.getLogger(__name__)
 
@@ -26,10 +26,10 @@ STABLE_RUN_SECONDS = 600.0
 async def run_with_restart(
     start: Callable[[], Awaitable[None]],
     *,
-    on_crash: Optional[Callable[[Exception], Awaitable[None]]] = None,
+    on_crash: Callable[[Exception], Awaitable[None]] | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     clock: Callable[[], float] = time.monotonic,
-    max_restarts: Optional[int] = None,
+    max_restarts: int | None = None,
 ) -> None:
     """Run `start()` until it returns cleanly, restarting after crashes.
 
@@ -42,7 +42,7 @@ async def run_with_restart(
         try:
             await start()
             return  # clean return = deliberate shutdown
-        except Exception as exc:  # noqa: BLE001 - BaseExceptions propagate
+        except Exception as exc:
             if clock() - began >= STABLE_RUN_SECONDS:
                 backoff = 1.0
             log.error(

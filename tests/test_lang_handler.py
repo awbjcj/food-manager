@@ -1,11 +1,11 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
-import app.handler_support as handler_support
+from app import handler_support
 from app.models import Household, User
 
 
@@ -18,13 +18,13 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        hh = Household(created_at=datetime.now(timezone.utc))
+        hh = Household(created_at=datetime.now(UTC))
         db.add(hh)
         db.commit()
         db.refresh(hh)
         assert hh.id is not None
         db.add(User(telegram_id=1, chat_id=99, household_id=hh.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
     return make
 

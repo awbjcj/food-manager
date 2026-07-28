@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
-from typing import AsyncIterator, Callable, Optional
+from datetime import UTC, date, datetime
 
 from sqlmodel import Session
 
@@ -26,16 +26,16 @@ log = logging.getLogger(__name__)
 @dataclass
 class AuthDecision:
     allowed: bool
-    user: Optional[User]
+    user: User | None
     created: bool
     reason: str
-    household: Optional[Household] = None
+    household: Household | None = None
 
 
 @dataclass
 class AuthStatus:
     allowed: bool
-    user: Optional[User]
+    user: User | None
     is_bootstrap: bool
 
 
@@ -75,11 +75,11 @@ def authorize_and_get_user(
         household = session.get(Household, status.user.household_id)
         if household is None:
             household = restore_household_for_user(
-                session, status.user, created_at=datetime.now(timezone.utc)
+                session, status.user, created_at=datetime.now(UTC)
             )
         return AuthDecision(True, status.user, False, "ok", household=household)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user = User(
         telegram_id=telegram_user_id,
         chat_id=chat_id,
@@ -168,7 +168,7 @@ async def guard(
 class RequestContext:
     session: Session
     user: User
-    today: Optional[date]
+    today: date | None
 
 
 @asynccontextmanager
@@ -177,8 +177,8 @@ async def request(
     *,
     session_factory: SessionFactory,
     on_user_created: Callable[[User], None] = noop_user_created,
-    now_provider: Optional[NowProvider] = None,
-) -> AsyncIterator[Optional[RequestContext]]:
+    now_provider: NowProvider | None = None,
+) -> AsyncIterator[RequestContext | None]:
     with session_factory() as session:
         user = await guard(msg, session, on_user_created=on_user_created)
         if user is None:

@@ -1,24 +1,24 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from app.backup import BackupError, pre_migration_backup
-from app.client_set import PerUserClients
 from app.bot import (
     authorize_and_get_user,
     build_dispatcher,
     handle_ate,
-    handle_item_callback,
     handle_callback,
     handle_help,
+    handle_item_callback,
     handle_list,
     handle_llm,
     handle_start,
 )
+from app.client_set import PerUserClients
 from app.llm import (
     LLMProviderSelector,
     LLMResult,
@@ -41,13 +41,13 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
         db.add(User(telegram_id=1, chat_id=999, household_id=household.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
         yield db
 
@@ -101,7 +101,7 @@ def _add_item(
         status=status,
         snoozed_until=snoozed_until,
         created_via="manual",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     session.add(item)
     session.commit()
@@ -148,7 +148,7 @@ async def test_handlers_smoke(session, monkeypatch):
         return session
 
     def now(tz):
-        return datetime(2026, 5, 26, tzinfo=timezone.utc)
+        return datetime(2026, 5, 26, tzinfo=UTC)
 
     start = _msg("/start")
     await handle_start(start, session_factory=factory, on_user_created=lambda user: None)
@@ -239,7 +239,7 @@ async def test_act_ate_callback_edits_digest_in_place(session, monkeypatch):
     await handle_callback(
         cb,
         session_factory=lambda: session,
-        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
+        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), UTC),
     )
     assert session.get(PantryItem, eaten_id).status == "eaten"
     cb.message.edit_text.assert_awaited_once()
@@ -259,7 +259,7 @@ async def test_act_callback_clears_digest_when_no_items_remain(session, monkeypa
     await handle_callback(
         cb,
         session_factory=lambda: session,
-        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
+        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), UTC),
     )
     cb.message.edit_text.assert_awaited_once()
     assert cb.message.edit_text.await_args is not None
@@ -276,7 +276,7 @@ async def test_act_callback_refreshes_digest_when_already_eaten(session, monkeyp
     await handle_callback(
         cb,
         session_factory=lambda: session,
-        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
+        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), UTC),
     )
     cb.message.edit_text.assert_awaited_once()
     assert cb.message.edit_text.await_args is not None
@@ -296,7 +296,7 @@ async def test_act_freeze_callback_extends_expiry(session, monkeypatch):
         now_provider=lambda tz: datetime.combine(
             today,
             datetime.min.time(),
-            timezone.utc,
+            UTC,
         ),
     )
     frozen = session.get(PantryItem, item.id)
@@ -317,7 +317,7 @@ async def test_act_fridge_callback_chills_and_extends_expiry(session, monkeypatc
         cb,
         session_factory=lambda: session,
         now_provider=lambda tz: datetime.combine(
-            today, datetime.min.time(), timezone.utc
+            today, datetime.min.time(), UTC
         ),
     )
     chilled = session.get(PantryItem, item.id)
@@ -339,7 +339,7 @@ async def test_show_all_callback_edits_due_items_in_place(session, monkeypatch):
     await handle_callback(
         cb,
         session_factory=lambda: session,
-        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
+        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), UTC),
     )
     cb.message.answer.assert_not_awaited()
     cb.message.edit_text.assert_awaited_once()
@@ -364,7 +364,7 @@ async def test_item_open_renders_card(session, monkeypatch):
     await handle_item_callback(
         cb,
         session_factory=lambda: session,
-        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
+        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), UTC),
     )
     datas = _edited_keyboard_datas(cb)
     assert f"item:corr:{item_id}" in datas
@@ -383,7 +383,7 @@ async def test_item_nudge_extends_expiry(session, monkeypatch):
     await handle_item_callback(
         cb,
         session_factory=lambda: session,
-        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
+        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), UTC),
     )
     updated = session.get(PantryItem, item_id)
     assert updated is not None
@@ -401,7 +401,7 @@ async def test_item_rmok_removes_and_refreshes(session, monkeypatch):
     await handle_item_callback(
         cb,
         session_factory=lambda: session,
-        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), timezone.utc),
+        now_provider=lambda tz: datetime.combine(today, datetime.min.time(), UTC),
     )
     removed = session.get(PantryItem, item_id)
     assert removed is not None
@@ -414,7 +414,7 @@ def test_build_dispatcher_imports_and_registers():
     dispatcher = build_dispatcher(
         bot=fake_bot,
         session_factory=lambda: MagicMock(),
-        now_provider=lambda tz: datetime.now(timezone.utc),
+        now_provider=lambda tz: datetime.now(UTC),
         on_user_created=lambda user: None,
         reschedule=lambda user: None,
         clients=PerUserClients.for_tests(
@@ -427,8 +427,8 @@ def test_build_dispatcher_imports_and_registers():
 
 
 def test_build_llm_clients_includes_profile_llm():
-    from bin.run import _build_llm_clients
     from app.settings import Settings
+    from bin.run import _build_llm_clients
 
     settings = Settings(
         TELEGRAM_BOT_TOKEN="token",
@@ -509,5 +509,5 @@ def test_backup_helper(tmp_path, monkeypatch):
 
 
 def test_runtime_imports_parse():
-    import bin.eval_receipts  # noqa: F401
+    import bin.eval_receipts
     import bin.run  # noqa: F401

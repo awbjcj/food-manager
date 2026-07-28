@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -10,20 +10,20 @@ from app.renderer import render_stats
 def test_compute_stats_counts_feedback():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
-    now = datetime(2026, 5, 30, 12, 0)
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
-        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
+        db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(UTC)))
         for fb in ("liked", "liked", "disliked", "none"):
             db.add(CookSession(household_id=household.id, status="done", chat_id=1, selected_item_ids="[]",
                                feedback=fb, created_at=now, expires_at=now))
         db.commit()
         stats = compute_stats(db, household_id=household.id,
-                              now=datetime(2026, 5, 30, 13, 0, tzinfo=timezone.utc))
+                              now=datetime(2026, 5, 30, 13, 0, tzinfo=UTC))
         assert stats.cook_feedback_count == 3  # liked+liked+disliked
         assert stats.cook_liked_count == 2
 

@@ -23,22 +23,18 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
-from anthropic import AsyncAnthropic
 from aiogram import Bot
+from anthropic import AsyncAnthropic
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-import app.handler_support as handler_support
 import app.bot as bot_mod
 import app.cook.service as cook_service_mod
+import app.plan_service as plan_service_mod
+from app import handler_support
 from app.alerts import OwnerAlerter
-from app.client_set import PerUserClients
 from app.backup import BackupError, pre_migration_backup
 from app.bot import build_dispatcher
-from app.cook.recipe_source import SpoonacularSource, TheMealDbSource
-from app.nl_intent import IntentAgentSelector, build_intent_agent
-import app.plan_service as plan_service_mod
-from app.resilience import run_with_restart
-from app.week_composer import WeekComposerSelector, build_week_composer
+from app.client_set import PerUserClients
 from app.cook.llm import (
     AnthropicNutritionLLM,
     AnthropicRecipeLLM,
@@ -47,26 +43,8 @@ from app.cook.llm import (
     OpenAIRecipeLLM,
     OpenAISelectionLLM,
 )
+from app.cook.recipe_source import SpoonacularSource, TheMealDbSource
 from app.db import make_engine, make_session_factory
-from app.llm import (
-    AnthropicLLMClient,
-    AnthropicProfileLLMClient,
-    AnthropicTextLLMClient,
-    LLMProviderSelector,
-    NutritionLLMProviderSelector,
-    OpenAILLMClient,
-    OpenAIProfileLLMClient,
-    OpenAITextLLMClient,
-    ProfileLLMProviderSelector,
-    RecipeLLMProviderSelector,
-    SelectionLLMProviderSelector,
-    TextLLMProviderSelector,
-)
-from app.translation_llm import (
-    AnthropicTranslationLLMClient,
-    OpenAITranslationLLMClient,
-    TranslationLLMProviderSelector,
-)
 from app.deepseek_llm import (
     DeepSeekNutritionLLM,
     DeepSeekProfileLLMClient,
@@ -84,8 +62,23 @@ from app.gemini_llm import (
     GeminiTextLLMClient,
     GeminiTranslationLLMClient,
 )
+from app.llm import (
+    AnthropicLLMClient,
+    AnthropicProfileLLMClient,
+    AnthropicTextLLMClient,
+    LLMProviderSelector,
+    NutritionLLMProviderSelector,
+    OpenAILLMClient,
+    OpenAIProfileLLMClient,
+    OpenAITextLLMClient,
+    ProfileLLMProviderSelector,
+    RecipeLLMProviderSelector,
+    SelectionLLMProviderSelector,
+    TextLLMProviderSelector,
+)
+from app.nl_intent import IntentAgentSelector, build_intent_agent
 from app.refine_service import AnthropicSearchClient
-from app.shelf_life_search import SearchProviderSelector
+from app.resilience import run_with_restart
 from app.scheduler import (
     catch_up_missed_digests,
     register_all_user_digests,
@@ -96,6 +89,13 @@ from app.scheduler import (
     unschedule_user_digest,
 )
 from app.settings import Settings
+from app.shelf_life_search import SearchProviderSelector
+from app.translation_llm import (
+    AnthropicTranslationLLMClient,
+    OpenAITranslationLLMClient,
+    TranslationLLMProviderSelector,
+)
+from app.week_composer import WeekComposerSelector, build_week_composer
 
 
 def _configure_logging(env: str, level: str) -> None:
@@ -131,7 +131,7 @@ def _capable_default(clients: dict, preferred: str) -> str:
     preferred provider if present, else the first configured one. Settings
     validation guarantees ``clients`` is non-empty for the image seam.
     """
-    return preferred if preferred in clients else sorted(clients)[0]
+    return preferred if preferred in clients else min(clients)
 
 
 def _build_intent_agents(settings: Settings) -> IntentAgentSelector | None:
@@ -365,7 +365,8 @@ async def _amain(settings: Settings) -> None:
             log.error("pre_migration_backup_failed", extra={"error": str(exc)})
             raise SystemExit(2) from exc
 
-    result = subprocess.run(
+    result = await asyncio.to_thread(
+        subprocess.run,
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         env={
             "DATABASE_PATH": settings.database_path,
@@ -373,6 +374,7 @@ async def _amain(settings: Settings) -> None:
         },
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode != 0:
         log.error("migration_failed", extra={"stderr": result.stderr})

@@ -5,17 +5,19 @@ import base64
 import json
 import logging
 from datetime import date
-from typing import Any, Literal, Optional, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field
 
 from app.llm_transport import with_transport_retry
 from app.profile_service import FoodProfile
-from app.providers import Provider, ProviderSelector
 
 # Re-exported for callers (app.bot, app.translation_llm) that import the error
 # from app.llm; the canonical definition lives in app.providers.
-from app.providers import LLMProviderNotConfigured as LLMProviderNotConfigured
+from app.providers import (
+    LLMProviderNotConfigured as LLMProviderNotConfigured,  # noqa: PLC0414 - intentional re-export
+)
+from app.providers import Provider, ProviderSelector
 
 Category = Literal[
     "dairy",
@@ -36,36 +38,36 @@ class ParsedItem(BaseModel):
     # ge, not gt: Pydantic emits gt as JSON Schema `exclusiveMinimum`, a field
     # Gemini's structured-output Schema type doesn't recognize and rejects.
     qty: float = Field(default=1.0, ge=0.01)
-    unit: Optional[str] = None
-    category: Optional[Category] = None
+    unit: str | None = None
+    category: Category | None = None
     est_shelf_life_days: int = Field(ge=1, le=730)
     confidence: float = Field(ge=0.0, le=1.0)
     track_worthy: bool = True
     frozen: bool = False
-    exclusion_reason: Optional[str] = None
+    exclusion_reason: str | None = None
 
 
 class ParseResult(BaseModel):
-    purchase_date: Optional[date] = None
+    purchase_date: date | None = None
     purchase_date_confidence: float = Field(ge=0.0, le=1.0, default=0.0)
     items: list[ParsedItem]
 
 
 class LLMResult(BaseModel):
     parse: ParseResult
-    cost_micros_usd: Optional[int] = None
-    provider_usage: Optional[dict[str, Any]] = None
+    cost_micros_usd: int | None = None
+    provider_usage: dict[str, Any] | None = None
 
 
 CacheAction = Literal["move", "add_new", "leave"]
 
 
 class CorrectionDiff(BaseModel):
-    name: Optional[str] = None
+    name: str | None = None
     name_translations: dict[str, str] = Field(default_factory=dict)
-    category: Optional[Category] = None
-    expires_on: Optional[date] = None
-    shelf_life_days: Optional[int] = Field(default=None, ge=1, le=730)
+    category: Category | None = None
+    expires_on: date | None = None
+    shelf_life_days: int | None = Field(default=None, ge=1, le=730)
     cache_action: CacheAction = "leave"
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
@@ -73,14 +75,14 @@ class CorrectionDiff(BaseModel):
 
 class ProposedAddItem(BaseModel):
     name: str
-    category: Optional[Category] = None
+    category: Category | None = None
     # ge, not gt: see ParsedItem.qty above.
     qty: float = Field(default=1.0, ge=0.01)
-    unit: Optional[str] = None
+    unit: str | None = None
     explicit_user_expiry: bool
-    shelf_life_days: Optional[int] = Field(default=None, ge=1, le=730)
-    expires_on: Optional[date] = None
-    estimated_shelf_life_days: Optional[int] = Field(default=None, ge=1, le=730)
+    shelf_life_days: int | None = Field(default=None, ge=1, le=730)
+    expires_on: date | None = None
+    estimated_shelf_life_days: int | None = Field(default=None, ge=1, le=730)
     confidence: float = Field(ge=0.0, le=1.0)
 
 
@@ -102,10 +104,10 @@ class TextLLMClient(Protocol):
         self,
         *,
         item_snapshot: dict[str, Any],
-        cache_snapshot: Optional[dict[str, Any]],
+        cache_snapshot: dict[str, Any] | None,
         user_text: str,
         today: date,
-    ) -> tuple[CorrectionDiff, Optional[int]]: ...
+    ) -> tuple[CorrectionDiff, int | None]: ...
 
     async def parse_add(
         self,
@@ -113,13 +115,13 @@ class TextLLMClient(Protocol):
         user_text: str,
         today: date,
         tz: str,
-    ) -> tuple[list[ProposedAddItem], Optional[int]]: ...
+    ) -> tuple[list[ProposedAddItem], int | None]: ...
 
 
 class ProfileUpdateLLMClient(Protocol):
     async def parse_profile_update(
         self, *, current: FoodProfile, sentence: str
-    ) -> tuple[FoodProfile, Optional[int]]: ...
+    ) -> tuple[FoodProfile, int | None]: ...
 
 
 log = logging.getLogger(__name__)
@@ -223,7 +225,7 @@ def _cost_micros(message, model: str) -> int | None:
         return round(
             usage.input_tokens * price["input"] + usage.output_tokens * price["output"]
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - cost estimate is best-effort
         return None
 
 
@@ -284,10 +286,10 @@ class TextLLMProviderSelector(ProviderSelector[TextLLMClient], TextLLMClient):
         self,
         *,
         item_snapshot: dict[str, Any],
-        cache_snapshot: Optional[dict[str, Any]],
+        cache_snapshot: dict[str, Any] | None,
         user_text: str,
         today: date,
-    ) -> tuple[CorrectionDiff, Optional[int]]:
+    ) -> tuple[CorrectionDiff, int | None]:
         return await self.for_provider(self._default_provider).parse_correct(
             item_snapshot=item_snapshot,
             cache_snapshot=cache_snapshot,
@@ -301,7 +303,7 @@ class TextLLMProviderSelector(ProviderSelector[TextLLMClient], TextLLMClient):
         user_text: str,
         today: date,
         tz: str,
-    ) -> tuple[list[ProposedAddItem], Optional[int]]:
+    ) -> tuple[list[ProposedAddItem], int | None]:
         return await self.for_provider(self._default_provider).parse_add(
             user_text=user_text,
             today=today,
@@ -314,7 +316,7 @@ class ProfileLLMProviderSelector(
 ):
     async def parse_profile_update(
         self, *, current: FoodProfile, sentence: str
-    ) -> tuple[FoodProfile, Optional[int]]:
+    ) -> tuple[FoodProfile, int | None]:
         return await self.for_provider(self._default_provider).parse_profile_update(
             current=current,
             sentence=sentence,
@@ -645,7 +647,7 @@ class AnthropicTextLLMClient(TextLLMClient):
         cache_snapshot,
         user_text,
         today,
-    ) -> tuple[CorrectionDiff, Optional[int]]:
+    ) -> tuple[CorrectionDiff, int | None]:
         user_msg = json.dumps(
             {
                 "item_snapshot": item_snapshot,
@@ -666,7 +668,7 @@ class AnthropicTextLLMClient(TextLLMClient):
         user_text,
         today,
         tz,
-    ) -> tuple[list[ProposedAddItem], Optional[int]]:
+    ) -> tuple[list[ProposedAddItem], int | None]:
         user_msg = json.dumps(
             {
                 "today": today.isoformat(),
@@ -678,7 +680,7 @@ class AnthropicTextLLMClient(TextLLMClient):
         def _parse(text: str) -> list[ProposedAddItem]:
             data = json.loads(text)
             if not isinstance(data, list):
-                raise ValueError("parse_add expected a JSON array")
+                raise ValueError("parse_add expected a JSON array")  # noqa: TRY004 - JSON-shape contract, not a type check
             return [ProposedAddItem.model_validate(item) for item in data]
 
         return await self._call_with_schema(ADD_SYSTEM_PROMPT, user_msg, _parse)
@@ -717,7 +719,7 @@ class OpenAITextLLMClient(TextLLMClient):
         cache_snapshot,
         user_text,
         today,
-    ) -> tuple[CorrectionDiff, Optional[int]]:
+    ) -> tuple[CorrectionDiff, int | None]:
         user_msg = json.dumps(
             {
                 "item_snapshot": item_snapshot,
@@ -742,7 +744,7 @@ class OpenAITextLLMClient(TextLLMClient):
         user_text,
         today,
         tz,
-    ) -> tuple[list[ProposedAddItem], Optional[int]]:
+    ) -> tuple[list[ProposedAddItem], int | None]:
         user_msg = json.dumps(
             {
                 "today": today.isoformat(),

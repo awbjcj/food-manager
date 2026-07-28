@@ -13,8 +13,9 @@ the v4.7 text-seam rule: the user's provider choice is always honoured.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import date
-from typing import Literal, Optional, Protocol, Sequence
+from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
@@ -29,9 +30,9 @@ MAX_CONTEXT_NAMES = 100
 
 class NLIntent(BaseModel):
     kind: Literal["add", "mark", "shelf_life_question", "pantry_query", "unknown"]
-    mark_action: Optional[Literal["ate", "tossed", "snooze", "freeze"]] = None
-    item_name: Optional[str] = None
-    food: Optional[str] = None
+    mark_action: Literal["ate", "tossed", "snooze", "freeze"] | None = None
+    item_name: str | None = None
+    food: str | None = None
 
 
 class IntentAgent(Protocol):
@@ -83,12 +84,12 @@ class AgnoIntentAgent:
         response = await self._agent.arun(prompt)
         intent = getattr(response, "content", None)
         if not isinstance(intent, NLIntent):
-            raise ValueError("intent agent returned no structured NLIntent")
+            raise ValueError("intent agent returned no structured NLIntent")  # noqa: TRY004 - JSON-shape contract, not a type check
         return intent
 
 
 def build_intent_agent(
-    provider: str, *, model_id: str, api_key: str, base_url: Optional[str] = None
+    provider: str, *, model_id: str, api_key: str, base_url: str | None = None
 ) -> AgnoIntentAgent:
     from agno.agent import Agent
 

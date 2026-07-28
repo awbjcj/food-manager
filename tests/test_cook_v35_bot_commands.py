@@ -1,13 +1,13 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 from sqlmodel import Session, SQLModel, create_engine
 
-import app.handler_support as handler_support
+from app import handler_support
 from app.bot import handle_favorites, handle_shopping
-from app.cook.models import RecipeCandidate, RecipeIngredient
 from app.cook.favorites_service import save_candidate
+from app.cook.models import RecipeCandidate, RecipeIngredient
 from app.models import Household, User
 from app.shopping_service import add_missing
 
@@ -24,19 +24,19 @@ def _engine_with_user():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
     return engine
 
 
 def _NOW(tz):
-    return datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+    return datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
 
 
 def test_shopping_lists_pending_with_buttons(monkeypatch):

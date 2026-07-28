@@ -2,11 +2,11 @@
 shares the unified Storage Date origin, and follows forward-only transitions.
 """
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from app.cache import get_cached, put_cached
 from app.commands import parse_callback
@@ -36,14 +36,14 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        hh = Household(created_at=datetime.now(timezone.utc))
+        hh = Household(created_at=datetime.now(UTC))
         db.add(hh)
         db.commit()
         db.refresh(hh)
         assert hh.id is not None
         db.add(User(
             telegram_id=1, chat_id=1, household_id=hh.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         ))
         db.commit()
         yield db
@@ -56,7 +56,7 @@ def _fresh_item(session, *, name="Chicken", normalized="chicken", days=2,
         category=category, qty=1.0, purchased_on=today, shelf_life_days=days,
         shelf_life_source="llm", ingest_shelf_life_source="llm",
         expires_on=today + timedelta(days=days), status="active",
-        created_via="receipt", created_at=datetime.now(timezone.utc),
+        created_via="receipt", created_at=datetime.now(UTC),
     )
     session.add(item)
     session.commit()

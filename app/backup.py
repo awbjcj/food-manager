@@ -1,6 +1,6 @@
-from datetime import datetime
-from pathlib import Path
 import shutil
+from datetime import UTC, datetime
+from pathlib import Path
 
 
 class BackupError(Exception):
@@ -11,7 +11,7 @@ def pre_migration_backup(database_path: str, *, keep: int) -> str | None:
     src = Path(database_path)
     if not src.exists():
         return None
-    timestamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
     dst = src.with_name(f"{src.name}.backup-{timestamp}")
     try:
         shutil.copy2(src, dst)

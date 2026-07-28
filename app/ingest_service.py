@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
-from typing import Literal, Optional
+from datetime import UTC, date, datetime, timedelta
+from typing import Literal
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
@@ -58,7 +58,7 @@ class DuplicateReceipt(Exception):
 
 @dataclass
 class IngestSummary:
-    receipt_id: Optional[int]
+    receipt_id: int | None
     inserted_food_count: int
     inserted_item_ids: list[int] = field(default_factory=list)
     inserted_item_names: list[str] = field(default_factory=list)
@@ -71,9 +71,9 @@ class IngestSummary:
     skipped_excluded_count: int = 0
     skipped_excluded_names: list[str] = field(default_factory=list)
     uncached_item_ids: list[int] = field(default_factory=list)
-    purchase_date: Optional[date] = None
+    purchase_date: date | None = None
     purchase_date_assumed: bool = False
-    cost_micros_usd: Optional[int] = None
+    cost_micros_usd: int | None = None
 
 
 async def ingest_photo(
@@ -84,7 +84,7 @@ async def ingest_photo(
     photo_file_id: str,
     image_bytes: bytes,
     today: date,
-    search: Optional[ShelfLifeSearchClient] = None,
+    search: ShelfLifeSearchClient | None = None,
 ) -> IngestSummary:
     existing = session.exec(
         select(Receipt).where(
@@ -141,7 +141,7 @@ async def ingest_photo(
             photo_file_id=photo_file_id,
             purchase_date=purchase_date,
             purchase_date_source=purchase_date_source,
-            scanned_at=datetime.now(timezone.utc),
+            scanned_at=datetime.now(UTC),
             llm_cost_micros_usd=llm_result.cost_micros_usd,
         )
         session.add(receipt)
@@ -193,7 +193,7 @@ async def ingest_photo(
                 storage=storage,
                 stored_on=stored_on,
                 source_receipt_id=receipt.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
             session.add(pantry_item)
             session.flush()

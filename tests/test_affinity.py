@@ -1,12 +1,17 @@
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.cook.affinity import affinity, list_recent_signals
 from app.cook.feedback import FeedbackSignal
-from app.cook.models import NutritionScore, RecipeCandidate, RecipeIngredient, ScoredCandidate
+from app.cook.models import (
+    NutritionScore,
+    RecipeCandidate,
+    RecipeIngredient,
+    ScoredCandidate,
+)
 from app.models import CookSession, Household, User
 
 
@@ -65,7 +70,7 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -75,7 +80,7 @@ def session_factory():
                 telegram_id=1,
                 chat_id=1,
                 household_id=household.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db.commit()
@@ -96,7 +101,7 @@ def _seed_cook(session_factory, *, feedback, feedback_at, title, cuisine, ingred
 
 
 def test_list_recent_signals_windows_and_orders(session_factory):
-    t0 = datetime(2026, 5, 30, 10, 0, tzinfo=timezone.utc)
+    t0 = datetime(2026, 5, 30, 10, 0, tzinfo=UTC)
     t1 = t0 + timedelta(hours=1)
     t2 = t0 + timedelta(hours=2)
     _seed_cook(session_factory, feedback="liked", feedback_at=t0, title="Old", cuisine="italian", ingredients=("a",))
@@ -118,7 +123,7 @@ def test_blend_weights_sum_to_one_and_include_affinity():
 def test_blended_score_uses_affinity_term():
     from app.cook.logic import blended_score
 
-    base = dict(health_0_1=0.5, expiry_use=0.5, deliciousness=0.5)
+    base = {"health_0_1": 0.5, "expiry_use": 0.5, "deliciousness": 0.5}
     assert blended_score(**base, affinity_0_1=1.0) > blended_score(
         **base, affinity_0_1=0.0
     )
@@ -130,7 +135,7 @@ def test_neutral_affinity_preserves_ranking_order():
     a = blended_score(health_0_1=0.9, expiry_use=0.2, deliciousness=0.5, affinity_0_1=0.5)
     b = blended_score(health_0_1=0.2, expiry_use=0.9, deliciousness=0.5, affinity_0_1=0.5)
     c = blended_score(health_0_1=0.1, expiry_use=0.1, deliciousness=0.1, affinity_0_1=0.5)
-    assert sorted([a, b, c], reverse=True)[-1] == c  # order driven by non-affinity terms
+    assert min([a, b, c]) == c  # order driven by non-affinity terms
 
 
 def test_steering_summary_deterministic_and_capped():

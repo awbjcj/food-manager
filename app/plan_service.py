@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
-from typing import Optional, Sequence
 
 from sqlmodel import Session, select
 
@@ -87,7 +87,7 @@ def _score(sourced, *, urgent_names: list[str], signals) -> ScoredCandidate:
 
 def _pick(
     sourced_list, *, exclusions, taken_ids: set[str], urgent_names: list[str], signals
-) -> Optional[ScoredCandidate]:
+) -> ScoredCandidate | None:
     safe = [
         s
         for s in sourced_list
@@ -106,7 +106,7 @@ def _pick(
 
 async def _search_day(
     source, *, spec: DaySpec, include: list[str], profile, offset: int,
-    remaining_cost_micros: Optional[int], steering: Optional[str] = None,
+    remaining_cost_micros: int | None, steering: str | None = None,
 ):
     criteria = build_criteria(
         include_ingredients=include,
@@ -258,7 +258,7 @@ async def swap_day(
     source,
     today: date,
     cost_ceiling_micros: int,
-) -> Optional[MealPlanEntry]:
+) -> MealPlanEntry | None:
     spec = DaySpec.model_validate_json(entry.spec_json)
     siblings = session.exec(
         select(MealPlanEntry).where(MealPlanEntry.plan_id == plan.id)

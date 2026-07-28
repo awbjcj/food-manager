@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 from app.callback_dispatch import CallbackResult
 from app.callbacks.context import CallbackContext

@@ -19,7 +19,7 @@ import asyncio
 import json
 import logging
 from datetime import date
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -30,6 +30,7 @@ from app.cook.llm import (
 )
 from app.cook.models import NutritionScores, RecipeCandidates, SelectedItems
 from app.llm import (
+    _PRICE_MICROS_PER_TOKEN_BY_MODEL,
     CORRECTION_SYSTEM_PROMPT,
     OPENAI_ADD_SYSTEM_PROMPT,
     PROFILE_SYSTEM_PROMPT,
@@ -40,7 +41,6 @@ from app.llm import (
     ProposedAddItem,
     ProposedAddItems,
     _detect_media_type,
-    _PRICE_MICROS_PER_TOKEN_BY_MODEL,
 )
 from app.llm_transport import with_transport_retry
 from app.profile_service import FoodProfile
@@ -63,7 +63,7 @@ TModel = TypeVar("TModel", bound=BaseModel)
 _THINKING_HEADROOM_TOKENS = 8192
 
 
-def _gemini_cost(response, model: str) -> Optional[int]:
+def _gemini_cost(response, model: str) -> int | None:
     """Best-effort cost in micro-USD from Gemini ``usage_metadata`` token counts."""
     price = _PRICE_MICROS_PER_TOKEN_BY_MODEL.get(model)
     if price is None:
@@ -75,11 +75,11 @@ def _gemini_cost(response, model: str) -> Optional[int]:
         in_tokens = getattr(usage, "prompt_token_count", None) or 0
         out_tokens = getattr(usage, "candidates_token_count", None) or 0
         return round(in_tokens * price["input"] + out_tokens * price["output"])
-    except Exception:
+    except Exception:  # noqa: BLE001 - cost estimate is best-effort
         return None
 
 
-def _usage_dict(response) -> Optional[dict[str, Any]]:
+def _usage_dict(response) -> dict[str, Any] | None:
     usage = getattr(response, "usage_metadata", None)
     if usage is None:
         return None
@@ -157,7 +157,7 @@ class _GeminiCaller:
         contents,
         model_cls: type[TModel],
         max_output_tokens: int = 2048,
-    ) -> tuple[TModel, Optional[int]]:
+    ) -> tuple[TModel, int | None]:
         """Call with structured output and validate into ``model_cls``."""
         response = await self.generate(
             system=system,
@@ -230,10 +230,10 @@ class GeminiTextLLMClient:
         self,
         *,
         item_snapshot: dict[str, Any],
-        cache_snapshot: Optional[dict[str, Any]],
+        cache_snapshot: dict[str, Any] | None,
         user_text: str,
         today: date,
-    ) -> tuple[CorrectionDiff, Optional[int]]:
+    ) -> tuple[CorrectionDiff, int | None]:
         user_msg = json.dumps(
             {
                 "item_snapshot": item_snapshot,
@@ -255,7 +255,7 @@ class GeminiTextLLMClient:
         user_text: str,
         today: date,
         tz: str,
-    ) -> tuple[list[ProposedAddItem], Optional[int]]:
+    ) -> tuple[list[ProposedAddItem], int | None]:
         user_msg = json.dumps(
             {"today": today.isoformat(), "tz": tz, "user_text": user_text}
         )
@@ -274,7 +274,7 @@ class GeminiProfileLLMClient:
 
     async def parse_profile_update(
         self, *, current: FoodProfile, sentence: str
-    ) -> tuple[FoodProfile, Optional[int]]:
+    ) -> tuple[FoodProfile, int | None]:
         user_msg = json.dumps({"current": current.model_dump(), "sentence": sentence})
         return await self._caller.structured(
             system=PROFILE_SYSTEM_PROMPT,
@@ -288,7 +288,7 @@ class GeminiSelectionLLM:
     def __init__(self, client, model: str, sleep=asyncio.sleep):
         self._caller = _GeminiCaller(client, model, sleep=sleep)
 
-    async def select_items(self, *, prompt: str) -> tuple[SelectedItems, Optional[int]]:
+    async def select_items(self, *, prompt: str) -> tuple[SelectedItems, int | None]:
         return await self._caller.structured(
             system=SELECTION_SYSTEM_PROMPT,
             contents=prompt,
@@ -305,7 +305,7 @@ class GeminiRecipeLLM:
 
     async def fetch_recipes(
         self, *, prompt: str
-    ) -> tuple[RecipeCandidates, Optional[int]]:
+    ) -> tuple[RecipeCandidates, int | None]:
         response = await self._caller.generate(
             system=RECIPE_SYSTEM_PROMPT,
             contents=prompt,
@@ -319,7 +319,7 @@ class GeminiNutritionLLM:
     def __init__(self, client, model: str, sleep=asyncio.sleep):
         self._caller = _GeminiCaller(client, model, sleep=sleep)
 
-    async def score(self, *, prompt: str) -> tuple[NutritionScores, Optional[int]]:
+    async def score(self, *, prompt: str) -> tuple[NutritionScores, int | None]:
         return await self._caller.structured(
             system=NUTRITION_SYSTEM_PROMPT,
             contents=prompt,
@@ -333,7 +333,7 @@ class GeminiTranslationLLMClient:
 
     async def translate(
         self, *, texts: list[str], lang: str
-    ) -> tuple[list[str], Optional[int]]:
+    ) -> tuple[list[str], int | None]:
         parsed, cost = await self._caller.structured(
             system=_TRANSLATE_SYSTEM_PROMPT,
             contents=_user_msg(texts, lang),
@@ -351,7 +351,7 @@ class GeminiSearchClient(ShelfLifeSearchClient):
         self._model = model
 
     async def lookup_shelf_life(
-        self, *, name: str, category: Optional[str]
+        self, *, name: str, category: str | None
     ) -> ShelfLifeSearchResult:
         prompt = f"Item: {name}" + (f" (category: {category})" if category else "")
         try:
@@ -361,7 +361,7 @@ class GeminiSearchClient(ShelfLifeSearchClient):
                 search=True,
                 max_output_tokens=512,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - search must degrade to unknown, not crash
             log.warning(
                 "search_transport_failed", extra={"error_class": type(exc).__name__}
             )
@@ -375,7 +375,7 @@ class GeminiSearchClient(ShelfLifeSearchClient):
                 confidence=float(data["confidence"]),
                 cost_micros_usd=cost,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - search must degrade to unknown, not crash
             log.warning(
                 "search_parse_failed", extra={"error_class": type(exc).__name__}
             )

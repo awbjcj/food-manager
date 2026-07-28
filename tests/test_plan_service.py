@@ -1,11 +1,17 @@
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.cook.models import NutritionScore, RecipeCandidate, RecipeIngredient, ScoredCandidate, SourcedRecipe
+from app.cook.models import (
+    NutritionScore,
+    RecipeCandidate,
+    RecipeIngredient,
+    ScoredCandidate,
+    SourcedRecipe,
+)
 from app.models import Household, MealPlan, MealPlanEntry, PantryItem, User
 from app.profile_service import FoodProfile
 from app.week_composer import DaySpec
@@ -20,7 +26,7 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -30,7 +36,7 @@ def session_factory():
                 telegram_id=1,
                 chat_id=1,
                 household_id=household.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db.commit()
@@ -43,7 +49,7 @@ def test_meal_plan_models_roundtrip(session_factory):
     with session_factory() as db:
         plan = MealPlan(
             household_id=1, start_date=date(2026, 7, 9), days=3,
-            chat_id=1, created_at=datetime.now(timezone.utc),
+            chat_id=1, created_at=datetime.now(UTC),
         )
         db.add(plan)
         db.commit()
@@ -72,10 +78,10 @@ def test_plan_cost_ceiling_setting(monkeypatch):
 
 
 def _profile(**kw):
-    base: dict[str, Any] = dict(
-        diet="none", exclusions=[], preferred_cuisines=[],
-        max_cook_minutes=None, household_size=2, note="",
-    )
+    base: dict[str, Any] = {
+        "diet": "none", "exclusions": [], "preferred_cuisines": [],
+        "max_cook_minutes": None, "household_size": 2, "note": "",
+    }
     base.update(kw)
     return FoodProfile(**base)
 
@@ -129,7 +135,7 @@ def seeded_pantry(session_factory):
                 category="produce", qty=1.0, purchased_on=today,
                 shelf_life_days=days, shelf_life_source="llm", ingest_shelf_life_source="llm",
                 expires_on=today + timedelta(days=days), status="active",
-                created_via="receipt", created_at=datetime.now(timezone.utc),
+                created_via="receipt", created_at=datetime.now(UTC),
             ))
         db.commit()
     return session_factory
@@ -152,7 +158,7 @@ async def test_build_plan_allocates_sequentially(seeded_pantry):
         plan, entries = await build_plan(
             session, household_id=1, days=2, profile=_profile(), composer=fake_composer,
             source=fake_source, today=today, chat_id=1, cost_ceiling_micros=1_000_000,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     assert len(entries) == 2
     assert "yogurt" not in fake_source.calls[1].include_ingredients
@@ -175,10 +181,10 @@ async def test_build_plan_dedups_recipes_across_days(seeded_pantry):
         DaySpec(day_index=1, cuisine="asian", feature_items=["chicken"]),
     ])
     with session_factory() as session:
-        plan, entries = await build_plan(
+        _plan, entries = await build_plan(
             session, household_id=1, days=2, profile=_profile(), composer=fake_composer,
             source=fake_source, today=today, chat_id=1, cost_ceiling_micros=1_000_000,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     assert len(entries) == 2
     day1_candidate = ScoredCandidate.model_validate_json(entries[1].recipe_json)
@@ -195,10 +201,10 @@ async def test_build_plan_composer_failure_uses_heuristic(seeded_pantry):
     fake_source = FakeRecipeSource([[recipe]])
     fake_composer = FakeComposer(error=RuntimeError("agent down"))
     with session_factory() as session:
-        plan, entries = await build_plan(
+        _plan, entries = await build_plan(
             session, household_id=1, days=1, profile=_profile(), composer=fake_composer,
             source=fake_source, today=today, chat_id=1, cost_ceiling_micros=1_000_000,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     assert len(entries) == 1
     # heuristic featured the two earliest-expiry items on day 0
@@ -224,7 +230,7 @@ async def test_build_plan_respects_cost_ceiling(seeded_pantry):
         plan, entries = await build_plan(
             session, household_id=1, days=3, profile=_profile(), composer=fake_composer,
             source=fake_source, today=today, chat_id=1, cost_ceiling_micros=150,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     assert len(entries) < 3
     assert plan.status == "active"
@@ -241,7 +247,7 @@ async def test_build_plan_raises_when_pantry_too_small(session_factory):
             category="dairy", qty=1.0, purchased_on=today,
             shelf_life_days=7, shelf_life_source="llm", ingest_shelf_life_source="llm",
             expires_on=today + timedelta(days=7), status="active",
-            created_via="receipt", created_at=datetime.now(timezone.utc),
+            created_via="receipt", created_at=datetime.now(UTC),
         ))
         db.commit()
     fake_source = FakeRecipeSource([])
@@ -250,7 +256,7 @@ async def test_build_plan_raises_when_pantry_too_small(session_factory):
         await build_plan(
             session, household_id=1, days=1, profile=_profile(), composer=fake_composer,
             source=fake_source, today=today, chat_id=1, cost_ceiling_micros=1_000_000,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
 
 
@@ -267,7 +273,7 @@ async def test_swap_day_advances_offset_and_dedups(seeded_pantry):
         plan, entries = await build_plan(
             session, household_id=1, days=1, profile=_profile(), composer=fake_composer,
             source=fake_source, today=today, chat_id=1, cost_ceiling_micros=1_000_000,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         entry = entries[0]
         assert entry.id is not None
@@ -305,7 +311,7 @@ def test_cancel_active_plans_supersedes(session_factory):
     with session_factory() as db:
         plan = MealPlan(
             household_id=1, start_date=date(2026, 7, 9), days=3, status="active",
-            chat_id=1, created_at=datetime.now(timezone.utc),
+            chat_id=1, created_at=datetime.now(UTC),
         )
         db.add(plan)
         db.commit()

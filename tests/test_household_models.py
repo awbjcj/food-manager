@@ -1,12 +1,18 @@
 # tests/test_household_models.py
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlmodel import Session, SQLModel, create_engine
 
-from app.models import Household, User
 from app.models import (
-    CookSession, PantryItem, PendingCorrection, Receipt, SavedRecipe,
-    ShelfLifeCache, ShoppingList,
+    CookSession,
+    Household,
+    PantryItem,
+    PendingCorrection,
+    Receipt,
+    SavedRecipe,
+    ShelfLifeCache,
+    ShoppingList,
+    User,
 )
 
 
@@ -19,13 +25,13 @@ def _engine():
 def test_household_owns_user_and_holds_profile():
     engine = _engine()
     with Session(engine) as db:
-        hh = Household(name="Smiths", diet="vegetarian", created_at=datetime.now(timezone.utc))
+        hh = Household(name="Smiths", diet="vegetarian", created_at=datetime.now(UTC))
         db.add(hh)
         db.commit()
         db.refresh(hh)
         assert hh.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=hh.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
         loaded = db.get(User, 1)
         assert loaded is not None and loaded.household_id == hh.id

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from app.callback_dispatch import CallbackResult
+from app.callbacks import EXPECTED_CALLBACK_ROUTES
 from app.callbacks.actions import handle_callback
 from app.callbacks.cook import handle_cook_callback
 from app.callbacks.help import handle_help_callback
 from app.callbacks.items import handle_item_callback
 from app.callbacks.plan import handle_plan_callback
-from app.callbacks import EXPECTED_CALLBACK_ROUTES
 from app.callbacks.registry import CallbackRegistry
 
 
@@ -19,7 +19,6 @@ def build_callback_registry() -> CallbackRegistry:
             await handle_help_callback(
                 context.callback, session_factory=context.session_factory
             )
-            return None
 
         return CallbackResult(deferred=run)
 
@@ -34,7 +33,6 @@ def build_callback_registry() -> CallbackRegistry:
                 recipe_sources=context.recipe_sources,
                 translation_llm=context.translation_llm,
             )
-            return None
 
         return CallbackResult(deferred=run)
 
@@ -56,7 +54,6 @@ def build_callback_registry() -> CallbackRegistry:
                 translation_llm=context.translation_llm,
                 recipe_sources=context.recipe_sources,
             )
-            return None
 
         return CallbackResult(deferred=run)
 
@@ -77,7 +74,6 @@ def build_callback_registry() -> CallbackRegistry:
                 now_provider=context.now_provider,
                 translation_llm=context.translation_llm,
             )
-            return None
 
         return CallbackResult(deferred=run)
 
@@ -108,7 +104,6 @@ def build_callback_registry() -> CallbackRegistry:
                 clients=context.clients,
                 translation_llm=context.translation_llm,
             )
-            return None
 
         return CallbackResult(deferred=run)
 

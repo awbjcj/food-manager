@@ -1,12 +1,12 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.bot as bot_mod
-import app.handler_support as handler_support
 import app.handlers.meta as meta_handlers
+from app import handler_support
 from app.client_set import PerUserClients
 from app.models import Household, PantryItem, User
 from app.nl_intent import NLIntent
@@ -37,7 +37,7 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -47,7 +47,7 @@ def session_factory():
                 telegram_id=1,
                 chat_id=1,
                 household_id=household.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db.commit()
@@ -56,7 +56,7 @@ def session_factory():
 
 def _seed_item(session_factory, name, item_id=None):
     with session_factory() as db:
-        today = datetime(2026, 7, 9).date()
+        today = datetime(2026, 7, 9, tzinfo=UTC).date()
         item = PantryItem(
             household_id=1,
             raw_name=name,
@@ -70,7 +70,7 @@ def _seed_item(session_factory, name, item_id=None):
             expires_on=today + timedelta(days=7),
             status="active",
             created_via="receipt",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(item)
         db.commit()
@@ -110,7 +110,7 @@ async def test_unknown_intent_replies_hint(session_factory, monkeypatch):
     await bot_mod.handle_nl_message(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
         intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="unknown")),
     )
     assert "didn't catch that" in _final_text(msg)
@@ -123,7 +123,7 @@ async def test_agent_failure_degrades_to_hint(session_factory, monkeypatch):
     await bot_mod.handle_nl_message(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
         intent_agent=FakeIntentAgentSelector(error=RuntimeError("provider down")),
     )
     assert "didn't catch that" in _final_text(msg)
@@ -137,7 +137,7 @@ async def test_commands_and_empty_text_are_ignored(session_factory, monkeypatch)
         await bot_mod.handle_nl_message(
             msg,
             session_factory=session_factory,
-            now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+            now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
             intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="unknown")),
         )
         msg.answer.assert_not_awaited()
@@ -158,7 +158,7 @@ async def test_dispatch_failure_degrades_to_hint_not_a_crash(
     await bot_mod.handle_nl_message(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
         intent_agent=FakeIntentAgentSelector(
             intent=NLIntent(kind="mark", mark_action="ate", item_name="yogurt")
         ),
@@ -176,7 +176,7 @@ async def test_mark_unique_match_applies(session_factory, monkeypatch):
     await bot_mod.handle_nl_message(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
         intent_agent=FakeIntentAgentSelector(
             intent=NLIntent(kind="mark", mark_action="ate", item_name="yogurt")
         ),
@@ -195,7 +195,7 @@ async def test_mark_ambiguous_shows_picker(session_factory, monkeypatch):
     await bot_mod.handle_nl_message(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
         intent_agent=FakeIntentAgentSelector(
             intent=NLIntent(kind="mark", mark_action="ate", item_name="milk")
         ),
@@ -213,7 +213,7 @@ async def test_mark_no_match_replies_not_found(session_factory, monkeypatch):
     await bot_mod.handle_nl_message(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
         intent_agent=FakeIntentAgentSelector(
             intent=NLIntent(kind="mark", mark_action="ate", item_name="caviar")
         ),
@@ -235,7 +235,7 @@ async def test_add_routes_raw_text_to_add_flow(session_factory, monkeypatch):
     await bot_mod.handle_nl_message(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
         intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="add")),
         clients=clients,
     )
@@ -250,7 +250,7 @@ async def test_shelf_life_question_answers(session_factory, monkeypatch):
     await bot_mod.handle_nl_message(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
         intent_agent=FakeIntentAgentSelector(
             intent=NLIntent(kind="shelf_life_question", food="whole milk")
         ),
@@ -266,7 +266,7 @@ async def test_pantry_query_renders_digest_view(session_factory, monkeypatch):
     await bot_mod.handle_nl_message(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
         intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="pantry_query")),
     )
     assert "spinach" in _final_text(msg)
@@ -279,7 +279,7 @@ async def test_pantry_query_empty_replies_clear(session_factory, monkeypatch):
     await bot_mod.handle_nl_message(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
         intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="pantry_query")),
     )
     from app.i18n import t

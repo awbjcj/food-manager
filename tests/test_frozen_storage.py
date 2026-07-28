@@ -1,17 +1,17 @@
 import sqlite3
 import subprocess
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from app.cache import get_cached, put_cached
 from app.commands import parse_callback
 from app.correction_service import CorrectPayload, apply_correct, propose_correct
 from app.frozen_shelf_life import FROZEN_DEFAULT_DAYS, resolve_frozen_days
 from app.ingest_service import ingest_photo
-from app.llm import Category, CorrectionDiff, LLMResult, ParseResult, ParsedItem
+from app.llm import Category, CorrectionDiff, LLMResult, ParsedItem, ParseResult
 from app.models import Household, PantryItem, User
 from app.pantry_service import correct_item, freeze_item
 from app.refine_service import ShelfLifeSearchResult, refine_receipt_items
@@ -24,7 +24,7 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        hh = Household(created_at=datetime.now(timezone.utc))
+        hh = Household(created_at=datetime.now(UTC))
         db.add(hh)
         db.commit()
         db.refresh(hh)
@@ -33,7 +33,7 @@ def session():
             telegram_id=1,
             chat_id=1,
             household_id=hh.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         ))
         db.commit()
         yield db
@@ -53,7 +53,7 @@ def test_pantryitem_storage_defaults(session):
         ingest_shelf_life_source="llm",
         expires_on=today,
         created_via="receipt",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     session.add(item)
     session.commit()
@@ -69,6 +69,7 @@ def test_migration_unifies_stored_on(tmp_path, monkeypatch):
         ["uv", "run", "alembic", "upgrade", "head"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     con = sqlite3.connect(str(db))
@@ -286,7 +287,7 @@ def _fresh_item(
         expires_on=today + timedelta(days=days),
         status="active",
         created_via="receipt",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     session.add(item)
     session.commit()

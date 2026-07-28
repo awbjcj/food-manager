@@ -2,27 +2,27 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from typing import Any, Literal, Optional
+from datetime import UTC, date, datetime, timedelta
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
 from app.cache import get_cached, put_cached, write_user_correction
 from app.frozen_shelf_life import storage_cache_key
-from app.llm import TextLLMClient
-from app.shelf_life_search import ShelfLifeSearchClient, resolve_search_days
 from app.i18n import LANGS
+from app.llm import TextLLMClient
 from app.models import PantryItem, ShelfLifeCache
 from app.normalization import normalize
-from app.storage_state import shelf_life_origin
 from app.shelf_life_defaults import lookup_default
+from app.shelf_life_search import ShelfLifeSearchClient, resolve_search_days
+from app.storage_state import shelf_life_origin
 from app.translation_service import upsert_name_translations
 
 
 class CorrectPayload(BaseModel):
     kind: Literal["correct"] = "correct"
-    diff: dict[str, Optional[dict[str, Any]]]
+    diff: dict[str, dict[str, Any] | None]
     name_translations: dict[str, str] = Field(default_factory=dict)
     cache_action: Literal["move", "add_new", "leave"]
     rationale: str
@@ -33,9 +33,9 @@ class CorrectPayload(BaseModel):
 class AddPayload(BaseModel):
     kind: Literal["add"] = "add"
     name: str
-    category: Optional[str] = None
+    category: str | None = None
     qty: float = Field(default=1.0, gt=0)
-    unit: Optional[str] = None
+    unit: str | None = None
     shelf_life_days: int = Field(ge=1, le=730)
     expires_on: date
     shelf_life_source: Literal["user_correction", "cache", "manual_fallback", "llm", "websearch"]
@@ -43,14 +43,14 @@ class AddPayload(BaseModel):
         "manual_user_hint", "cache", "manual_fallback", "llm"
     ]
     explicit_user_expiry: bool
-    estimated_shelf_life_days: Optional[int] = Field(default=None, ge=1, le=730)
+    estimated_shelf_life_days: int | None = Field(default=None, ge=1, le=730)
     confidence: float
 
 
 @dataclass(frozen=True)
 class AddProposal:
     payload: AddPayload
-    cost_share: Optional[int]
+    cost_share: int | None
 
 
 class NullDiff(Exception):
@@ -115,7 +115,7 @@ def item_snapshot_to_json(item: PantryItem) -> str:
     return json.dumps(_snapshot(item), sort_keys=True)
 
 
-def _cache_snapshot(row: ShelfLifeCache | None) -> Optional[dict[str, Any]]:
+def _cache_snapshot(row: ShelfLifeCache | None) -> dict[str, Any] | None:
     if row is None:
         return None
     return {
@@ -153,7 +153,7 @@ async def propose_correct(
     item: PantryItem,
     user_text: str,
     today: date,
-) -> tuple[CorrectPayload, Optional[int]]:
+) -> tuple[CorrectPayload, int | None]:
     cache_row = get_cached(session, household_id, _cache_key_for_item(item))
     diff, cost = await llm.parse_correct(
         item_snapshot=_snapshot(item),
@@ -205,7 +205,7 @@ async def propose_correct(
     elif new_days is not None:
         new_expires = origin + timedelta(days=new_days)
 
-    payload_diff: dict[str, Optional[dict[str, Any]]] = {
+    payload_diff: dict[str, dict[str, Any] | None] = {
         "name": (
             {"old": item.raw_name, "new": corrected_name}
             if corrected_name is not None and corrected_name != item.raw_name
@@ -330,14 +330,14 @@ async def propose_add(
     user_text: str,
     today: date,
     tz: str,
-    search: Optional[ShelfLifeSearchClient] = None,
-) -> tuple[list[AddProposal], Optional[int]]:
+    search: ShelfLifeSearchClient | None = None,
+) -> tuple[list[AddProposal], int | None]:
     items, total_cost = await llm.parse_add(user_text=user_text, today=today, tz=tz)
     if not items:
         return [], total_cost
 
     if total_cost is None:
-        shares: list[Optional[int]] = [None] * len(items)
+        shares: list[int | None] = [None] * len(items)
     else:
         base = total_cost // len(items)
         remainder = total_cost - base * len(items)
@@ -347,7 +347,7 @@ async def propose_add(
     for parsed, cost_share in zip(items, shares):
         normalized = normalize(parsed.name)
         category = parsed.category
-        search_cost: Optional[int] = None
+        search_cost: int | None = None
 
         if parsed.explicit_user_expiry:
             if parsed.shelf_life_days is not None:
@@ -446,7 +446,7 @@ def apply_add(
         status="active",
         created_via="manual",
         source_receipt_id=None,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     session.add(item)
     session.flush()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 from sqlmodel import Session
@@ -16,7 +16,7 @@ class FoodProfile(BaseModel):
     diet: str = "none"
     exclusions: list[str] = Field(default_factory=list)
     preferred_cuisines: list[str] = Field(default_factory=list)
-    max_cook_minutes: Optional[int] = None
+    max_cook_minutes: int | None = None
     household_size: int = 1
     note: str = ""
 
@@ -44,10 +44,10 @@ def apply_profile_to_household(household: Household, profile: FoodProfile) -> No
 async def update_profile_from_sentence(
     session: Session,
     *,
-    llm: "ProfileUpdateLLMClient",
+    llm: ProfileUpdateLLMClient,
     household: Household,
     sentence: str,
-) -> tuple[FoodProfile, Optional[int]]:
+) -> tuple[FoodProfile, int | None]:
     current = profile_from_household(household)
     merged, cost = await llm.parse_profile_update(current=current, sentence=sentence)
     apply_profile_to_household(household, merged)

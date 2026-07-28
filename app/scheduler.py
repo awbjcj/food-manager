@@ -2,21 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
-from typing import Awaitable, Callable, Optional
+from datetime import UTC, date, datetime
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.base import JobLookupError
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlmodel import Session, select
 
-import app.views as views
+from app import views
 from app.models import PantryItem, User
 from app.pantry_service import list_digest_due
 from app.pending_service import sweep_expired
 from app.renderer import build_digest_keyboard
 from app.telegram_ui import to_aiogram_keyboard
-
 
 log = logging.getLogger(__name__)
 SessionFactory = Callable[[], Session]
@@ -31,7 +30,7 @@ class DigestPayload:
 
 def build_digest_payload(
     session: Session, *, user_id: int, today: date
-) -> Optional[DigestPayload]:
+) -> DigestPayload | None:
     user = session.get(User, user_id)
     if user is None:
         return None
@@ -99,7 +98,7 @@ async def send_digest_with_retry(
     today_provider: TodayProvider,
     retry_sleep_seconds: int = 60,
     translation_llm=None,
-    on_final_failure: Optional[Callable[[int, Exception], Awaitable[None]]] = None,
+    on_final_failure: Callable[[int, Exception], Awaitable[None]] | None = None,
 ) -> None:
     try:
         await send_digest_once(
@@ -110,7 +109,7 @@ async def send_digest_with_retry(
             translation_llm=translation_llm,
         )
         return
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - digest send retries, must not crash the scheduler
         log.warning(
             "digest_send_failed",
             extra={
@@ -129,7 +128,7 @@ async def send_digest_with_retry(
             today_provider=today_provider,
             translation_llm=translation_llm,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - digest send retries, must not crash the scheduler
         log.warning(
             "digest_send_failed",
             extra={
@@ -226,10 +225,10 @@ def register_all_user_digests(
 def _sweep_job(session_factory: SessionFactory) -> None:
     try:
         with session_factory() as session:
-            swept = sweep_expired(session, now=datetime.now(timezone.utc))
+            swept = sweep_expired(session, now=datetime.now(UTC))
             if swept:
                 log.info("pending_swept", extra={"count": swept})
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - sweep job must not crash the scheduler
         log.warning(
             "pending_sweep_failed",
             extra={"error_class": type(exc).__name__},
@@ -255,10 +254,10 @@ def _cook_sweep_job(session_factory: SessionFactory) -> None:
 
     try:
         with session_factory() as session:
-            swept = sweep_expired_cooks(session, now=datetime.now(timezone.utc))
+            swept = sweep_expired_cooks(session, now=datetime.now(UTC))
             if swept:
                 log.info("cook_swept", extra={"count": swept})
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - sweep job must not crash the scheduler
         log.warning(
             "cook_sweep_failed",
             extra={"error_class": type(exc).__name__},

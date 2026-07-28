@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 
@@ -30,7 +30,7 @@ def _context():
     return CallbackContext(
         callback=_Callback(),
         session_factory=lambda: None,  # type: ignore[arg-type,return-value]
-        now_provider=lambda _tz: datetime(2026, 7, 17),
+        now_provider=lambda _tz: datetime(2026, 7, 17, tzinfo=UTC),
         clients=PerUserClients.for_tests(),
     )
 

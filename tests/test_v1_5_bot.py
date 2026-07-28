@@ -1,11 +1,11 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.bot as bot_mod
-import app.handler_support as handler_support
+from app import handler_support
 from app.client_set import PerUserClients
 from app.correction_service import CorrectPayload, correct_payload_to_json
 from app.llm import CorrectionDiff, ProposedAddItem
@@ -23,13 +23,13 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
         db.add(User(telegram_id=1, chat_id=99, household_id=household.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
     return make
 
@@ -77,7 +77,7 @@ def _item(session_factory) -> int:
             expires_on=date(2026, 6, 2),
             status="active",
             created_via="manual",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(item)
         db.commit()
@@ -109,7 +109,7 @@ def _pending_correct(session_factory) -> tuple[int, int]:
             snapshot_json=None,
             cost_micros_usd=100,
             chat_id=99,
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
         assert pending.id is not None
         return pending.id, item_id
@@ -134,7 +134,7 @@ async def test_handle_correct_creates_pending_and_sends_diff(session_factory, mo
     await bot_mod.handle_correct(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=UTC),
         clients=PerUserClients.for_tests(text=fake),
     )
 
@@ -164,7 +164,7 @@ async def test_handle_correct_null_diff_does_not_create_pending(session_factory,
     await bot_mod.handle_correct(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=UTC),
         clients=PerUserClients.for_tests(text=fake),
     )
 
@@ -195,7 +195,7 @@ async def test_correct_reply_routes_to_proposal(session_factory, monkeypatch):
     await bot_mod.handle_correct_reply(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=UTC),
         clients=PerUserClients.for_tests(text=fake),
     )
 
@@ -218,7 +218,7 @@ async def test_correct_reply_ignores_non_marked_reply(session_factory, monkeypat
     await bot_mod.handle_correct_reply(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=UTC),
         clients=PerUserClients.for_tests(text=fake),
     )
 
@@ -258,7 +258,7 @@ async def test_handle_add_sends_one_pending_message_per_item(session_factory, mo
     await bot_mod.handle_add(
         msg,
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=UTC),
         clients=PerUserClients.for_tests(text=fake),
     )
 
@@ -279,7 +279,7 @@ async def test_apply_and_cancel_callbacks(session_factory, monkeypatch):
     await bot_mod.handle_callback(
         _cb(f"apply:{pending_id}"),
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=UTC),
     )
 
     with session_factory() as db:
@@ -292,7 +292,7 @@ async def test_apply_and_cancel_callbacks(session_factory, monkeypatch):
     await bot_mod.handle_callback(
         _cb(f"cancel:{pending_id}"),
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=UTC),
     )
     with session_factory() as db:
         assert db.get(PendingCorrection, pending_id).status == "cancelled"
@@ -305,14 +305,14 @@ async def test_apply_expired_pending_refuses_mutation(session_factory, monkeypat
     pending_id, item_id = _pending_correct(session_factory)
     with session_factory() as db:
         pending = db.get(PendingCorrection, pending_id)
-        pending.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        pending.expires_at = datetime.now(UTC) - timedelta(minutes=1)
         db.add(pending)
         db.commit()
 
     await bot_mod.handle_callback(
         _cb(f"apply:{pending_id}"),
         session_factory=session_factory,
-        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=timezone.utc),
+        now_provider=lambda tz: datetime(2026, 5, 27, tzinfo=UTC),
     )
 
     with session_factory() as db:

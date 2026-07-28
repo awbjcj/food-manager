@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Optional, Protocol
+from typing import Protocol
 
 from app.cook.models import NutritionScores, RecipeCandidates, SelectedItems
 from app.llm import (
@@ -46,19 +46,19 @@ SCHEMA_REPAIR_INSTRUCTION = (
 class SelectionLLMClient(Protocol):
     async def select_items(
         self, *, prompt: str
-    ) -> tuple[SelectedItems, Optional[int]]: ...
+    ) -> tuple[SelectedItems, int | None]: ...
 
 
 class RecipeLLMClient(Protocol):
     async def fetch_recipes(
         self, *, prompt: str
-    ) -> tuple[RecipeCandidates, Optional[int]]: ...
+    ) -> tuple[RecipeCandidates, int | None]: ...
 
 
 class NutritionLLMClient(Protocol):
     async def score(
         self, *, prompt: str
-    ) -> tuple[NutritionScores, Optional[int]]: ...
+    ) -> tuple[NutritionScores, int | None]: ...
 
 
 class _AnthropicJSONClient:
@@ -124,7 +124,7 @@ class AnthropicSelectionLLM(SelectionLLMClient):
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
         self._client = _AnthropicJSONClient(sdk, model, sleep=sleep)
 
-    async def select_items(self, *, prompt: str) -> tuple[SelectedItems, Optional[int]]:
+    async def select_items(self, *, prompt: str) -> tuple[SelectedItems, int | None]:
         return await self._client._call(SELECTION_SYSTEM_PROMPT, prompt, SelectedItems)
 
 
@@ -139,7 +139,7 @@ class AnthropicRecipeLLM(RecipeLLMClient):
 
     async def fetch_recipes(
         self, *, prompt: str
-    ) -> tuple[RecipeCandidates, Optional[int]]:
+    ) -> tuple[RecipeCandidates, int | None]:
         return await self._client._call(RECIPE_SYSTEM_PROMPT, prompt, RecipeCandidates)
 
 
@@ -147,7 +147,7 @@ class AnthropicNutritionLLM(NutritionLLMClient):
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
         self._client = _AnthropicJSONClient(sdk, model, sleep=sleep)
 
-    async def score(self, *, prompt: str) -> tuple[NutritionScores, Optional[int]]:
+    async def score(self, *, prompt: str) -> tuple[NutritionScores, int | None]:
         return await self._client._call(NUTRITION_SYSTEM_PROMPT, prompt, NutritionScores)
 
 
@@ -217,7 +217,7 @@ class OpenAISelectionLLM(SelectionLLMClient):
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
         self._client = _OpenAIJSONClient(sdk, model, sleep=sleep)
 
-    async def select_items(self, *, prompt: str) -> tuple[SelectedItems, Optional[int]]:
+    async def select_items(self, *, prompt: str) -> tuple[SelectedItems, int | None]:
         return await self._client._call(SELECTION_SYSTEM_PROMPT, prompt, SelectedItems)
 
 
@@ -227,7 +227,7 @@ class OpenAIRecipeLLM(RecipeLLMClient):
 
     async def fetch_recipes(
         self, *, prompt: str
-    ) -> tuple[RecipeCandidates, Optional[int]]:
+    ) -> tuple[RecipeCandidates, int | None]:
         return await self._client._call(RECIPE_SYSTEM_PROMPT, prompt, RecipeCandidates)
 
 
@@ -235,5 +235,5 @@ class OpenAINutritionLLM(NutritionLLMClient):
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
         self._client = _OpenAIJSONClient(sdk, model, sleep=sleep)
 
-    async def score(self, *, prompt: str) -> tuple[NutritionScores, Optional[int]]:
+    async def score(self, *, prompt: str) -> tuple[NutritionScores, int | None]:
         return await self._client._call(NUTRITION_SYSTEM_PROMPT, prompt, NutritionScores)

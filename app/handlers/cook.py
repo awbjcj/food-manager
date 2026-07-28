@@ -2,32 +2,33 @@ from __future__ import annotations
 
 import json as _json
 import logging
-from datetime import datetime, timezone
-from typing import Callable
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from sqlmodel import Session
 
+from app import handler_support, views
 from app.client_set import PerUserClients
-from app.i18n import t
 from app.cook import (
     NotEnoughItems,
     create_cook_session,
     load_cook_session,
     mark_status,
     run_cook,
+)
+from app.cook import (
     set_message_id as set_cook_message_id,
 )
 from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
-import app.handler_support as handler_support
-import app.views as views
+from app.i18n import t
 from app.models import Household, User
-from app.telegram_ui import to_aiogram_keyboard
+from app.profile_service import profile_from_household
 from app.renderer import (
     CallbackButton,
     build_cook_result_keyboard,
     build_cook_round_keyboard,
 )
-from app.profile_service import profile_from_household
+from app.telegram_ui import to_aiogram_keyboard
 
 MEAL_TYPES = ["Dinner", "Lunch", "Breakfast", "Dessert", "Snack", "Surprise me"]
 DEFAULT_CUISINES = ["Italian", "Mexican", "Chinese", "American", "Surprise me"]
@@ -61,7 +62,7 @@ async def handle_cook(
             session,
             household_id=user.household_id,
             chat_id=msg.chat.id,
-            now=now.astimezone(timezone.utc),
+            now=now.astimezone(UTC),
         )
         assert cook.id is not None
         keyboard = to_aiogram_keyboard(
@@ -111,7 +112,7 @@ async def _safe_edit_bot(
             text=text,
             reply_markup=keyboard,
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - background edit is best-effort
         log.warning("cook_edit_failed", extra={"error_class": type(exc).__name__})
 
 
@@ -178,7 +179,7 @@ async def run_cook_and_render(
                 text="Not enough usable items - send a receipt or /add a few things.",
             )
             return
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - /cook must never crash the bot
             log.warning(
                 "cook_pipeline_failed", extra={"error_class": type(exc).__name__}
             )

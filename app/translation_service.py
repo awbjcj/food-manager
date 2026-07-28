@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 from sqlmodel import Session, col, select
 
@@ -107,7 +107,7 @@ async def translate_texts(
             # leaves every miss to fall back to English consistently.
             for src, dst in zip(misses, translations):
                 result[src] = dst
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - translation falls back to English, never blocks
             session.rollback()
             log.warning(
                 "translation_failed_fallback_english",

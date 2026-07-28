@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Optional, Sequence, TypeAlias, cast
+from typing import Literal, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.i18n import LANGS
-from app.providers import ALL_PROVIDERS, Provider
 from app.pantry_service import (
     ALLOWED_CATEGORIES,
     NUDGE_CODES,
-    ListFilter,
     SNOOZE_DAYS_DEFAULT,
     SNOOZE_DAYS_MAX,
     SNOOZE_DAYS_MIN,
+    ListFilter,
 )
+from app.providers import ALL_PROVIDERS, Provider
 
 
 class CommandError(Exception):
@@ -88,7 +89,7 @@ ALLOWED_LLM_PROVIDERS: tuple[Provider, ...] = ALL_PROVIDERS
 _LLM_USAGE = f"usage: /llm [{'|'.join(ALLOWED_LLM_PROVIDERS)}]"
 
 
-def parse_llm_provider(args: Sequence[str]) -> Optional[LLMProviderName]:
+def parse_llm_provider(args: Sequence[str]) -> LLMProviderName | None:
     if len(args) > 1:
         raise CommandError(_LLM_USAGE)
     if not args:
@@ -113,7 +114,7 @@ def parse_plan_arg(args: Sequence[str]) -> int:
     return days
 
 
-def parse_lang(args: Sequence[str]) -> Optional[str]:
+def parse_lang(args: Sequence[str]) -> str | None:
     if len(args) > 1:
         raise CommandError(f"usage: /lang [{'|'.join(LANGS)}]")
     if not args:
@@ -124,7 +125,7 @@ def parse_lang(args: Sequence[str]) -> Optional[str]:
     return token
 
 
-def parse_invite_mode(args: Sequence[str]) -> Optional[int]:
+def parse_invite_mode(args: Sequence[str]) -> int | None:
     """Parse ``/invite`` arguments into a ``max_uses`` value.
 
     No argument -> 1 (single-use). ``family`` -> None (reusable until expiry).
@@ -182,16 +183,16 @@ Verb = Literal[
 @dataclass(frozen=True)
 class CallbackAction:
     verb: Verb
-    item_id: Optional[int]
-    option_index: Optional[int] = None
-    round_name: Optional[str] = None
+    item_id: int | None
+    option_index: int | None = None
+    round_name: str | None = None
     back_to: str = "digest"
 
 
 def parse_callback(data: str) -> CallbackAction:
     if data == "show:all":
         return CallbackAction(verb="show_all", item_id=None)
-    if data.startswith("apply:") or data.startswith("cancel:"):
+    if data.startswith(("apply:", "cancel:")):
         verb, _, raw_id = data.partition(":")
         try:
             pending_id = int(raw_id)
@@ -336,8 +337,8 @@ ItemKind = Literal["open", "list", "corr", "nudge", "ctext", "rm", "rmok"]
 @dataclass(frozen=True)
 class ItemAction:
     kind: ItemKind
-    item_id: Optional[int] = None
-    nudge_code: Optional[str] = None
+    item_id: int | None = None
+    nudge_code: str | None = None
     back_to: str = "digest"
 
 
@@ -383,7 +384,7 @@ ItemRoute = Literal[
     "item_rm",
     "item_rmok",
 ]
-CallbackRoute: TypeAlias = Verb | ItemRoute | Literal["help"]
+type CallbackRoute = Verb | ItemRoute | Literal["help"]
 
 
 @dataclass(frozen=True)
@@ -410,7 +411,7 @@ class HelpCallbackRequest:
     route: Literal["help"] = "help"
 
 
-CallbackRequest: TypeAlias = (
+type CallbackRequest = (
     ActionCallbackRequest | ItemCallbackRequest | HelpCallbackRequest
 )
 
@@ -441,7 +442,7 @@ def parse_pantry_arg(args: Sequence[str]) -> Literal["all", "digest"] | int:
 _CORRECT_REPLY_MARKER = re.compile(r"\[correct:#(\d+)\]")
 
 
-def parse_correct_reply_marker(text: Optional[str]) -> Optional[int]:
+def parse_correct_reply_marker(text: str | None) -> int | None:
     if not text:
         return None
     match = _CORRECT_REPLY_MARKER.search(text)

@@ -17,7 +17,7 @@ without an import cycle.
 from __future__ import annotations
 
 import logging
-from typing import Generic, Literal, TypeVar
+from typing import Literal, TypeVar
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class LLMProviderNotConfigured(ValueError):
 T = TypeVar("T")
 
 
-class ProviderSelector(Generic[T]):
+class ProviderSelector[T]:
     """Maps a provider name to a capability client, with optional fallback.
 
     ``clients`` is ``{provider_name: client}`` for the providers that can serve

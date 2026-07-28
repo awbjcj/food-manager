@@ -1,12 +1,12 @@
-from datetime import datetime, timedelta, timezone
 import os
-from pathlib import Path
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from app.cook.session_service import (
     COOK_TTL_MINUTES,
@@ -23,19 +23,19 @@ def _session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     db = Session(engine)
-    household = Household(created_at=datetime.now(timezone.utc))
+    household = Household(created_at=datetime.now(UTC))
     db.add(household)
     db.commit()
     db.refresh(household)
     assert household.id is not None
-    db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(timezone.utc)))
+    db.add(User(telegram_id=1, chat_id=1, household_id=household.id, created_at=datetime.now(UTC)))
     db.commit()
     return db
 
 
 def test_cook_session_row_persists():
     with _session() as db:
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        now = datetime.now(UTC).replace(tzinfo=None)
         row = CookSession(
             household_id=1, status="collecting", chat_id=1,
             selected_item_ids="[]", created_at=now,
@@ -51,7 +51,7 @@ def test_cook_session_row_persists():
 
 def test_create_supersedes_previous_active():
     with _session() as db:
-        now = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
         first = create_cook_session(db, household_id=1, chat_id=1, now=now)
         second = create_cook_session(db, household_id=1, chat_id=1, now=now)
         db.refresh(first)
@@ -64,7 +64,7 @@ def test_create_supersedes_previous_active():
 
 def test_accrue_cost_sums():
     with _session() as db:
-        now = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
         row = create_cook_session(db, household_id=1, chat_id=1, now=now)
         accrue_cost(db, cook=row, add_micros=100)
         accrue_cost(db, cook=row, add_micros=50)
@@ -73,7 +73,7 @@ def test_accrue_cost_sums():
 
 def test_sweep_expires_old_collecting():
     with _session() as db:
-        old = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+        old = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
         row = create_cook_session(db, household_id=1, chat_id=1, now=old)
         swept = sweep_expired_cooks(db, now=old + timedelta(minutes=COOK_TTL_MINUTES + 1))
         db.refresh(row)
@@ -83,7 +83,7 @@ def test_sweep_expires_old_collecting():
 
 def test_mark_status_rejects_invalid_status_without_mutating():
     with _session() as db:
-        now = datetime(2026, 5, 30, 12, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
         row = create_cook_session(db, household_id=1, chat_id=1, now=now)
 
         with pytest.raises(ValueError):
@@ -100,6 +100,7 @@ def test_migration_0005_creates_cooksession(tmp_path):
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         env={**dict(os.environ), "DATABASE_PATH": str(db_path)},
         capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1],
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     engine = sa.create_engine(f"sqlite:///{db_path}")
@@ -110,11 +111,11 @@ def test_stats_counts_cook_cost():
     from app.pantry_service import compute_stats
 
     with _session() as db:
-        now = datetime(2026, 5, 30, 12, 0)
+        now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
         db.add(CookSession(household_id=1, status="done", chat_id=1, selected_item_ids="[]",
                            llm_cost_micros_usd=500, created_at=now,
                            expires_at=now))
         db.commit()
-        stats = compute_stats(db, household_id=1, now=datetime(2026, 5, 30, 13, 0, tzinfo=timezone.utc))
+        stats = compute_stats(db, household_id=1, now=datetime(2026, 5, 30, 13, 0, tzinfo=UTC))
         assert stats.cook_cost_micros_usd == 500
         assert stats.cook_count == 1

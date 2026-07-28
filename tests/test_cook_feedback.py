@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine
@@ -27,15 +27,15 @@ def _scored(title="Pasta", cuisine="italian", ingredients=("pasta", "tomato")):
 def _engine_with_done_cook(candidates):
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
-    now = datetime(2026, 5, 30, 12, 0)
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.add(CookSession(
             household_id=1, status="done", chat_id=1, selected_item_ids="[]",
             candidates_json=json.dumps([c.model_dump() for c in candidates]),
@@ -47,7 +47,7 @@ def _engine_with_done_cook(candidates):
 
 def test_set_feedback_records_verdict_and_timestamp():
     engine = _engine_with_done_cook([_scored()])
-    now = datetime(2026, 5, 30, 12, 5, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 12, 5, tzinfo=UTC)
     with Session(engine) as db:
         cook = db.exec(__import__("sqlmodel").select(CookSession)).one()
         set_feedback(db, cook=cook, feedback="liked", now=now)
@@ -59,7 +59,7 @@ def test_set_feedback_records_verdict_and_timestamp():
 
 def test_set_feedback_rejects_bad_value():
     engine = _engine_with_done_cook([_scored()])
-    now = datetime(2026, 5, 30, 12, 5, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 12, 5, tzinfo=UTC)
     with Session(engine) as db:
         cook = db.exec(__import__("sqlmodel").select(CookSession)).one()
         with pytest.raises(ValueError):
@@ -70,7 +70,7 @@ def test_set_feedback_rejects_bad_value():
 
 def test_feedback_signal_reconstructs_for_v36():
     engine = _engine_with_done_cook([_scored(cuisine="thai", ingredients=("tofu", "basil"))])
-    now = datetime(2026, 5, 30, 12, 5, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 30, 12, 5, tzinfo=UTC)
     with Session(engine) as db:
         cook = db.exec(__import__("sqlmodel").select(CookSession)).one()
         set_feedback(db, cook=cook, feedback="liked", now=now)

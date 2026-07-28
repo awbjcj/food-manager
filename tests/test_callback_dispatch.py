@@ -89,7 +89,6 @@ async def test_apply_supports_ack_only_and_direct_deferred_effects():
     async def deferred():
         nonlocal called
         called = True
-        return None
 
     await apply(cb, CallbackResult(ack="saved", deferred=deferred))
 

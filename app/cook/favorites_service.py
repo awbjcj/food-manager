@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Optional
 
 from sqlmodel import Session, select
 
@@ -17,7 +16,7 @@ from app.pending_service import utc_naive
 @dataclass
 class SaveResult:
     saved: bool
-    recipe_id: Optional[int]
+    recipe_id: int | None
     duplicate: bool
 
 
@@ -60,7 +59,7 @@ def list_saved(session: Session, *, household_id: int) -> list[SavedRecipe]:
 
 def load_saved(
     session: Session, *, household_id: int, recipe_id: int
-) -> Optional[SavedRecipe]:
+) -> SavedRecipe | None:
     row = session.get(SavedRecipe, recipe_id)
     if row is None or row.household_id != household_id:
         return None

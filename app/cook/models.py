@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -16,18 +16,18 @@ class SelectedItems(BaseModel):
 
 class RecipeIngredient(BaseModel):
     name: str
-    qty: Optional[float] = None
-    unit: Optional[str] = None
+    qty: float | None = None
+    unit: str | None = None
 
 
 class RecipeCandidate(BaseModel):
     title: str
     cuisine: str
-    source_url: Optional[str] = None
+    source_url: str | None = None
     ingredients: list[RecipeIngredient]
     method_gist: str
     deliciousness: float = Field(ge=0.0, le=1.0, default=0.5)
-    image_url: Optional[str] = None
+    image_url: str | None = None
 
 
 class RecipeCandidates(BaseModel):
@@ -57,21 +57,21 @@ class Purpose(str, Enum):
 class RecipeCriteria:
     include_ingredients: list[str]
     purpose: Purpose
-    meal_type: Optional[str] = None
-    cuisine: Optional[str] = None
-    diet: Optional[str] = None
+    meal_type: str | None = None
+    cuisine: str | None = None
+    diet: str | None = None
     intolerances: list[str] = field(default_factory=list)
     exclude_ingredients: list[str] = field(default_factory=list)
-    max_ready_minutes: Optional[int] = None
+    max_ready_minutes: int | None = None
     number: int = 6
     offset: int = 0
-    steering: Optional[str] = None
+    steering: str | None = None
 
 
 class SourcedRecipe(BaseModel):
     recipe: RecipeCandidate
     nutrition: NutritionScore
-    external_id: Optional[str] = None
+    external_id: str | None = None
 
 
 class ScoredCandidate(BaseModel):
@@ -79,5 +79,5 @@ class ScoredCandidate(BaseModel):
     nutrition: NutritionScore
     expiry_use: float = Field(ge=0.0, le=1.0)
     final_score: float
-    external_id: Optional[str] = None
+    external_id: str | None = None
     shopping_list: list[str] = Field(default_factory=list)

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -12,13 +12,18 @@ from app.commands import (
     parse_digest_at,
     parse_item_callback,
     parse_item_id_arg,
-    parse_llm_provider,
     parse_list_filter,
+    parse_llm_provider,
     parse_pantry_arg,
     parse_snooze_args,
     parse_tz,
 )
-from app.cook.models import NutritionScore, RecipeCandidate, RecipeIngredient, ScoredCandidate
+from app.cook.models import (
+    NutritionScore,
+    RecipeCandidate,
+    RecipeIngredient,
+    ScoredCandidate,
+)
 from app.ingest_service import IngestSummary
 from app.models import PantryItem
 from app.pantry_service import ListFilter, Stats
@@ -136,21 +141,21 @@ def test_parse_correct_reply_marker():
 
 
 def _summary(**kwargs) -> IngestSummary:
-    values: dict = dict(
-        receipt_id=1,
-        inserted_food_count=2,
-        inserted_item_ids=[42, 43],
-        inserted_item_names=["Whole Milk 1 gal", "Bananas"],
-        inserted_item_expires_on=[date(2026, 5, 31), date(2026, 5, 29)],
-        inserted_item_shelf_life_days=[7, 3],
-        skipped_non_food_count=0,
-        skipped_low_confidence_count=0,
-        skipped_low_confidence_names=[],
-        low_confidence_inserted_ids=[],
-        purchase_date=date(2026, 5, 26),
-        purchase_date_assumed=False,
-        cost_micros_usd=18000,
-    )
+    values: dict = {
+        "receipt_id": 1,
+        "inserted_food_count": 2,
+        "inserted_item_ids": [42, 43],
+        "inserted_item_names": ["Whole Milk 1 gal", "Bananas"],
+        "inserted_item_expires_on": [date(2026, 5, 31), date(2026, 5, 29)],
+        "inserted_item_shelf_life_days": [7, 3],
+        "skipped_non_food_count": 0,
+        "skipped_low_confidence_count": 0,
+        "skipped_low_confidence_names": [],
+        "low_confidence_inserted_ids": [],
+        "purchase_date": date(2026, 5, 26),
+        "purchase_date_assumed": False,
+        "cost_micros_usd": 18000,
+    }
     values.update(kwargs)
     return IngestSummary(**values)  # type: ignore[arg-type]
 
@@ -204,7 +209,7 @@ def _pantry_item(name, expires_on, item_id):
         expires_on=expires_on,
         status="active",
         created_via="manual",
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
 
 

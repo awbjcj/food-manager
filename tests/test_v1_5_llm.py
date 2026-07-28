@@ -4,6 +4,7 @@ from datetime import date
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from app.llm import (
     AnthropicTextLLMClient,
@@ -49,9 +50,9 @@ class _OpenAIParsedResponse:
 
 
 def test_text_llm_models_validate_ranges():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         CorrectionDiff(shelf_life_days=0, cache_action="leave", rationale="x", confidence=0.5)
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ProposedAddItem(name="Milk", explicit_user_expiry=False, confidence=1.5)
 
 

@@ -2,83 +2,105 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Awaitable, Callable
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from sqlmodel import Session
 
+from app import handler_support
+from app.callback_dispatch import (
+    answer as dispatch_answer,
+)
+from app.callback_dispatch import (
+    apply as apply_callback_result,
+)
+from app.callbacks import CallbackContext
+from app.callbacks.actions import (
+    handle_callback,  # noqa: F401 - compatibility re-export
+)
+from app.callbacks.cook import (
+    handle_cook_callback,  # noqa: F401 - compatibility re-export
+)
+from app.callbacks.help import (
+    handle_help_callback,  # noqa: F401 - compatibility re-export
+)
+from app.callbacks.items import (
+    handle_item_callback,  # noqa: F401 - compatibility re-export
+)
+from app.callbacks.plan import (
+    handle_plan_callback,  # noqa: F401 - compatibility re-export
+)
+from app.callbacks.routes import build_callback_registry
+from app.client_set import PerUserClients
 from app.commands import (
     CommandError,
     parse_callback_request,
 )
-from app.client_set import PerUserClients
-from app.callbacks import CallbackContext
-from app.callbacks.routes import build_callback_registry
-from app.callbacks.actions import handle_callback  # noqa: F401 - compatibility re-export
-from app.callbacks.cook import handle_cook_callback  # noqa: F401 - compatibility re-export
-from app.callbacks.help import handle_help_callback  # noqa: F401 - compatibility re-export
-from app.callbacks.items import handle_item_callback  # noqa: F401 - compatibility re-export
-from app.callbacks.plan import handle_plan_callback  # noqa: F401 - compatibility re-export
-from app.i18n import t
-import app.handler_support as handler_support
-from app.models import User
-from app.callback_dispatch import (
-    answer as dispatch_answer,
-    apply as apply_callback_result,
-)
-
-from app.handlers.household import (  # noqa: F401
-    COMMANDS as HOUSEHOLD_COMMANDS,
-    handle_start,
-    handle_invite,
-    handle_join,
-    handle_household,
-    handle_leave,
-    handle_remove,
-    handle_tz,
-    handle_lang,
-    handle_digest_at,
-)
-from app.handlers.pantry import (  # noqa: F401
-    COMMANDS as PANTRY_COMMANDS,
-    handle_list,
-    handle_pantry,
-    handle_add,
-    handle_ate,
-    handle_toss,
-    handle_delete,
-    handle_snooze,
-    handle_correct,
-    handle_correct_reply,
-    handle_stats,
-)
-from app.handlers.shopping import (  # noqa: F401
-    COMMANDS as SHOPPING_COMMANDS,
-    handle_shopping,
-    handle_favorites,
-)
-from app.handlers.plan import (  # noqa: F401
-    COMMANDS as PLAN_COMMANDS,
-    handle_plan,
-)
-from app.handlers.meta import (  # noqa: F401
-    COMMANDS as META_COMMANDS,
-    _answer_shelf_life,  # noqa: F401 - compatibility re-export
-    handle_nl_message,
-    handle_llm,
-    handle_prefs,
-    handle_help,
-    handle_photo,
-)
-from app.handlers.cook import (  # noqa: F401
+from app.handlers.cook import (
     COMMANDS as COOK_COMMANDS,
-    handle_cook,
+)
+from app.handlers.cook import (
+    handle_cook,  # noqa: F401 - compatibility re-export
     run_cook_and_render,  # noqa: F401 - compatibility re-export
 )
+from app.handlers.household import (
+    COMMANDS as HOUSEHOLD_COMMANDS,
+)
+from app.handlers.household import (
+    handle_digest_at,  # noqa: F401 - compatibility re-export
+    handle_household,  # noqa: F401 - compatibility re-export
+    handle_invite,  # noqa: F401 - compatibility re-export
+    handle_join,  # noqa: F401 - compatibility re-export
+    handle_lang,  # noqa: F401 - compatibility re-export
+    handle_leave,  # noqa: F401 - compatibility re-export
+    handle_remove,  # noqa: F401 - compatibility re-export
+    handle_start,  # noqa: F401 - compatibility re-export
+    handle_tz,  # noqa: F401 - compatibility re-export
+)
+from app.handlers.meta import (
+    COMMANDS as META_COMMANDS,
+)
+from app.handlers.meta import (
+    _answer_shelf_life,  # noqa: F401 - compatibility re-export
+    handle_help,  # noqa: F401 - compatibility re-export
+    handle_llm,  # noqa: F401 - compatibility re-export
+    handle_nl_message,
+    handle_photo,
+    handle_prefs,  # noqa: F401 - compatibility re-export
+)
+from app.handlers.pantry import (
+    COMMANDS as PANTRY_COMMANDS,
+)
+from app.handlers.pantry import (
+    handle_add,  # noqa: F401 - compatibility re-export
+    handle_ate,  # noqa: F401 - compatibility re-export
+    handle_correct,  # noqa: F401 - compatibility re-export
+    handle_correct_reply,
+    handle_delete,  # noqa: F401 - compatibility re-export
+    handle_list,  # noqa: F401 - compatibility re-export
+    handle_pantry,  # noqa: F401 - compatibility re-export
+    handle_snooze,  # noqa: F401 - compatibility re-export
+    handle_stats,  # noqa: F401 - compatibility re-export
+    handle_toss,  # noqa: F401 - compatibility re-export
+)
+from app.handlers.plan import (
+    COMMANDS as PLAN_COMMANDS,
+)
+from app.handlers.plan import (
+    handle_plan,  # noqa: F401 - compatibility re-export
+)
+from app.handlers.shopping import (
+    COMMANDS as SHOPPING_COMMANDS,
+)
+from app.handlers.shopping import (
+    handle_favorites,  # noqa: F401 - compatibility re-export
+    handle_shopping,  # noqa: F401 - compatibility re-export
+)
+from app.i18n import t
+from app.models import User
 from app.telegram_ui import to_aiogram_keyboard  # noqa: F401 - compatibility re-export
-
 
 DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8

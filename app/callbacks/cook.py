@@ -2,44 +2,42 @@ from __future__ import annotations
 
 import json as _json
 import logging
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable
 
 from sqlalchemy import update
 from sqlmodel import Session
 
+from app import handler_support, views
+from app.callback_dispatch import edit_or_resend
+from app.client_set import PerUserClients
 from app.commands import (
     CommandError,
     parse_callback,
 )
-from app.client_set import PerUserClients
-from app.i18n import t
 from app.cook import (
     ScoredCandidate,
     load_cook_session,
     run_cook_more,
 )
 from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
-import app.handler_support as handler_support
-import app.views as views
-from app.models import CookSession, Household
-from app.telegram_ui import to_aiogram_keyboard
-from app.pending_service import (
-    utc_naive,
-)
-from app.renderer import (
-    build_cook_result_keyboard,
-    build_cook_round_keyboard,
-    PURPOSE_OPTIONS,
-)
-from app.profile_service import profile_from_household
-from app.callback_dispatch import edit_or_resend
-
 from app.handlers.cook import (
     _cuisine_options,
     _cuisine_round_keyboard,
     run_cook_and_render,
 )
+from app.i18n import t
+from app.models import CookSession, Household
+from app.pending_service import (
+    utc_naive,
+)
+from app.profile_service import profile_from_household
+from app.renderer import (
+    PURPOSE_OPTIONS,
+    build_cook_result_keyboard,
+    build_cook_round_keyboard,
+)
+from app.telegram_ui import to_aiogram_keyboard
 
 MEAL_TYPES = ["Dinner", "Lunch", "Breakfast", "Dessert", "Snack", "Surprise me"]
 SPOONACULAR_CUISINES = [
@@ -213,7 +211,7 @@ async def handle_cook_callback(
                             source=source,
                             today=today,
                         )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001 - show-more must never crash the bot
                     log.warning(
                         "cook_more_failed", extra={"error_class": type(exc).__name__}
                     )

@@ -1,6 +1,6 @@
 """Tests for the interactive /pantry command."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,7 +22,7 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -32,7 +32,7 @@ def session_factory():
                 telegram_id=1,
                 chat_id=99,
                 household_id=household.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db.commit()
@@ -40,7 +40,7 @@ def session_factory():
 
 
 def _now(tz: str) -> datetime:
-    return datetime(2026, 6, 14, 12, 0, tzinfo=timezone.utc)
+    return datetime(2026, 6, 14, 12, 0, tzinfo=UTC)
 
 
 def _msg(text: str):
@@ -84,7 +84,7 @@ def _active_item(
             expires_on=today + timedelta(days=expires_in_days),
             status=status,
             created_via="manual",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(item)
         db.commit()

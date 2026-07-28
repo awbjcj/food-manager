@@ -33,7 +33,7 @@ def test_name_translation_roundtrip():
 
 async def test_fake_translation_llm_returns_mapping_in_order():
     fake = FakeTranslationLLM(table={"Milk": "牛奶", "Eggs": "鸡蛋"})
-    out, cost = await fake.translate(texts=["Milk", "Eggs"], lang="zh")
+    out, _cost = await fake.translate(texts=["Milk", "Eggs"], lang="zh")
     assert out == ["牛奶", "鸡蛋"]
     assert fake.calls == [(("Milk", "Eggs"), "zh")]
 

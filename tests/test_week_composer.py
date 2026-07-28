@@ -15,10 +15,10 @@ from app.week_composer import (
 
 
 def _profile(**kw):
-    base: dict[str, Any] = dict(
-        diet="none", exclusions=[], preferred_cuisines=[],
-        max_cook_minutes=None, household_size=2, note="",
-    )
+    base: dict[str, Any] = {
+        "diet": "none", "exclusions": [], "preferred_cuisines": [],
+        "max_cook_minutes": None, "household_size": 2, "note": "",
+    }
     base.update(kw)
     return FoodProfile(**base)
 

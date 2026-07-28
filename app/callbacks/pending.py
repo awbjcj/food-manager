@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlmodel import Session
 
+from app.callback_dispatch import edit_or_resend
 from app.correction_service import (
     add_payload_from_json,
     apply_add,
@@ -12,8 +13,6 @@ from app.correction_service import (
     correct_payload_from_json,
 )
 from app.models import PantryItem
-from app.callback_dispatch import edit_or_resend
-from app.telegram_ui import to_aiogram_keyboard
 from app.pending_service import (
     expire_for_item,
     load_pending,
@@ -27,7 +26,7 @@ from app.renderer import (
     render_applied_correction,
     render_terminal_state,
 )
-
+from app.telegram_ui import to_aiogram_keyboard
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +46,7 @@ async def _handle_pending_callback(
         await cb.answer("not found")
         return
 
-    now = utc_naive(datetime.now(timezone.utc))
+    now = utc_naive(datetime.now(UTC))
     if pending.status != "pending" or pending.expires_at <= now:
         terminal = pending.status if pending.status != "pending" else "expired"
         if terminal == "expired" and pending.status == "pending":

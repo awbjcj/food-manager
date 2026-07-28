@@ -1,5 +1,5 @@
 """Tests for i18n-aware daily digest (Task 18)."""
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -27,7 +27,7 @@ def _seed_zh_user(eng):
     """Seed a zh-lang user with one active PantryItem 'Milk' due today."""
     today = date(2026, 5, 26)
     with Session(eng) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -37,7 +37,7 @@ def _seed_zh_user(eng):
             chat_id=999,
             household_id=household.id,
             lang="zh",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(user)
         db.commit()
@@ -56,7 +56,7 @@ def _seed_zh_user(eng):
             expires_on=today,  # due exactly today
             status="active",
             created_via="manual",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(item)
         db.commit()
@@ -68,7 +68,7 @@ def _seed_en_user(eng):
     """Seed a default (en) user with one active PantryItem 'Milk' due today."""
     today = date(2026, 5, 26)
     with Session(eng) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -77,7 +77,7 @@ def _seed_en_user(eng):
             telegram_id=7,
             chat_id=888,
             household_id=household.id,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(user)
         db.commit()
@@ -96,7 +96,7 @@ def _seed_en_user(eng):
             expires_on=today,
             status="active",
             created_via="manual",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
         db.add(item)
         db.commit()

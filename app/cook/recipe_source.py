@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json as _json
 import hashlib
+import json as _json
 import logging
-from typing import Optional, Protocol
+from typing import Protocol
 
 from app.cook.logic import violates_exclusions
 from app.cook.models import (
@@ -37,13 +37,13 @@ _PURPOSE_SORT = {
 def build_criteria(
     *,
     include_ingredients: list[str],
-    meal_type: Optional[str],
-    cuisine: Optional[str],
+    meal_type: str | None,
+    cuisine: str | None,
     purpose: Purpose,
     profile: FoodProfile,
     offset: int,
     number: int = 6,
-    steering: Optional[str] = None,
+    steering: str | None = None,
 ) -> RecipeCriteria:
     meal = None if meal_type in (None, "Surprise me") else meal_type
     cuisine_value = None if cuisine in (None, "Surprise me", "Any") else cuisine
@@ -102,7 +102,7 @@ def spoonacular_params(criteria: RecipeCriteria, *, api_key: str) -> dict:
 _SPOON_URL = "https://api.spoonacular.com/recipes/complexSearch"
 
 
-def _effort_for(minutes: Optional[int]) -> Effort:
+def _effort_for(minutes: int | None) -> Effort:
     if minutes is None:
         return "medium"
     if minutes <= 20:
@@ -114,7 +114,7 @@ def _effort_for(minutes: Optional[int]) -> Effort:
 
 def _nutrition_rationale(raw: dict) -> str:
     nutrients = (raw.get("nutrition") or {}).get("nutrients") or []
-    wanted: dict[str, Optional[str]] = {
+    wanted: dict[str, str | None] = {
         "Calories": None,
         "Protein": None,
         "Fat": None,
@@ -188,12 +188,12 @@ class RecipeSource(Protocol):
         self,
         criteria: RecipeCriteria,
         *,
-        remaining_cost_micros: Optional[int] = None,
-    ) -> tuple[list[SourcedRecipe], Optional[int]]: ...
+        remaining_cost_micros: int | None = None,
+    ) -> tuple[list[SourcedRecipe], int | None]: ...
 
 
 class SpoonacularSource:
-    def __init__(self, *, http, api_key: Optional[str], timeout: float = 12.0):
+    def __init__(self, *, http, api_key: str | None, timeout: float = 12.0):
         self._http = http
         self._api_key = api_key
         self._timeout = timeout
@@ -205,8 +205,8 @@ class SpoonacularSource:
         self,
         criteria: RecipeCriteria,
         *,
-        remaining_cost_micros: Optional[int] = None,
-    ) -> tuple[list[SourcedRecipe], Optional[int]]:
+        remaining_cost_micros: int | None = None,
+    ) -> tuple[list[SourcedRecipe], int | None]:
         if not self._api_key:
             return [], None
         try:
@@ -217,7 +217,7 @@ class SpoonacularSource:
             )
             response.raise_for_status()
             return map_spoonacular(response.json()), None
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - one source failing must not break the chain
             log.warning(
                 "spoonacular_search_failed",
                 extra={"error_class": type(exc).__name__},
@@ -252,8 +252,8 @@ class TheMealDbSource:
         self,
         criteria: RecipeCriteria,
         *,
-        remaining_cost_micros: Optional[int] = None,
-    ) -> tuple[list[SourcedRecipe], Optional[int]]:
+        remaining_cost_micros: int | None = None,
+    ) -> tuple[list[SourcedRecipe], int | None]:
         if not criteria.include_ingredients:
             return [], None
         try:
@@ -279,7 +279,7 @@ class TheMealDbSource:
                     continue
                 out.append(self._to_sourced(detail))
             return out, None
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - one source failing must not break the chain
             log.warning(
                 "themealdb_search_failed",
                 extra={"error_class": type(exc).__name__},
@@ -325,8 +325,8 @@ class LlmRecipeSource:
         self,
         criteria: RecipeCriteria,
         *,
-        remaining_cost_micros: Optional[int] = None,
-    ) -> tuple[list[SourcedRecipe], Optional[int]]:
+        remaining_cost_micros: int | None = None,
+    ) -> tuple[list[SourcedRecipe], int | None]:
         if not self.available():
             return [], None
         payload: dict = {
@@ -343,7 +343,7 @@ class LlmRecipeSource:
         if criteria.steering:
             payload["household_taste"] = criteria.steering
         prompt = _json.dumps(payload, sort_keys=True)
-        total: Optional[int] = None
+        total: int | None = None
         recipes, recipe_cost = await self._recipe_llm.fetch_recipes(prompt=prompt)
         total = _add_known_cost(total, recipe_cost)
         if _over_budget(total, remaining_cost_micros):
@@ -431,9 +431,9 @@ class ChainedRecipeSource:
         self,
         criteria: RecipeCriteria,
         *,
-        remaining_cost_micros: Optional[int] = None,
-    ) -> tuple[list[SourcedRecipe], Optional[int]]:
-        total: Optional[int] = None
+        remaining_cost_micros: int | None = None,
+    ) -> tuple[list[SourcedRecipe], int | None]:
+        total: int | None = None
         for source in self._sources:
             if not source.available():
                 continue
@@ -443,7 +443,7 @@ class ChainedRecipeSource:
                     criteria,
                     remaining_cost_micros=source_budget,
                 )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - one source failing must not break the chain
                 log.warning(
                     "recipe_source_failed",
                     extra={
@@ -468,17 +468,17 @@ class ChainedRecipeSource:
         return [], total
 
 
-def _add_known_cost(total: Optional[int], cost: Optional[int]) -> Optional[int]:
+def _add_known_cost(total: int | None, cost: int | None) -> int | None:
     if not cost:
         return total
     return (total or 0) + cost
 
 
-def _over_budget(cost: Optional[int], limit: Optional[int]) -> bool:
+def _over_budget(cost: int | None, limit: int | None) -> bool:
     return limit is not None and cost is not None and cost > limit
 
 
-def _remaining_budget(limit: Optional[int], spent: Optional[int]) -> Optional[int]:
+def _remaining_budget(limit: int | None, spent: int | None) -> int | None:
     if limit is None:
         return None
     return max(0, limit - (spent or 0))

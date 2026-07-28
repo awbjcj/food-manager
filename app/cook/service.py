@@ -7,13 +7,13 @@ from datetime import date
 from sqlmodel import Session
 
 from app.cook.affinity import affinity, list_recent_signals, steering_summary
+from app.cook.llm import SelectionLLMClient
 from app.cook.logic import (
     blended_score,
     expiry_utilization,
     shopping_list,
     violates_exclusions,
 )
-from app.cook.llm import SelectionLLMClient
 from app.cook.models import Purpose, RecipeCandidate, ScoredCandidate
 from app.cook.recipe_source import RecipeSource, build_criteria
 from app.cook.session_service import accrue_cost

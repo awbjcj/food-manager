@@ -12,7 +12,6 @@ Internal modules still import each other by their submodule path
 """
 from __future__ import annotations
 
-from app.cook.feedback import set_feedback
 from app.cook.favorites_service import (
     list_saved,
     load_saved,
@@ -20,6 +19,7 @@ from app.cook.favorites_service import (
     recook_shopping_list,
     save_candidate,
 )
+from app.cook.feedback import set_feedback
 from app.cook.logic import missing_ingredients, shopping_list, violates_exclusions
 from app.cook.models import (
     RecipeCandidate,

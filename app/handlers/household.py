@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Callable, Optional
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from aiogram import Bot
 from sqlmodel import Session
 
+from app import handler_support
 from app.commands import (
     CommandError,
     parse_digest_at,
@@ -17,7 +18,6 @@ from app.commands import (
     parse_tz,
 )
 from app.i18n import DEFAULT_LANG, LANGS, t
-import app.handler_support as handler_support
 from app.invite_service import (
     AlreadyMember,
     CannotRemoveSelf,
@@ -42,7 +42,7 @@ _require_user = handler_support.require_user
 _request = handler_support.request
 
 
-def _start_token(text: str | None) -> Optional[str]:
+def _start_token(text: str | None) -> str | None:
     """Extract a deep-link payload from ``/start <token>`` (None if absent)."""
     parts = (text or "").split(maxsplit=1)
     if len(parts) == 2 and parts[1].strip():
@@ -70,7 +70,7 @@ async def _notify_household_join(
                 member_user.chat_id,
                 t("household.member_joined", member_user.lang, id=joiner_id),
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - join notification is best-effort
             log.warning(
                 "member_join_notify_failed",
                 extra={"telegram_user_id": member.telegram_id},
@@ -96,7 +96,7 @@ async def _try_redeem_invite(
             token=token,
             telegram_user_id=msg.from_user.id,
             chat_id=msg.chat.id,
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
             tz=handler_support.DEFAULT_TZ,
             digest_hour=handler_support.DEFAULT_DIGEST_HOUR,
             llm_provider=handler_support.DEFAULT_LLM_PROVIDER,
@@ -184,7 +184,7 @@ async def handle_invite(
             session,
             household_id=user.household_id,
             created_by=user.telegram_id,
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
             max_uses=max_uses,
         )
         me = await bot.get_me()

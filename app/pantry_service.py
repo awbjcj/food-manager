@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Literal, Optional
+from datetime import UTC, date, datetime, timedelta
+from typing import TYPE_CHECKING, Literal
 
 from sqlmodel import Session, col, select
 
@@ -26,11 +26,11 @@ Window = Literal["all", "week", "expired"]
 
 @dataclass(frozen=True)
 class ListFilter:
-    category: Optional[str] = None
+    category: str | None = None
     window: Window = "all"
 
     @classmethod
-    def default(cls) -> "ListFilter":
+    def default(cls) -> ListFilter:
         return cls()
 
 
@@ -158,7 +158,7 @@ async def move_to_storage(
     item_id: int,
     state: Literal["fridge", "frozen"],
     today: date,
-    search: Optional["ShelfLifeSearchClient"] = None,
+    search: ShelfLifeSearchClient | None = None,
 ) -> MutationResult:
     """Move an active item to a forward Storage State, resolving the state's
     shelf life and resetting its Storage Date (the new Shelf-Life Origin).
@@ -196,7 +196,7 @@ async def freeze_item(
     household_id: int,
     item_id: int,
     today: date,
-    search: Optional["ShelfLifeSearchClient"] = None,
+    search: ShelfLifeSearchClient | None = None,
 ) -> MutationResult:
     return await move_to_storage(
         session, household_id=household_id, item_id=item_id,
@@ -268,11 +268,11 @@ class Stats:
     receipt_count: int
     tracked_item_count: int
     removed_item_count: int
-    cache_hit_percent: Optional[float]
+    cache_hit_percent: float | None
     total_cost_micros_usd: int
-    avg_cost_micros_usd: Optional[int]
+    avg_cost_micros_usd: int | None
     unknown_cost_receipt_count: int
-    waste_rate_percent: Optional[float]
+    waste_rate_percent: float | None
     cook_cost_micros_usd: int = 0
     cook_count: int = 0
     cook_feedback_count: int = 0
@@ -430,7 +430,7 @@ class UndoResult:
 
 
 def _expired(reference: datetime, now: datetime) -> bool:
-    ref = reference if reference.tzinfo else reference.replace(tzinfo=timezone.utc)
+    ref = reference if reference.tzinfo else reference.replace(tzinfo=UTC)
     return (now - ref) > timedelta(minutes=UNDO_TTL_MINUTES)
 
 

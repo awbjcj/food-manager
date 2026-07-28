@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel
 from sqlmodel import Session
@@ -33,7 +32,7 @@ def set_feedback(
     session.commit()
 
 
-def _chosen_candidate(cook: CookSession) -> Optional[ScoredCandidate]:
+def _chosen_candidate(cook: CookSession) -> ScoredCandidate | None:
     try:
         raw = json.loads(cook.candidates_json or "[]")
     except (TypeError, ValueError):
@@ -45,11 +44,11 @@ def _chosen_candidate(cook: CookSession) -> Optional[ScoredCandidate]:
         index = 0
     try:
         return ScoredCandidate.model_validate(raw[index])
-    except Exception:
+    except Exception:  # noqa: BLE001 - stored candidate is best-effort
         return None
 
 
-def feedback_signal(cook: CookSession) -> Optional[FeedbackSignal]:
+def feedback_signal(cook: CookSession) -> FeedbackSignal | None:
     if cook.feedback not in VALID_FEEDBACK:
         return None
     candidate = _chosen_candidate(cook)

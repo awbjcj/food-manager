@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -12,19 +12,19 @@ def _engine():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
     return engine
 
 
 def _now(minute=0):
-    return datetime(2026, 5, 30, 12, minute, tzinfo=timezone.utc)
+    return datetime(2026, 5, 30, 12, minute, tzinfo=UTC)
 
 
 def test_missing_ingredients_returns_objects_not_in_pantry():
@@ -71,13 +71,13 @@ def test_list_pending_excludes_bought_and_check_off_is_idempotent():
 def test_check_off_rejects_other_users_row():
     engine = _engine()
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
         db.add(User(telegram_id=2, chat_id=2, household_id=household.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
         add_missing(db, household_id=1,
                     ingredients=[RecipeIngredient(name="Milk")], now=_now())

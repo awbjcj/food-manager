@@ -1,14 +1,14 @@
 import asyncio
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import sqlalchemy as sa
-from sqlmodel import SQLModel, Session, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
-import app.handler_support as handler_support
+from app import handler_support
 from app.bot import handle_prefs
 from app.client_set import PerUserClients
 from app.models import Household, User
@@ -29,20 +29,20 @@ def _session():
 
 
 def _add_household_user(db: Session) -> Household:
-    household = Household(created_at=datetime.now(timezone.utc))
+    household = Household(created_at=datetime.now(UTC))
     db.add(household)
     db.commit()
     db.refresh(household)
     assert household.id is not None
     db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
-                created_at=datetime.now(timezone.utc)))
+                created_at=datetime.now(UTC)))
     db.commit()
     return household
 
 
 def test_household_has_profile_columns_with_defaults():
     with _session() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -62,6 +62,7 @@ def test_migration_head_moves_profile_columns_to_household(tmp_path):
         capture_output=True,
         text=True,
         cwd=Path(__file__).resolve().parents[1],
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     engine = sa.create_engine(f"sqlite:///{db_path}")
@@ -81,7 +82,7 @@ def test_migration_head_moves_profile_columns_to_household(tmp_path):
 
 
 def test_profile_round_trips_through_household():
-    household = Household(name="x", created_at=datetime.now(timezone.utc))
+    household = Household(name="x", created_at=datetime.now(UTC))
     profile = FoodProfile(
         diet="vegetarian",
         exclusions=["peanut", "cilantro"],
@@ -97,7 +98,7 @@ def test_profile_round_trips_through_household():
 
 
 def test_profile_defaults_from_blank_household():
-    household = Household(created_at=datetime.now(timezone.utc))
+    household = Household(created_at=datetime.now(UTC))
     assert profile_from_household(household) == FoodProfile()
 
 
@@ -126,7 +127,7 @@ def test_fake_profile_client_returns_merged_profile():
 
 def test_update_profile_persists_merge_and_keeps_allergy_structured():
     with _session() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)

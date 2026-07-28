@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -38,7 +38,7 @@ def session():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         household = Household(created_at=now)
         db.add(household)
         db.commit()
@@ -71,7 +71,7 @@ def _reply(msg) -> str:
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # --------------------------------------------------------------------------

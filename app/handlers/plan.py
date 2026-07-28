@@ -1,35 +1,33 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Callable
 
 from sqlmodel import Session, select
 
+import app.plan_service as plan_service_mod
+from app import handler_support, views
+from app.client_set import EMPTY_CLIENTS, PerUserClients
 from app.commands import (
     CommandError,
     parse_plan_arg,
 )
-from app.client_set import PerUserClients
-from app.i18n import t
 from app.cook import (
     ScoredCandidate,
 )
 from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
-import app.plan_service as plan_service_mod
-import app.handler_support as handler_support
-import app.views as views
-from app.plan_service import NotEnoughItemsToPlan, build_plan
-from app.week_composer import DaySpec
+from app.i18n import t
 from app.models import Household, MealPlan, MealPlanEntry, User
-from app.telegram_ui import to_aiogram_keyboard
+from app.plan_service import NotEnoughItemsToPlan, build_plan
+from app.profile_service import profile_from_household
 from app.progress import finish_progress, start_progress
 from app.renderer import (
     build_plan_keyboard,
 )
-from app.profile_service import profile_from_household
-
+from app.telegram_ui import to_aiogram_keyboard
+from app.week_composer import DaySpec
 
 _SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
@@ -72,7 +70,7 @@ async def handle_plan(
     session_factory: _SessionFactory,
     now_provider: NowProvider,
     composer,
-    clients: PerUserClients = PerUserClients(),
+    clients: PerUserClients = EMPTY_CLIENTS,
     recipe_sources=(),
     on_user_created: Callable[[User], None] = _noop_user_created,
     translation_llm=None,
@@ -122,7 +120,7 @@ async def handle_plan(
                 today=today,
                 chat_id=msg.chat.id,
                 cost_ceiling_micros=plan_service_mod.PLAN_COST_CEILING_MICROS,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         except NotEnoughItemsToPlan:
             await finish_progress(progress, msg, t("plan.not_enough", user.lang))

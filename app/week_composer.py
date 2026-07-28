@@ -11,8 +11,9 @@ answers.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import date
-from typing import Literal, Optional, Protocol, Sequence
+from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
@@ -25,7 +26,7 @@ ITEMS_PER_DAY = 2  # heuristic: expiring items featured per day
 
 class DaySpec(BaseModel):
     day_index: int
-    cuisine: Optional[str] = None
+    cuisine: str | None = None
     purpose: Literal["use_it_up", "quick", "healthy", "comfort", "surprise"] = "use_it_up"
     feature_items: list[str] = []
 
@@ -96,7 +97,7 @@ class AgnoWeekComposer:
         response = await self._agent.arun(prompt)
         spec = getattr(response, "content", None)
         if not isinstance(spec, WeekPlanSpec):
-            raise ValueError("week composer returned no structured WeekPlanSpec")
+            raise ValueError("week composer returned no structured WeekPlanSpec")  # noqa: TRY004 - JSON-shape contract, not a type check
         specs = list(spec.days[:days])
         if len(specs) < days:  # pad missing days deterministically
             specs.extend(heuristic_compose(pantry=pantry, profile=profile, days=days)[len(specs):])
@@ -106,7 +107,7 @@ class AgnoWeekComposer:
 
 
 def build_week_composer(
-    provider: str, *, model_id: str, api_key: str, base_url: Optional[str] = None
+    provider: str, *, model_id: str, api_key: str, base_url: str | None = None
 ) -> AgnoWeekComposer:
     from agno.agent import Agent
 

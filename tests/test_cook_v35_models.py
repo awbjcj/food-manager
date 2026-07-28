@@ -1,7 +1,7 @@
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -14,20 +14,20 @@ def _engine():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
     return engine
 
 
 def test_cooksession_has_feedback_default_none():
     engine = _engine()
-    now = datetime(2026, 5, 30, 12, 0)
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     with Session(engine) as db:
         db.add(CookSession(household_id=1, status="done", chat_id=1,
                            selected_item_ids="[]", created_at=now, expires_at=now))
@@ -39,7 +39,7 @@ def test_cooksession_has_feedback_default_none():
 
 def test_shopping_and_saved_tables_accept_rows():
     engine = _engine()
-    now = datetime(2026, 5, 30, 12, 0)
+    now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
     with Session(engine) as db:
         db.add(ShoppingList(household_id=1, name_raw="Tomatoes", name_normalized="tomatoes",
                             qty=2.0, unit="kg", added_at=now))
@@ -57,6 +57,7 @@ def test_migration_0006_creates_v35_schema(tmp_path):
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         env={**dict(os.environ), "DATABASE_PATH": str(db_path)},
         capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1],
+        check=False,
     )
     assert result.returncode == 0, result.stderr
     insp = sa.inspect(sa.create_engine(f"sqlite:///{db_path}"))

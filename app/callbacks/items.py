@@ -5,20 +5,19 @@ from datetime import date
 
 from aiogram.types import ForceReply
 
+from app import handler_support, views
+from app.callback_dispatch import (
+    answer as dispatch_answer,
+)
+from app.callback_dispatch import (
+    edit_or_resend,
+)
 from app.commands import (
     CommandError,
     parse_item_callback,
 )
 from app.i18n import t
-import app.handler_support as handler_support
-import app.views as views
 from app.models import PantryItem
-from app.storage_state import shelf_life_origin
-from app.telegram_ui import to_aiogram_keyboard
-from app.callback_dispatch import (
-    answer as dispatch_answer,
-    edit_or_resend,
-)
 from app.pantry_service import (
     ListFilter,
     compute_nudge_days,
@@ -33,7 +32,8 @@ from app.renderer import (
     build_item_card_keyboard,
     build_remove_confirm_keyboard,
 )
-
+from app.storage_state import shelf_life_origin
+from app.telegram_ui import to_aiogram_keyboard
 
 log = logging.getLogger(__name__)
 
@@ -150,7 +150,7 @@ async def handle_item_callback(
             )
             try:
                 await cb.message.answer(prompt, reply_markup=ForceReply())
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - prompt send is best-effort
                 log.warning(
                     "correct_prompt_failed",
                     extra={"error_class": type(exc).__name__},

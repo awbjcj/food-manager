@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -18,7 +18,11 @@ from app.renderer import (
     render_stats,
     render_terminal_state,
 )
-from app.scheduler import _sweep_job, build_digest_payload, register_sweep_expired_pendings
+from app.scheduler import (
+    _sweep_job,
+    build_digest_payload,
+    register_sweep_expired_pendings,
+)
 
 
 def test_parse_callback_apply_cancel_and_bad_id():
@@ -115,13 +119,13 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
         assert household.id is not None
         db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
-                    created_at=datetime.now(timezone.utc)))
+                    created_at=datetime.now(UTC)))
         db.commit()
     return make
 
@@ -142,7 +146,7 @@ def test_build_digest_payload_resolves_user_household(session_factory):
             expires_on=today,
             status="active",
             created_via="receipt",
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         ))
         db.commit()
         payload = build_digest_payload(db, user_id=1, today=today)
@@ -168,7 +172,7 @@ def test_register_sweep_expired_pendings_and_job_marks_rows(session_factory):
             snapshot_json=None,
             cost_micros_usd=None,
             chat_id=1,
-            now=datetime.now(timezone.utc) - timedelta(minutes=20),
+            now=datetime.now(UTC) - timedelta(minutes=20),
         )
 
     _sweep_job(session_factory)

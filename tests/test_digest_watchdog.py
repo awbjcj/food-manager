@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -19,7 +19,7 @@ def session_factory():
         return Session(engine)
 
     with make() as db:
-        household = Household(created_at=datetime.now(timezone.utc))
+        household = Household(created_at=datetime.now(UTC))
         db.add(household)
         db.commit()
         db.refresh(household)
@@ -29,7 +29,7 @@ def session_factory():
                 telegram_id=1,
                 chat_id=1,
                 household_id=household.id,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db.commit()
@@ -54,7 +54,7 @@ def _seed_due_item(session_factory) -> None:
                 expires_on=TODAY + timedelta(days=1),
                 status="active",
                 created_via="manual",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         db.commit()
@@ -93,7 +93,7 @@ async def test_catch_up_sends_missed_digest(session_factory):
     count = await catch_up_missed_digests(
         session_factory=session_factory,
         send=send,
-        now_provider=lambda tz: datetime(2026, 7, 8, 9, 30),  # past digest_hour 8
+        now_provider=lambda tz: datetime(2026, 7, 8, 9, 30, tzinfo=UTC),  # past digest_hour 8
     )
     assert count == 1
     send.assert_awaited_once_with(1)
@@ -105,7 +105,7 @@ async def test_catch_up_skips_before_digest_hour(session_factory):
     count = await catch_up_missed_digests(
         session_factory=session_factory,
         send=send,
-        now_provider=lambda tz: datetime(2026, 7, 8, 7, 0),
+        now_provider=lambda tz: datetime(2026, 7, 8, 7, 0, tzinfo=UTC),
     )
     assert count == 0
     send.assert_not_awaited()
@@ -122,7 +122,7 @@ async def test_catch_up_skips_already_sent_today(session_factory):
     count = await catch_up_missed_digests(
         session_factory=session_factory,
         send=send,
-        now_provider=lambda tz: datetime(2026, 7, 8, 9, 30),
+        now_provider=lambda tz: datetime(2026, 7, 8, 9, 30, tzinfo=UTC),
     )
     assert count == 0
     send.assert_not_awaited()

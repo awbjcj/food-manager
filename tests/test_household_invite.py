@@ -27,7 +27,7 @@ from app.invite_service import (
     redeem_invite,
     remove_member,
 )
-from app.models import Household, HouseholdInvite, User
+from app.models import Household, HouseholdInvite, Subscription, User
 
 
 # --------------------------------------------------------------------------
@@ -51,6 +51,17 @@ def session():
                 household_id=household.id,
                 role="owner",
                 created_at=now,
+            )
+        )
+        db.add(
+            Subscription(
+                household_id=household.id,
+                tier="family",
+                seat_cap=10,
+                period_start=now,
+                period_end=now + timedelta(days=30),
+                created_at=now,
+                updated_at=now,
             )
         )
         db.commit()

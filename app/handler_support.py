@@ -17,6 +17,7 @@ DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8
 DEFAULT_LLM_PROVIDER = "anthropic"
 ALLOWED_TELEGRAM_USER_ID: int = 0
+OPEN_REGISTRATION: bool = False
 
 SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
@@ -44,11 +45,14 @@ def resolve_authorization(
     *,
     allowed_user_id: int,
     telegram_user_id: int,
+    open_registration: bool = False,
 ) -> AuthStatus:
     existing = session.get(User, telegram_user_id)
     if existing is not None:
+        if existing.banned:
+            return AuthStatus(False, None, is_bootstrap=False)
         return AuthStatus(True, existing, is_bootstrap=False)
-    if telegram_user_id == allowed_user_id:
+    if open_registration or telegram_user_id == allowed_user_id:
         return AuthStatus(True, None, is_bootstrap=True)
     return AuthStatus(False, None, is_bootstrap=False)
 
@@ -60,11 +64,15 @@ def authorize_and_get_user(
     telegram_user_id: int,
     chat_id: int,
     chat_type: str,
+    open_registration: bool | None = None,
 ) -> AuthDecision:
     status = resolve_authorization(
         session,
         allowed_user_id=allowed_user_id,
         telegram_user_id=telegram_user_id,
+        open_registration=OPEN_REGISTRATION
+        if open_registration is None
+        else open_registration,
     )
     if not status.allowed:
         return AuthDecision(False, None, False, "not authorized")
@@ -134,6 +142,7 @@ def authorized_callback_user(session: Session, telegram_id: int) -> User | None:
         session,
         allowed_user_id=ALLOWED_TELEGRAM_USER_ID,
         telegram_user_id=telegram_id,
+        open_registration=OPEN_REGISTRATION,
     )
     return status.user if status.allowed else None
 

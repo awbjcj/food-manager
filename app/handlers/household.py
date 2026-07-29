@@ -21,6 +21,7 @@ from app.i18n import DEFAULT_LANG, LANGS, t
 from app.invite_service import (
     AlreadyMember,
     CannotRemoveSelf,
+    HouseholdFull,
     InviteInvalid,
     MemberNotFound,
     NotOwner,
@@ -111,6 +112,9 @@ async def _try_redeem_invite(
         # No User row yet for a newcomer, so fall back to the default language.
         await msg.answer(t("join.invalid", DEFAULT_LANG))
         return True
+    except HouseholdFull as exc:
+        await msg.answer(t("invite.household_full", DEFAULT_LANG, cap=exc.cap))
+        return True
     on_user_created(result.user)
     await msg.answer(t("join.success", result.user.lang))
     await _notify_household_join(
@@ -158,6 +162,8 @@ async def handle_start(
             t("start.ready", user.lang, tz=user.tz, digest_hour=user.digest_hour)
         )
         await msg.answer(t("start.tour", user.lang))
+        if decision.created:
+            await msg.answer(t("start.welcome_free", user.lang))
 
 
 async def handle_invite(
@@ -180,13 +186,17 @@ async def handle_invite(
         except CommandError as exc:
             await msg.answer(str(exc))
             return
-        result = create_invite(
-            session,
-            household_id=user.household_id,
-            created_by=user.telegram_id,
-            now=datetime.now(UTC),
-            max_uses=max_uses,
-        )
+        try:
+            result = create_invite(
+                session,
+                household_id=user.household_id,
+                created_by=user.telegram_id,
+                now=datetime.now(UTC),
+                max_uses=max_uses,
+            )
+        except HouseholdFull as exc:
+            await msg.answer(t("invite.household_full", user.lang, cap=exc.cap))
+            return
         me = await bot.get_me()
         link = f"https://t.me/{me.username}?start={result.token}"
         key = "invite.created" if max_uses == 1 else "invite.created_reusable"

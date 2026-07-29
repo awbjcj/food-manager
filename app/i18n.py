@@ -11,6 +11,153 @@ DEFAULT_LANG = "en"
 # Catalog. English is mandatory for every key; other languages are optional and
 # fall back to English. Keys are added incrementally by later tasks.
 MESSAGES: dict[str, dict[str, str]] = {
+    "quota.title": {
+        "en": "📊 {plan} quota - renews in {days}d",
+        "zh": "📊 {plan}配额 - {days}天后更新",
+        "fr": "📊 Quota {plan} - renouvellement dans {days} j",
+        "es": "📊 Cuota {plan} - se renueva en {days} d",
+    },
+    "quota.plan.free": {"en": "Free", "zh": "免费", "fr": "Gratuit", "es": "Gratis"},
+    "quota.plan.family": {
+        "en": "Family",
+        "zh": "家庭",
+        "fr": "Famille",
+        "es": "Familiar",
+    },
+    "quota.receipts": {
+        "en": "🧾 Receipts",
+        "zh": "🧾 收据",
+        "fr": "🧾 Reçus",
+        "es": "🧾 Recibos",
+    },
+    "quota.actions": {
+        "en": "⚡ AI actions",
+        "zh": "⚡ AI 操作",
+        "fr": "⚡ Actions IA",
+        "es": "⚡ Acciones de IA",
+    },
+    "quota.op.cook": {"en": "Cook", "zh": "烹饪", "fr": "Cuisine", "es": "Cocina"},
+    "quota.op.plan": {"en": "Plans", "zh": "计划", "fr": "Menus", "es": "Planes"},
+    "quota.op.edit": {"en": "Edits", "zh": "编辑", "fr": "Modifications", "es": "Ediciones"},
+    "quota.op.chat": {"en": "Chat", "zh": "聊天", "fr": "Discussion", "es": "Chat"},
+    "quota.op.search": {"en": "Search", "zh": "搜索", "fr": "Recherche", "es": "Búsqueda"},
+    "quota.need_more": {
+        "en": "Need more? -> /buy",
+        "zh": "需要更多？-> /buy",
+        "fr": "Besoin de plus ? -> /buy",
+        "es": "¿Necesitas más? -> /buy",
+    },
+    "quota.multiplier_note": {
+        "en": "Provider multipliers are included in the AI actions total.",
+        "zh": "AI 操作总数已包含提供商倍率。",
+        "fr": "Le total des actions IA inclut les multiplicateurs des fournisseurs.",
+        "es": "El total de acciones de IA incluye los multiplicadores del proveedor.",
+    },
+    "quota.free_upsell": {
+        "en": "Family: 100 receipts, 300 AI actions, 10 members.",
+        "zh": "家庭版：100 张收据、300 次 AI 操作、10 位成员。",
+        "fr": "Famille : 100 reçus, 300 actions IA, 10 membres.",
+        "es": "Familiar: 100 recibos, 300 acciones de IA, 10 miembros.",
+    },
+    "quota.receipts_exhausted": {
+        "en": "You've used all {limit} receipts this period. More: /buy",
+        "zh": "本周期的 {limit} 张收据配额已用完。需要更多：/buy",
+        "fr": "Vous avez utilisé les {limit} reçus de cette période. Plus : /buy",
+        "es": "Has usado los {limit} recibos de este período. Más: /buy",
+    },
+    "quota.degraded.profile": {
+        "en": "AI quota used up; your profile was not changed. More: /buy",
+        "zh": "AI 配额已用完；您的资料未更改。需要更多：/buy",
+        "fr": "Quota IA épuisé ; votre profil n'a pas été modifié. Plus : /buy",
+        "es": "Cuota de IA agotada; tu perfil no cambió. Más: /buy",
+    },
+    "quota.degraded.plan": {
+        "en": "AI quota used up - using the basic planner.",
+        "zh": "AI 配额已用完——正在使用基础计划器。",
+        "fr": "Quota IA épuisé - utilisation du planificateur de base.",
+        "es": "Cuota de IA agotada: se usará el planificador básico.",
+    },
+    "quota.degraded.add": {
+        "en": "Added {name} with a basic {days}-day estimate. AI quota used up; more: /buy",
+        "zh": "已添加 {name}，使用基础的 {days} 天估算。AI 配额已用完；需要更多：/buy",
+        "fr": "{name} ajouté avec une estimation simple de {days} jours. Quota IA épuisé ; plus : /buy",
+        "es": "Se añadió {name} con una estimación básica de {days} días. Cuota de IA agotada; más: /buy",
+    },
+    "quota.degraded.correction": {
+        "en": "AI quota used up; correction parsing is unavailable. More: /buy",
+        "zh": "AI 配额已用完；无法解析更正。需要更多：/buy",
+        "fr": "Quota IA épuisé ; l'analyse des corrections est indisponible. Plus : /buy",
+        "es": "Cuota de IA agotada; no se pueden interpretar correcciones. Más: /buy",
+    },
+    "quota.degraded.cook": {
+        "en": "AI quota used up. Your saved recipes still work: /favorites",
+        "zh": "AI 配额已用完。已保存的食谱仍可使用：/favorites",
+        "fr": "Quota IA épuisé. Vos recettes enregistrées restent disponibles : /favorites",
+        "es": "Cuota de IA agotada. Tus recetas guardadas siguen disponibles: /favorites",
+    },
+    "quota.degraded.more": {
+        "en": "AI quota used up; more: /buy",
+        "zh": "AI 配额已用完；需要更多：/buy",
+        "fr": "Quota IA épuisé ; plus : /buy",
+        "es": "Cuota de IA agotada; más: /buy",
+    },
+    "billing.payments_unavailable": {
+        "en": "Payments aren't available right now. Try again later.",
+        "zh": "付款暂时不可用。请稍后再试。",
+        "fr": "Les paiements sont indisponibles pour le moment. Réessayez plus tard.",
+        "es": "Los pagos no están disponibles ahora. Inténtalo más tarde.",
+    },
+    "billing.buy_choose": {
+        "en": "Choose a plan or top-up:",
+        "zh": "选择套餐或加购：",
+        "fr": "Choisissez un forfait ou une recharge :",
+        "es": "Elige un plan o una recarga:",
+    },
+    "billing.sku.family_monthly": {"en": "Family plan", "zh": "家庭套餐", "fr": "Forfait Famille", "es": "Plan Familiar"},
+    "billing.sku.topup_receipts_50": {"en": "+50 receipts", "zh": "+50 张收据", "fr": "+50 reçus", "es": "+50 recibos"},
+    "billing.sku.topup_actions_150": {"en": "+150 AI actions", "zh": "+150 次 AI 操作", "fr": "+150 actions IA", "es": "+150 acciones de IA"},
+    "billing.purchase_unavailable": {
+        "en": "This purchase isn't available. Try /buy again.",
+        "zh": "此购买不可用。请重试 /buy。",
+        "fr": "Cet achat n'est pas disponible. Réessayez avec /buy.",
+        "es": "Esta compra no está disponible. Vuelve a intentar /buy.",
+    },
+    "billing.subscription_active": {
+        "en": "Thanks! Family plan is active. See /quota",
+        "zh": "谢谢！家庭套餐已启用。查看 /quota",
+        "fr": "Merci ! Le forfait Famille est actif. Voir /quota",
+        "es": "¡Gracias! El plan Familiar está activo. Consulta /quota",
+    },
+    "billing.topup_active": {
+        "en": "Thanks! Your top-up has been added. See /quota",
+        "zh": "谢谢！加购已添加。查看 /quota",
+        "fr": "Merci ! Votre recharge a été ajoutée. Voir /quota",
+        "es": "¡Gracias! Se añadió tu recarga. Consulta /quota",
+    },
+    "billing.plan_free": {
+        "en": "Plan: Free. Upgrade with /buy",
+        "zh": "套餐：免费。使用 /buy 升级",
+        "fr": "Forfait : Gratuit. Mise à niveau avec /buy",
+        "es": "Plan: Gratis. Mejora con /buy",
+    },
+    "billing.plan_family": {
+        "en": "Plan: Family. Renews in {days}d. Manage it in Telegram Settings > Stars.",
+        "zh": "套餐：家庭。{days} 天后更新。在 Telegram 设置 > Stars 中管理。",
+        "fr": "Forfait : Famille. Renouvellement dans {days} j. Gérez-le dans Réglages Telegram > Stars.",
+        "es": "Plan: Familiar. Se renueva en {days} d. Adminístralo en Ajustes de Telegram > Stars.",
+    },
+    "start.welcome_free": {
+        "en": "You're on the free plan: 5 receipts and 30 AI actions a month, up to 2 people. Check usage with /quota, upgrade with /buy.",
+        "zh": "你正在使用免费套餐：每月 5 张收据、30 次 AI 操作，最多 2 人。使用 /quota 查看用量，使用 /buy 升级。",
+        "fr": "Vous êtes sur le forfait gratuit : 5 reçus et 30 actions IA par mois, jusqu'à 2 personnes. Utilisation avec /quota, mise à niveau avec /buy.",
+        "es": "Estás en el plan gratuito: 5 recibos y 30 acciones IA al mes, hasta 2 personas. Consulta el uso con /quota y mejora con /buy.",
+    },
+    "invite.household_full": {
+        "en": "This household is full ({cap} members).",
+        "zh": "此家庭已满（{cap} 位成员）。",
+        "fr": "Ce foyer est complet ({cap} membres).",
+        "es": "Este hogar está lleno ({cap} miembros).",
+    },
     "digest.section.expired": {"en": "Expired", "zh": "已过期", "fr": "Périmé", "es": "Caducado"},
     "digest.section.today": {"en": "Today", "zh": "今天", "fr": "Aujourd'hui", "es": "Hoy"},
     "digest.section.tomorrow": {"en": "Tomorrow", "zh": "明天", "fr": "Demain", "es": "Mañana"},
@@ -667,6 +814,9 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /household - list household members\n"
             "  /leave - leave your household\n"
             "  /remove <id> - (owner) remove a member\n"
+            "  /quota - show household usage\n"
+            "  /buy - choose a plan or top-up\n"
+            "  /billing - show subscription status\n"
             "  /help - this message\n"
             "Send a receipt photo to log it."
         ),
@@ -700,6 +850,9 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /household - 列出家庭成员\n"
             "  /leave - 离开您的家庭\n"
             "  /remove <id> -（所有者）移除成员\n"
+            "  /quota - 查看家庭用量\n"
+            "  /buy - 选择套餐或加购\n"
+            "  /billing - 查看订阅状态\n"
             "  /help - 本消息\n"
             "发送收据照片以记录。"
         ),
@@ -733,6 +886,9 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /household - lister les membres du foyer\n"
             "  /leave - quitter votre foyer\n"
             "  /remove <id> - (propriétaire) retirer un membre\n"
+            "  /quota - afficher l'utilisation du foyer\n"
+            "  /buy - choisir un forfait ou une recharge\n"
+            "  /billing - afficher l'abonnement\n"
             "  /help - ce message\n"
             "Envoyez une photo de reçu pour l'enregistrer."
         ),
@@ -766,6 +922,9 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /household - listar miembros del hogar\n"
             "  /leave - salir de tu hogar\n"
             "  /remove <id> - (propietario) quitar un miembro\n"
+            "  /quota - ver el uso del hogar\n"
+            "  /buy - elegir un plan o recarga\n"
+            "  /billing - ver el estado de suscripción\n"
             "  /help - este mensaje\n"
             "Envía una foto de un recibo para registrarlo."
         ),

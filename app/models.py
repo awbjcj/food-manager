@@ -36,6 +36,9 @@ CacheAction = Literal["move", "add_new", "leave"]
 CookStatus = Literal["collecting", "ready", "done", "cancelled", "expired"]
 CookFeedback = Literal["none", "liked", "disliked"]
 Role = Literal["owner", "member"]
+PlanTier = Literal["free", "family"]
+SubStatus = Literal["active", "past_due", "cancelled", "expired"]
+PaymentKind = Literal["subscription", "topup", "refund", "grant"]
 
 
 class Household(SQLModel, table=True):
@@ -59,6 +62,7 @@ class User(SQLModel, table=True):
     llm_provider: str = "anthropic"
     lang: str = "en"
     role: str = "member"  # "owner" | "member"; owner is the household creator
+    banned: bool = False
     created_at: datetime
     # Last date (user tz) a digest run completed — silent days count. None = never.
     last_digest_date: date | None = None
@@ -235,3 +239,47 @@ class HouseholdInvite(SQLModel, table=True):
     uses: int = 0  # redemptions so far
     redeemed_by: int | None = None  # telegram_id of the last joiner; None = unused
     redeemed_at: datetime | None = None
+
+
+class Subscription(SQLModel, table=True):
+    household_id: int = Field(foreign_key="household.id", primary_key=True)
+    tier: str = "free"
+    status: str = "active"
+    telegram_charge_id: str | None = None
+    payer_telegram_id: int | None = None
+    period_start: datetime
+    period_end: datetime
+    seat_cap: int = 2
+    created_at: datetime
+    updated_at: datetime
+
+
+class QuotaUsage(SQLModel, table=True):
+    household_id: int = Field(foreign_key="household.id", primary_key=True)
+    period_start: datetime = Field(primary_key=True)
+    receipts_used: int = 0
+    actions_used: int = 0
+    cook_used: int = 0
+    plan_used: int = 0
+    edit_used: int = 0
+    chat_used: int = 0
+    search_used: int = 0
+    cost_micros_used: int = 0
+    receipts_granted: int = 0
+    actions_granted: int = 0
+    cost_micros_granted: int = 0
+
+
+class PaymentEvent(SQLModel, table=True):
+    __table_args__ = (
+        Index("ix_payment_household_created", "household_id", "created_at"),
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    telegram_charge_id: str = Field(unique=True, index=True)
+    kind: str
+    sku: str
+    stars: int
+    payer_telegram_id: int
+    payload_json: str
+    created_at: datetime

@@ -57,5 +57,8 @@ def test_dispatcher_rosters_cover_every_supported_entry_point():
         "llm",
         "prefs",
         "help",
+        "quota",
+        "buy",
+        "billing",
     }
     assert len(EXPECTED_CALLBACK_ROUTES) == 32

@@ -1,4 +1,4 @@
-from typing import Any, Self, TypeVar, cast
+from typing import Any, ClassVar, Self, TypeVar, cast
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -40,6 +40,11 @@ class Settings(BaseSettings):
         default="https://api.deepseek.com", alias="DEEPSEEK_BASE_URL"
     )
     spoonacular_api_key: str | None = Field(default=None, alias="SPOONACULAR_API_KEY")
+    billing_enabled: bool = Field(default=False, alias="BILLING_ENABLED")
+    ingest_provider: str = Field(default="", alias="INGEST_PROVIDER")
+    operator_telegram_ids: str = Field(default="", alias="OPERATOR_TELEGRAM_IDS")
+    operator_bot_token: str | None = Field(default=None, alias="OPERATOR_BOT_TOKEN")
+    open_registration: bool = Field(default=False, alias="OPEN_REGISTRATION")
     cook_cost_ceiling_micros: int = Field(
         default=100_000, alias="COOK_COST_CEILING_MICROS"
     )
@@ -81,6 +86,40 @@ class Settings(BaseSettings):
                     "(anthropic, openai, or gemini)"
                 )
         return self
+
+    _INGEST_PREFERENCE: ClassVar[tuple[str, ...]] = ("gemini", "openai", "anthropic")
+
+    @model_validator(mode="after")
+    def resolve_ingest_provider(self) -> "Settings":
+        if self.ingest_provider:
+            if not supports(self.ingest_provider, "image"):
+                raise ValueError(
+                    f"INGEST_PROVIDER={self.ingest_provider} cannot process images"
+                )
+            if not self._api_key_for(self.ingest_provider):
+                raise ValueError(
+                    f"INGEST_PROVIDER={self.ingest_provider} has no API key"
+                )
+            return self
+        for provider in self._INGEST_PREFERENCE:
+            if self._api_key_for(provider):
+                object.__setattr__(self, "ingest_provider", provider)
+                break
+        return self
+
+    @property
+    def operator_ids(self) -> frozenset[int]:
+        raw = self.operator_telegram_ids.strip()
+        if not raw:
+            return frozenset({self.allowed_telegram_user_id})
+        try:
+            return frozenset(
+                int(part.strip()) for part in raw.split(",") if part.strip()
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "OPERATOR_TELEGRAM_IDS must contain comma-separated integers"
+            ) from exc
 
     @classmethod
     def load(cls) -> Self:

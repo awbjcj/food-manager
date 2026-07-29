@@ -10,6 +10,8 @@ from app.llm import LLMClient, ProfileUpdateLLMClient, TextLLMClient
 from app.shelf_life_search import ShelfLifeSearchClient
 from app.translation_llm import TranslationLLMClient
 
+INGEST_PROVIDER = "gemini"
+
 
 class UserProvider(Protocol):
     @property
@@ -105,6 +107,9 @@ class PerUserClients:
     def image(self, user: UserProvider) -> LLMClient:
         return _required(resolve(self._image, user.llm_provider), "image")
 
+    def image_for_ingest(self) -> LLMClient:
+        return _required(resolve(self._image, INGEST_PROVIDER), "image")
+
     def text(self, user: UserProvider) -> TextLLMClient:
         return _required(resolve(self._text, user.llm_provider), "text")
 
@@ -123,9 +128,7 @@ class PerUserClients:
     def nutrition(self, user: UserProvider) -> NutritionLLMClient:
         return _required(resolve(self._nutrition, user.llm_provider), "nutrition")
 
-    def nutrition_if_configured(
-        self, user: UserProvider
-    ) -> NutritionLLMClient | None:
+    def nutrition_if_configured(self, user: UserProvider) -> NutritionLLMClient | None:
         return resolve(self._nutrition, user.llm_provider)
 
     def search(self, user: UserProvider) -> ShelfLifeSearchClient | None:
@@ -137,9 +140,7 @@ class PerUserClients:
 
     @property
     def available_text_providers(self) -> tuple[str, ...]:
-        return tuple(
-            sorted(getattr(self._text, "available_providers", ("anthropic",)))
-        )
+        return tuple(sorted(getattr(self._text, "available_providers", ("anthropic",))))
 
     @property
     def cook_configured(self) -> bool:

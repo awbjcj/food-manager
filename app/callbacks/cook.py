@@ -9,6 +9,7 @@ from sqlalchemy import update
 from sqlmodel import Session
 
 from app import handler_support, views
+from app.billing.meter import admit, commit
 from app.callback_dispatch import edit_or_resend
 from app.client_set import PerUserClients
 from app.commands import (
@@ -164,6 +165,17 @@ async def handle_cook_callback(
                 session.commit()
                 await cb.answer("this cook session expired - start a new /cook")
                 return
+            decision = admit(
+                session,
+                household_id=user.household_id,
+                op="cook",
+                provider=user.llm_provider,
+                now=now,
+            )
+            if not decision.allowed:
+                await cb.answer(t("quota.degraded.more", user.lang), show_alert=True)
+                return
+            cost_before = cook.llm_cost_micros_usd or 0
             assert cook.id is not None
             claim = session.exec(
                 update(CookSession)
@@ -244,6 +256,14 @@ async def handle_cook_callback(
                         ),
                     )
             finally:
+                commit(
+                    session,
+                    household_id=user.household_id,
+                    op="cook",
+                    provider=user.llm_provider,
+                    cost_micros=max(0, (cook.llm_cost_micros_usd or 0) - cost_before),
+                    now=now,
+                )
                 cook.status = "done"
                 session.add(cook)
                 session.commit()

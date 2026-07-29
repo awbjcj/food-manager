@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlmodel import Session
 
 from app import handler_support, views
+from app.billing.meter import admit, commit
 from app.client_set import PerUserClients
 from app.cook import (
     NotEnoughItems,
@@ -150,6 +151,23 @@ async def run_cook_and_render(
         chat_id = cook.chat_id
         message_id = cook.message_id
         today = now_provider(user_tz).date()
+        now = now_provider(user_tz)
+        decision = admit(
+            session,
+            household_id=household_id,
+            op="cook",
+            provider=user.llm_provider,
+            now=now,
+        )
+        if not decision.allowed:
+            mark_status(session, cook=cook, status="cancelled")
+            await _safe_edit_bot(
+                bot,
+                chat_id=chat_id,
+                message_id=message_id,
+                text=t("quota.degraded.cook", user.lang),
+            )
+            return
         selected_selection_llm = clients.selection(user)
         selected_recipe_llm = clients.recipe(user)
         selected_nutrition_llm = clients.nutrition(user)
@@ -191,6 +209,15 @@ async def run_cook_and_render(
                 text="Couldn't build a recipe right now - try /cook again.",
             )
             return
+        finally:
+            commit(
+                session,
+                household_id=household_id,
+                op="cook",
+                provider=user.llm_provider,
+                cost_micros=cook.llm_cost_micros_usd,
+                now=now,
+            )
 
         mark_status(session, cook=cook, status="done")
         view = await views.cook_result(

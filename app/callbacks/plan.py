@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import app.plan_service as plan_service_mod
 from app import handler_support
+from app.billing.meter import admit, commit
 from app.callback_dispatch import (
     answer as dispatch_answer,
 )
@@ -17,6 +18,7 @@ from app.commands import (
     CommandError,
     parse_callback,
 )
+from app.cook.recipe_source import ChainedRecipeSource
 from app.handlers.plan import (
     _plan_entry_rows,
     _plan_source,
@@ -109,7 +111,20 @@ async def handle_plan_callback(
             await dispatch_answer(cb, "couldn't load your household profile")
             return
         profile = profile_from_household(household)
-        source = _plan_source(recipe_sources, clients, user)
+        now = now_provider(user.tz)
+        decision = admit(
+            session,
+            household_id=user.household_id,
+            op="plan",
+            provider=user.llm_provider,
+            now=now,
+        )
+        source = (
+            _plan_source(recipe_sources, clients, user)
+            if decision.allowed
+            else ChainedRecipeSource(list(recipe_sources))
+        )
+        cost_before = plan.cost_micros_usd
         await dispatch_answer(cb)
         try:
             updated = await swap_day(
@@ -127,6 +142,15 @@ async def handle_plan_callback(
         if updated is None:
             await edit_or_resend(cb, t("plan.no_swap", user.lang))
             return
+        if decision.allowed:
+            commit(
+                session,
+                household_id=user.household_id,
+                op="plan",
+                provider=user.llm_provider,
+                cost_micros=max(0, plan.cost_micros_usd - cost_before),
+                now=now,
+            )
         text, keyboard = await _render_plan_message(
             session, plan=plan, lang=user.lang, translation_llm=translation_llm
         )

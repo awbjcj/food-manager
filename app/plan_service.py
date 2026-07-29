@@ -6,6 +6,7 @@ always answers. Day N is planned against the pantry pool minus what days
 1..N-1 consumed, so expiring items are cooked early and the aggregated
 shopping list is correct by construction.
 """
+
 from __future__ import annotations
 
 import json
@@ -105,8 +106,14 @@ def _pick(
 
 
 async def _search_day(
-    source, *, spec: DaySpec, include: list[str], profile, offset: int,
-    remaining_cost_micros: int | None, steering: str | None = None,
+    source,
+    *,
+    spec: DaySpec,
+    include: list[str],
+    profile,
+    offset: int,
+    remaining_cost_micros: int | None,
+    steering: str | None = None,
 ):
     criteria = build_criteria(
         include_ingredients=include,
@@ -131,7 +138,9 @@ async def _search_day(
             steering=steering,
         )
         remaining_after = (
-            None if remaining_cost_micros is None else max(0, remaining_cost_micros - (cost or 0))
+            None
+            if remaining_cost_micros is None
+            else max(0, remaining_cost_micros - (cost or 0))
         )
         more, extra = await source.search(
             criteria, remaining_cost_micros=remaining_after
@@ -166,13 +175,13 @@ async def build_plan(
 
     cost = 0
     try:
+        if composer is None:
+            raise RuntimeError("composer disabled")
         specs = await composer.compose(
             pantry=pantry, profile=profile, days=days, today=today
         )
     except Exception as exc:  # noqa: BLE001 - composer is best-effort
-        log.warning(
-            "plan_composer_failed", extra={"error_class": type(exc).__name__}
-        )
+        log.warning("plan_composer_failed", extra={"error_class": type(exc).__name__})
         specs = heuristic_compose(pantry=pantry, profile=profile, days=days)
 
     cancel_active_plans(session, household_id=household_id)
@@ -199,8 +208,13 @@ async def build_plan(
             include = pool_names[:2]
         remaining = max(0, cost_ceiling_micros - cost)
         sourced, day_cost = await _search_day(
-            source, spec=spec, include=include, profile=profile, offset=0,
-            remaining_cost_micros=remaining, steering=steering_summary(signals) or None,
+            source,
+            spec=spec,
+            include=include,
+            profile=profile,
+            offset=0,
+            remaining_cost_micros=remaining,
+            steering=steering_summary(signals) or None,
         )
         cost += day_cost or 0
         urgent = [n for n, d in pool if d <= URGENT_DAYS]

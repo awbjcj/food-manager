@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from sqlmodel import Session
 
 from app import handler_support, views
+from app.billing.meter import admit, commit
+from app.cache import get_cached
 from app.client_set import PerUserClients
 from app.commands import (
     CommandError,
@@ -28,6 +30,7 @@ from app.correction_service import (
 from app.i18n import t
 from app.llm import LLMProviderNotConfigured
 from app.models import PantryItem, User
+from app.normalization import normalize
 from app.pantry_service import (
     ListFilter,
     NotOwnerOrMissing,
@@ -53,6 +56,7 @@ from app.renderer import (
     render_correction_diff,
     render_stats,
 )
+from app.shelf_life_defaults import lookup_default
 from app.telegram_ui import to_aiogram_keyboard
 
 _SessionFactory = Callable[[], Session]
@@ -293,15 +297,64 @@ async def handle_add(
         if len(parts) != 2 or not parts[1].strip():
             await msg.answer("usage: /add <free text - name, category, expiry>")
             return
+        now = now_provider(user.tz)
+        decision = admit(
+            session,
+            household_id=user.household_id,
+            op="edit",
+            provider=user.llm_provider,
+            now=now,
+        )
+        raw_text = parts[1].strip()
+        if not decision.allowed:
+            normalized = normalize(raw_text)
+            cached = get_cached(session, user.household_id, normalized)
+            default = lookup_default(normalized)
+            days = cached.days if cached is not None else default.days if default else 7
+            category = (
+                cached.category
+                if cached is not None
+                else default.category
+                if default is not None
+                else None
+            )
+            session.add(
+                PantryItem(
+                    household_id=user.household_id,
+                    raw_name=raw_text,
+                    normalized_name=normalized,
+                    category=category,
+                    purchased_on=today,
+                    shelf_life_days=days,
+                    shelf_life_source="manual_fallback",
+                    ingest_shelf_life_source="manual_fallback",
+                    expires_on=today + timedelta(days=days),
+                    created_via="manual",
+                    created_at=now,
+                )
+            )
+            session.commit()
+            await msg.answer(
+                t("quota.degraded.add", user.lang, name=raw_text, days=days)
+            )
+            return
         progress = await start_progress(msg, t("progress.parsing_add", user.lang))
         await _run_add_flow(
             msg,
             session=session,
             user=user,
             today=today,
-            raw_text=parts[1].strip(),
+            raw_text=raw_text,
             clients=clients,
             progress=progress,
+        )
+        commit(
+            session,
+            household_id=user.household_id,
+            op="edit",
+            provider=user.llm_provider,
+            cost_micros=None,
+            now=now,
         )
 
 
@@ -571,6 +624,19 @@ async def handle_correct(
         if item.status != "active":
             await msg.answer(f"#{item_id} is {item.status}; cannot correct")
             return
+        now = now_provider(user.tz)
+        decision = admit(
+            session,
+            household_id=user.household_id,
+            op="edit",
+            provider=user.llm_provider,
+            now=now,
+        )
+        if not decision.allowed:
+            await msg.answer(
+                t("quota.degraded.correction", user.lang)
+            )
+            return
         await _propose_and_send_correction(
             msg,
             session=session,
@@ -579,6 +645,14 @@ async def handle_correct(
             user_text=parts[2].strip(),
             today=today,
             clients=clients,
+        )
+        commit(
+            session,
+            household_id=user.household_id,
+            op="edit",
+            provider=user.llm_provider,
+            cost_micros=None,
+            now=now,
         )
 
 
@@ -615,6 +689,19 @@ async def handle_correct_reply(
         if not user_text:
             await msg.answer("reply with the correction text")
             return
+        now = now_provider(user.tz)
+        decision = admit(
+            session,
+            household_id=user.household_id,
+            op="edit",
+            provider=user.llm_provider,
+            now=now,
+        )
+        if not decision.allowed:
+            await msg.answer(
+                t("quota.degraded.correction", user.lang)
+            )
+            return
         await _propose_and_send_correction(
             msg,
             session=session,
@@ -623,6 +710,14 @@ async def handle_correct_reply(
             user_text=user_text,
             today=today,
             clients=clients,
+        )
+        commit(
+            session,
+            household_id=user.household_id,
+            op="edit",
+            provider=user.llm_provider,
+            cost_micros=None,
+            now=now,
         )
 
 

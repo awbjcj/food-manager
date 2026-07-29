@@ -5,6 +5,7 @@ import logging
 from datetime import UTC, datetime
 
 from app import handler_support, views
+from app.billing.meter import admit, commit
 from app.callback_dispatch import (
     answer as dispatch_answer,
 )
@@ -76,7 +77,8 @@ async def handle_callback(
             )
             await cb.answer("not authorized", show_alert=False)
             return
-        today = now_provider(user.tz).date()
+        now = now_provider(user.tz)
+        today = now.date()
 
         async def refresh_items_for_origin() -> None:
             if action.back_to == "all":
@@ -300,14 +302,30 @@ async def handle_callback(
                     days=2,
                 )
             elif action.verb in ("freeze", "fridge"):
+                decision = admit(
+                    session,
+                    household_id=user.household_id,
+                    op="search",
+                    provider=user.llm_provider,
+                    now=now,
+                )
                 result = await move_to_storage(
                     session,
                     household_id=user.household_id,
                     item_id=item_id,
                     state="frozen" if action.verb == "freeze" else "fridge",
                     today=today,
-                    search=clients.search(user),
+                    search=clients.search(user) if decision.allowed else None,
                 )
+                if decision.allowed:
+                    commit(
+                        session,
+                        household_id=user.household_id,
+                        op="search",
+                        provider=user.llm_provider,
+                        cost_micros=None,
+                        now=now,
+                    )
             else:
                 await dispatch_answer(cb, "unrecognized action")
                 return

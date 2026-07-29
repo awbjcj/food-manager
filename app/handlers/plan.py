@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 
 import app.plan_service as plan_service_mod
 from app import handler_support, views
+from app.billing.meter import admit, commit
 from app.client_set import EMPTY_CLIENTS, PerUserClients
 from app.commands import (
     CommandError,
@@ -97,6 +98,14 @@ async def handle_plan(
             await msg.answer("couldn't load your household profile")
             return
         profile = profile_from_household(household)
+        now = now_provider(user.tz)
+        decision = admit(
+            session,
+            household_id=user.household_id,
+            op="plan",
+            provider=user.llm_provider,
+            now=now,
+        )
         progress = await start_progress(msg, t("plan.progress", user.lang))
         had_active = (
             session.exec(
@@ -107,8 +116,16 @@ async def handle_plan(
             ).first()
             is not None
         )
-        selected_composer = composer.for_provider(user.llm_provider)
-        source = _plan_source(recipe_sources, clients, user)
+        selected_composer = (
+            composer.for_provider(user.llm_provider) if decision.allowed else None
+        )
+        source = (
+            _plan_source(recipe_sources, clients, user)
+            if decision.allowed
+            else ChainedRecipeSource(list(recipe_sources))
+        )
+        if not decision.allowed:
+            await msg.answer(t("quota.degraded.plan", user.lang))
         try:
             plan, entries = await build_plan(
                 session,
@@ -137,6 +154,15 @@ async def handle_plan(
         if not entries:
             await finish_progress(progress, msg, t("plan.not_enough", user.lang))
             return
+        if decision.allowed:
+            commit(
+                session,
+                household_id=user.household_id,
+                op="plan",
+                provider=user.llm_provider,
+                cost_micros=plan.cost_micros_usd,
+                now=now,
+            )
 
         candidates = [
             ScoredCandidate.model_validate_json(entry.recipe_json) for entry in entries

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 from app import handler_support, views
+from app.billing.meter import admit, commit
 from app.cache import get_cached
 from app.client_set import EMPTY_CLIENTS, PerUserClients
 from app.commands import (
@@ -73,6 +75,17 @@ async def handle_nl_message(
         if ctx is None:
             return
         session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
+        now = now_provider(user.tz)
+        decision = admit(
+            session,
+            household_id=user.household_id,
+            op="chat",
+            provider=user.llm_provider,
+            now=now,
+        )
+        if not decision.allowed:
+            await msg.answer(t("nl.hint", user.lang))
+            return
         progress = await start_progress(msg, t("nl.thinking", user.lang))
         try:
             agent = intent_agent.for_provider(user.llm_provider)
@@ -88,6 +101,14 @@ async def handle_nl_message(
                 pantry_names=[i.normalized_name for i in pantry][:MAX_CONTEXT_NAMES],
             )
         except Exception as exc:  # noqa: BLE001 - NL must never break the bot
+            commit(
+                session,
+                household_id=user.household_id,
+                op="chat",
+                provider=user.llm_provider,
+                cost_micros=None,
+                now=now,
+            )
             log.warning(
                 "nl_intent_failed",
                 extra={
@@ -97,6 +118,14 @@ async def handle_nl_message(
             )
             await finish_progress(progress, msg, t("nl.hint", user.lang))
             return
+        commit(
+            session,
+            household_id=user.household_id,
+            op="chat",
+            provider=user.llm_provider,
+            cost_micros=None,
+            now=now,
+        )
         try:
             await _dispatch_nl_intent(
                 msg,
@@ -278,6 +307,7 @@ async def handle_prefs(
     *,
     session_factory,
     clients: PerUserClients,
+    now_provider=None,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
     async with _request(
@@ -298,9 +328,24 @@ async def handle_prefs(
                 render_profile(profile_from_household(household), lang=user.lang)
             )
             return
+        now = now_provider(user.tz) if now_provider is not None else datetime.now(UTC)
+        decision = admit(
+            session,
+            household_id=user.household_id,
+            op="edit",
+            provider=user.llm_provider,
+            now=now,
+        )
+        if not decision.allowed:
+            await msg.answer(
+                render_profile(profile_from_household(household), lang=user.lang)
+                + "\n\n"
+                + t("quota.degraded.profile", user.lang)
+            )
+            return
         try:
             selected = clients.profile(user)
-            profile, _ = await update_profile_from_sentence(
+            profile, cost = await update_profile_from_sentence(
                 session,
                 llm=selected,
                 household=household,
@@ -321,6 +366,14 @@ async def handle_prefs(
             )
             await msg.answer("couldn't update your profile - try simpler wording")
             return
+        commit(
+            session,
+            household_id=user.household_id,
+            op="edit",
+            provider=user.llm_provider,
+            cost_micros=cost,
+            now=now,
+        )
         await msg.answer(
             t("prefs.updated", user.lang)
             + "\n\n"
@@ -381,6 +434,23 @@ async def handle_photo(
         if ctx is None:
             return
         session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
+        now = now_provider(user.tz)
+        decision = admit(
+            session,
+            household_id=user.household_id,
+            op="receipt",
+            provider=user.llm_provider,
+            now=now,
+        )
+        if not decision.allowed:
+            await msg.answer(
+                t(
+                    "quota.receipts_exhausted",
+                    user.lang,
+                    limit=decision.snapshot.receipts_limit,
+                )
+            )
+            return
         if not msg.photo:
             await msg.answer("send a photo of a receipt")
             return
@@ -391,7 +461,7 @@ async def handle_photo(
         )
         progress = await start_progress(msg, t("progress.reading_receipt", user.lang))
         try:
-            selected_llm = clients.image(user)
+            selected_llm = clients.image_for_ingest()
             selected_search = clients.search(user)
             summary = await ingest_photo(
                 session,
@@ -427,6 +497,14 @@ async def handle_photo(
                 "couldn't read that one - try a clearer photo or /add <items> manually",
             )
             return
+        commit(
+            session,
+            household_id=user.household_id,
+            op="receipt",
+            provider=user.llm_provider,
+            cost_micros=summary.cost_micros_usd,
+            now=now,
+        )
         log.info(
             "receipt_ingest_succeeded",
             extra={
@@ -534,6 +612,10 @@ async def _answer_shelf_life(
 
 COMMANDS = (
     ("llm", handle_llm, ("session_factory", "clients", "on_user_created")),
-    ("prefs", handle_prefs, ("session_factory", "clients", "on_user_created")),
+    (
+        "prefs",
+        handle_prefs,
+        ("session_factory", "clients", "now_provider", "on_user_created"),
+    ),
     ("help", handle_help, ("session_factory", "on_user_created")),
 )

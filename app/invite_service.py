@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel import Session, select
 
-from app.billing.entitlement import get_or_create_subscription
+from app.billing.entitlement import get_or_create_subscription, roll_period_if_due
 from app.models import HouseholdInvite, User
 
 INVITE_TTL_HOURS = 24
@@ -174,6 +174,7 @@ def seats_used(session: Session, *, household_id: int) -> int:
 
 def _require_free_seat(session: Session, *, household_id: int, now: datetime) -> None:
     sub = get_or_create_subscription(session, household_id=household_id, now=now)
+    sub = roll_period_if_due(session, sub=sub, now=now)
     if seats_used(session, household_id=household_id) >= sub.seat_cap:
         raise HouseholdFull(sub.seat_cap)
 

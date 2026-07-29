@@ -17,6 +17,7 @@ from app.bot import (
 from app.invite_service import (
     AlreadyMember,
     CannotRemoveSelf,
+    HouseholdFull,
     InviteInvalid,
     MemberNotFound,
     NotOwner,
@@ -97,6 +98,21 @@ def test_create_invite_returns_token_and_future_expiry(session):
     assert stored.household_id == 1
     assert stored.created_by == 1
     assert stored.redeemed_by is None
+
+
+def test_create_invite_rejects_when_expired_paid_period_rolls_seat_cap_down(session):
+    now = _now()
+    sub = session.get(Subscription, 1)
+    sub.telegram_charge_id = "charge_1"
+    sub.period_end = now - timedelta(days=1)
+    session.add(sub)
+    session.add(
+        User(telegram_id=2, chat_id=22, household_id=1, role="member", created_at=now)
+    )
+    session.commit()
+
+    with pytest.raises(HouseholdFull):
+        create_invite(session, household_id=1, created_by=1, now=now)
 
 
 def test_redeem_invite_creates_member_and_marks_single_use(session):

@@ -4,7 +4,8 @@ from datetime import datetime
 
 from sqlmodel import Session
 
-from app.models import Household, User
+from app.billing.entitlement import PERIOD
+from app.models import Household, Subscription, User
 
 
 def provision_solo_household(
@@ -17,6 +18,15 @@ def provision_solo_household(
     assert household.id is not None
     user.household_id = household.id
     session.add(user)
+    session.add(
+        Subscription(
+            household_id=household.id,
+            period_start=created_at,
+            period_end=created_at + PERIOD,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+    )
     session.commit()
     session.refresh(household)
     session.refresh(user)
@@ -36,6 +46,15 @@ def restore_household_for_user(
         id=user.household_id, name="My Household", created_at=created_at
     )
     session.add(household)
+    session.add(
+        Subscription(
+            household_id=user.household_id,
+            period_start=created_at,
+            period_end=created_at + PERIOD,
+            created_at=created_at,
+            updated_at=created_at,
+        )
+    )
     session.commit()
     session.refresh(household)
     return household

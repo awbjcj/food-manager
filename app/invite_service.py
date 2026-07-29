@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlmodel import Session, select
 
+from app.billing.entitlement import get_or_create_subscription
 from app.models import HouseholdInvite, User
 
 INVITE_TTL_HOURS = 24
@@ -52,6 +53,14 @@ class CannotRemoveSelf(InviteError):
     """Owner tried to /remove themselves."""
 
 
+class HouseholdFull(InviteError):
+    """The household is at its subscription seat cap."""
+
+    def __init__(self, cap: int) -> None:
+        self.cap = cap
+        super().__init__(f"household is full ({cap})")
+
+
 def _utc_naive(value: datetime) -> datetime:
     """Normalize to naive UTC so comparisons match SQLite-stored datetimes."""
     if value.tzinfo is not None:
@@ -81,6 +90,7 @@ def create_invite(
     handler enforces that the caller is a member); role is not checked here.
     """
     issued_at = _utc_naive(now)
+    _require_free_seat(session, household_id=household_id, now=issued_at)
     expires_at = issued_at + timedelta(hours=ttl_hours)
     token = secrets.token_urlsafe(_TOKEN_BYTES)
     invite = HouseholdInvite(
@@ -134,6 +144,8 @@ def redeem_invite(
     if exhausted or _utc_naive(invite.expires_at) <= moment:
         raise InviteInvalid()
 
+    _require_free_seat(session, household_id=invite.household_id, now=moment)
+
     user = User(
         telegram_id=telegram_user_id,
         chat_id=chat_id,
@@ -152,6 +164,18 @@ def redeem_invite(
     session.commit()
     session.refresh(user)
     return RedeemResult(user=user, household_id=invite.household_id)
+
+
+def seats_used(session: Session, *, household_id: int) -> int:
+    return len(
+        session.exec(select(User).where(User.household_id == household_id)).all()
+    )
+
+
+def _require_free_seat(session: Session, *, household_id: int, now: datetime) -> None:
+    sub = get_or_create_subscription(session, household_id=household_id, now=now)
+    if seats_used(session, household_id=household_id) >= sub.seat_cap:
+        raise HouseholdFull(sub.seat_cap)
 
 
 def _revoke_invites_from(session: Session, *, created_by: int) -> None:

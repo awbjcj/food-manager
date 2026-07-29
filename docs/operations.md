@@ -74,3 +74,24 @@ For unattended operation register it as a Scheduled Task ("At startup",
   auto-restart with 1s→300s backoff.
 - Process died overnight → on restart, any digest whose hour already passed
   and wasn't recorded in `User.last_digest_date` is sent late.
+
+## Operator bot
+
+Set `OPERATOR_BOT_TOKEN` to enable a second private bot in the same process.
+Only IDs in `OPERATOR_TELEGRAM_IDS` can use `/whois`, `/grant`, `/refund`,
+`/ban`, `/unban`, `/revenue`, and `/reconcile`; other senders receive no reply.
+Both bots stay co-located because they share the SQLite volume. Migrating to
+separate processes requires Postgres first.
+
+## v6.0 go-live checklist
+
+1. Deploy with `BILLING_ENABLED=false` and `OPEN_REGISTRATION=false`.
+2. Observe at least one complete 30-day usage period and recalibrate
+   `app/billing/plans.py` from `quotausage` before accepting money.
+3. Set `OPERATOR_BOT_TOKEN`; verify `/whois`, `/grant`, `/ban`, and `/reconcile`.
+4. Set `BILLING_ENABLED=true`; verify `/quota` and one real top-up. Confirm its
+   ledger row, raised limit, and a clean `/reconcile` result.
+5. Set `OPEN_REGISTRATION=true`; monitor `household_registered` logs and alerts.
+
+To close registration, restore `OPEN_REGISTRATION=false`. Existing households
+continue to work; only first-contact provisioning stops.

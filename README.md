@@ -124,6 +124,9 @@ reverted.
 | `/household` | List household members |
 | `/leave` | Leave your household |
 | `/remove <id>` | (owner) Remove a member from your household |
+| `/quota` | Show pooled household receipt and AI-action usage |
+| `/buy` | Buy the Family plan or a quota top-up with Telegram Stars |
+| `/billing` | Show the current subscription status |
 | `/help` | Show all commands |
 
 ## Environment variables
@@ -131,7 +134,12 @@ reverted.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | Yes | — | Bot token from `@BotFather` |
-| `ALLOWED_TELEGRAM_USER_ID` | Yes | — | Numeric Telegram user ID allowed to bootstrap the first household |
+| `ALLOWED_TELEGRAM_USER_ID` | Yes | — | Bootstrap and default operator identity |
+| `OPEN_REGISTRATION` | No | `false` | Allow new Telegram users to provision free households; existing members and invites still work when false |
+| `BILLING_ENABLED` | No | `false` | Enforce quota and expose Stars checkout; usage is still recorded when false |
+| `INGEST_PROVIDER` | No | cheapest configured | Image-capable provider pinned for receipt ingest, independent of `/llm` |
+| `OPERATOR_TELEGRAM_IDS` | No | `ALLOWED_TELEGRAM_USER_ID` | Comma-separated operator Telegram IDs |
+| `OPERATOR_BOT_TOKEN` | No | — | Token for the optional, separate operator bot |
 | `LLM_PROVIDER` | No | `anthropic` | Default provider: `anthropic`, `openai`, `gemini`, or `deepseek`. Each user can override with `/llm`. `deepseek` is text-only, so at least one image-capable provider's key must also be set |
 | `ANTHROPIC_API_KEY` | When using anthropic | — | Anthropic API key |
 | `ANTHROPIC_MODEL` | No | `claude-sonnet-5` | Claude model to use for receipt parsing |
@@ -151,3 +159,6 @@ reverted.
 | `DATABASE_PATH` | No | `./food.db` | Path to the SQLite database file |
 | `LOG_LEVEL` | No | `INFO` | Logging level |
 | `ENV` | No | `dev` | Set to `prod` for JSON-structured logs |
+
+Stars subscriptions renew every 30 days and are managed in Telegram Settings.
+Top-ups expire at the end of the household's current quota period.

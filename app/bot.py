@@ -38,6 +38,13 @@ from app.commands import (
     CommandError,
     parse_callback_request,
 )
+from app.handlers.billing import (
+    COMMANDS as BILLING_COMMANDS,
+)
+from app.handlers.billing import (
+    handle_pre_checkout,
+    handle_successful_payment,
+)
 from app.handlers.cook import (
     COMMANDS as COOK_COMMANDS,
 )
@@ -106,6 +113,7 @@ DEFAULT_TZ = "America/Detroit"
 DEFAULT_DIGEST_HOUR = 8
 DEFAULT_LLM_PROVIDER = "anthropic"
 ALLOWED_TELEGRAM_USER_ID: int = 0
+OPEN_REGISTRATION: bool = False
 MEAL_TYPES = ["Dinner", "Lunch", "Breakfast", "Dessert", "Snack", "Surprise me"]
 DEFAULT_CUISINES = ["Italian", "Mexican", "Chinese", "American", "Surprise me"]
 SPOONACULAR_CUISINES = [
@@ -174,6 +182,7 @@ _MESSAGE_COMMANDS: tuple[
     *PLAN_COMMANDS,
     *SHOPPING_COMMANDS,
     *META_COMMANDS,
+    *BILLING_COMMANDS,
 )
 
 
@@ -191,6 +200,7 @@ def build_dispatcher(
     recipe_sources=(),
     intent_agent=None,
     composer=None,
+    payments=None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -217,6 +227,7 @@ def build_dispatcher(
         "spawn": asyncio.create_task,
         "composer": composer,
         "recipe_sources": recipe_sources,
+        "payments": payments,
     }
 
     def _bind(handler, *dep_names):
@@ -229,6 +240,14 @@ def build_dispatcher(
 
     for _name, _handler, _dep_names in _MESSAGE_COMMANDS:
         dispatcher.message.register(_bind(_handler, *_dep_names), Command(_name))
+
+    dispatcher.pre_checkout_query.register(
+        _bind(handle_pre_checkout, "session_factory")
+    )
+    dispatcher.message.register(
+        _bind(handle_successful_payment, "session_factory", "now_provider"),
+        F.successful_payment,
+    )
 
     dispatcher.message.register(
         _bind(

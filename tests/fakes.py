@@ -2,6 +2,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.billing.payment import LedgerRow
+from app.billing.plans import Sku
 from app.cook.models import NutritionScores, RecipeCandidates, SelectedItems
 from app.llm import CorrectionDiff, LLMClient, LLMResult, ProposedAddItem
 from app.profile_service import FoodProfile
@@ -164,3 +166,28 @@ class FakeTranslationLLM:
             raise RuntimeError("simulated translation failure")
         result: list[str] = [self.table.get(t, t) for t in texts]
         return result, 0
+
+
+@dataclass
+class FakePaymentProvider:
+    refund_succeeds: bool = True
+    transactions: list[tuple[str, int]] = field(default_factory=list)
+    checkouts: list[tuple[str, int]] = field(default_factory=list)
+    refunds: list[tuple[int, str]] = field(default_factory=list)
+    cancellations: list[tuple[int, str]] = field(default_factory=list)
+
+    async def create_checkout(self, *, sku: Sku, household_id: int) -> str:
+        self.checkouts.append((sku.code, household_id))
+        return f"https://t.me/invoice/{sku.code}/{household_id}"
+
+    async def refund(self, *, user_id: int, charge_id: str) -> bool:
+        self.refunds.append((user_id, charge_id))
+        return self.refund_succeeds
+
+    async def cancel_subscription(self, *, user_id: int, charge_id: str) -> bool:
+        self.cancellations.append((user_id, charge_id))
+        return True
+
+    async def list_transactions(self, *, offset: int, limit: int) -> list[LedgerRow]:
+        rows = [LedgerRow(charge_id, stars, None) for charge_id, stars in self.transactions]
+        return rows[offset : offset + limit]

@@ -99,66 +99,66 @@ reverted.
 
 ## Bot commands
 
-| Command | Description |
-|---|---|
-| Send a photo | Parse a receipt and log all food items |
-| `/add 2 lb chicken, dozen eggs` | Propose manual items without a receipt |
-| `/list` | Show all active pantry items |
-| `/list dairy` | Filter by category |
-| `/list week` | Show items expiring within 7 days |
-| `/list expired` | Show already-expired items |
-| `/pantry [digest\|<id>]` | Interactive pantry view — digest, full list, or one item card with action buttons |
-| `/correct <id> <free text>` | Propose a natural-language correction |
-| `/delete <id>` | Remove a wrongly imported item (does not teach future imports) |
-| `/digest_at 7` | Set your daily digest hour (0–23, in your timezone) |
-| `/tz America/New_York` | Set your timezone |
-| `/lang [en\|zh\|fr\|es]` | Show or set your language |
-| `/stats` | Show pantry statistics |
-| `/llm [anthropic\|openai\|gemini\|deepseek]` | Show or switch the LLM provider |
-| `/prefs [sentence]` | Show or update your household's food profile |
-| `/cook` | Get a recipe built from your pantry |
-| `/shopping` | View your to-buy list; tap an item once bought |
-| `/favorites` | View saved recipes; tap to re-cook against your current pantry |
-| `/invite [family]` | Invite one person (or `family` for a reusable link) to your household |
-| `/join <code>` | Join a household you were invited to |
-| `/household` | List household members |
-| `/leave` | Leave your household |
-| `/remove <id>` | (owner) Remove a member from your household |
-| `/quota` | Show pooled household receipt and AI-action usage |
-| `/buy` | Buy the Family plan or a quota top-up with Telegram Stars |
-| `/billing` | Show the current subscription status |
-| `/help` | Show all commands |
+| Command                                      | Description                                                                       |
+| -------------------------------------------- | --------------------------------------------------------------------------------- |
+| Send a photo                                 | Parse a receipt and log all food items                                            |
+| `/add 2 lb chicken, dozen eggs`              | Propose manual items without a receipt                                            |
+| `/list`                                      | Show all active pantry items                                                      |
+| `/list dairy`                                | Filter by category                                                                |
+| `/list week`                                 | Show items expiring within 7 days                                                 |
+| `/list expired`                              | Show already-expired items                                                        |
+| `/pantry [digest\|<id>]`                     | Interactive pantry view — digest, full list, or one item card with action buttons |
+| `/correct <id> <free text>`                  | Propose a natural-language correction                                             |
+| `/delete <id>`                               | Remove a wrongly imported item (does not teach future imports)                    |
+| `/digest_at 7`                               | Set your daily digest hour (0–23, in your timezone)                               |
+| `/tz America/New_York`                       | Set your timezone                                                                 |
+| `/lang [en\|zh\|fr\|es]`                     | Show or set your language                                                         |
+| `/stats`                                     | Show pantry statistics                                                            |
+| `/llm [anthropic\|openai\|gemini\|deepseek]` | Show or switch the LLM provider                                                   |
+| `/prefs [sentence]`                          | Show or update your household's food profile                                      |
+| `/cook`                                      | Get a recipe built from your pantry                                               |
+| `/shopping`                                  | View your to-buy list; tap an item once bought                                    |
+| `/favorites`                                 | View saved recipes; tap to re-cook against your current pantry                    |
+| `/invite [family]`                           | Invite one person (or `family` for a reusable link) to your household             |
+| `/join <code>`                               | Join a household you were invited to                                              |
+| `/household`                                 | List household members                                                            |
+| `/leave`                                     | Leave your household                                                              |
+| `/remove <id>`                               | (owner) Remove a member from your household                                       |
+| `/quota`                                     | Show pooled household receipt and AI-action usage                                 |
+| `/buy`                                       | Buy the Family plan or a quota top-up with Telegram Stars                         |
+| `/billing`                                   | Show the current subscription status                                              |
+| `/help`                                      | Show all commands                                                                 |
 
 ## Environment variables
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | Yes | — | Bot token from `@BotFather` |
-| `ALLOWED_TELEGRAM_USER_ID` | Yes | — | Bootstrap and default operator identity |
-| `OPEN_REGISTRATION` | No | `false` | Allow new Telegram users to provision free households; existing members and invites still work when false |
-| `BILLING_ENABLED` | No | `false` | Enforce quota and expose Stars checkout; usage is still recorded when false |
-| `INGEST_PROVIDER` | No | cheapest configured | Image-capable provider pinned for receipt ingest, independent of `/llm` |
-| `OPERATOR_TELEGRAM_IDS` | No | `ALLOWED_TELEGRAM_USER_ID` | Comma-separated operator Telegram IDs |
-| `OPERATOR_BOT_TOKEN` | No | — | Token for the optional, separate operator bot |
-| `LLM_PROVIDER` | No | `anthropic` | Default provider: `anthropic`, `openai`, `gemini`, or `deepseek`. Each user can override with `/llm`. `deepseek` is text-only, so at least one image-capable provider's key must also be set |
-| `ANTHROPIC_API_KEY` | When using anthropic | — | Anthropic API key |
-| `ANTHROPIC_MODEL` | No | `claude-sonnet-5` | Claude model to use for receipt parsing |
-| `ANTHROPIC_TEXT_MODEL` | No | `claude-haiku-4-5-20251001` | Claude model to use for `/correct` and `/add` proposals |
-| `ANTHROPIC_SEARCH_MODEL` | No | `claude-sonnet-5` | Claude model used for shelf-life web search — **requires web search enabled on the Anthropic workspace** |
-| `OPENAI_API_KEY` | When using openai | — | OpenAI API key |
-| `OPENAI_MODEL` | No | `gpt-5.6-terra` | OpenAI model to use for receipt parsing |
-| `OPENAI_TEXT_MODEL` | No | `gpt-5.6-luna` | OpenAI model to use for `/correct` and `/add` proposals |
-| `GEMINI_API_KEY` | When using gemini | — | Google Gemini API key (native `google-genai` SDK) |
-| `GEMINI_MODEL` | No | `gemini-3.1-pro-preview` | Gemini model to use for receipt parsing |
-| `GEMINI_TEXT_MODEL` | No | `gemini-3.5-flash` | Gemini model to use for `/correct` and `/add` proposals |
-| `DEEPSEEK_API_KEY` | When using deepseek | — | DeepSeek API key. DeepSeek is text-only: no receipt photo reading, no web search |
-| `DEEPSEEK_MODEL` | No | `deepseek-chat` | DeepSeek model to use for text tasks |
-| `DEEPSEEK_BASE_URL` | No | `https://api.deepseek.com` | DeepSeek API base URL (OpenAI-compatible) |
-| `SPOONACULAR_API_KEY` | No | — | Optional Spoonacular key for the in-progress real-source `/cook` recipe chain (not yet wired into the live pipeline) |
-| `COOK_COST_CEILING_MICROS` | No | `100000` | Per-`/cook` LLM spend ceiling in micro-USD ($0.10); raise if recipes come back empty |
-| `DATABASE_PATH` | No | `./food.db` | Path to the SQLite database file |
-| `LOG_LEVEL` | No | `INFO` | Logging level |
-| `ENV` | No | `dev` | Set to `prod` for JSON-structured logs |
+| Variable                   | Required             | Default                     | Description                                                                                                                                                                                  |
+| -------------------------- | -------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TELEGRAM_BOT_TOKEN`       | Yes                  | —                           | Bot token from `@BotFather`                                                                                                                                                                  |
+| `ALLOWED_TELEGRAM_USER_ID` | Yes                  | —                           | Bootstrap and default operator identity                                                                                                                                                      |
+| `OPEN_REGISTRATION`        | No                   | `false`                     | Allow new Telegram users to provision free households; existing members and invites still work when false                                                                                    |
+| `BILLING_ENABLED`          | No                   | `false`                     | Enforce quota and expose Stars checkout; usage is still recorded when false                                                                                                                  |
+| `INGEST_PROVIDER`          | No                   | cheapest configured         | Image-capable provider pinned for receipt ingest, independent of `/llm`                                                                                                                      |
+| `OPERATOR_TELEGRAM_IDS`    | No                   | `ALLOWED_TELEGRAM_USER_ID`  | Comma-separated operator Telegram IDs                                                                                                                                                        |
+| `OPERATOR_BOT_TOKEN`       | No                   | —                           | Token for the optional, separate operator bot                                                                                                                                                |
+| `LLM_PROVIDER`             | No                   | `anthropic`                 | Default provider: `anthropic`, `openai`, `gemini`, or `deepseek`. Each user can override with `/llm`. `deepseek` is text-only, so at least one image-capable provider's key must also be set |
+| `ANTHROPIC_API_KEY`        | When using anthropic | —                           | Anthropic API key                                                                                                                                                                            |
+| `ANTHROPIC_MODEL`          | No                   | `claude-sonnet-5`           | Claude model to use for receipt parsing                                                                                                                                                      |
+| `ANTHROPIC_TEXT_MODEL`     | No                   | `claude-haiku-4-5-20251001` | Claude model to use for `/correct` and `/add` proposals                                                                                                                                      |
+| `ANTHROPIC_SEARCH_MODEL`   | No                   | `claude-sonnet-5`           | Claude model used for shelf-life web search — **requires web search enabled on the Anthropic workspace**                                                                                     |
+| `OPENAI_API_KEY`           | When using openai    | —                           | OpenAI API key                                                                                                                                                                               |
+| `OPENAI_MODEL`             | No                   | `gpt-5.6-terra`             | OpenAI model to use for receipt parsing                                                                                                                                                      |
+| `OPENAI_TEXT_MODEL`        | No                   | `gpt-5.6-luna`              | OpenAI model to use for `/correct` and `/add` proposals                                                                                                                                      |
+| `GEMINI_API_KEY`           | When using gemini    | —                           | Google Gemini API key (native `google-genai` SDK)                                                                                                                                            |
+| `GEMINI_MODEL`             | No                   | `gemini-3.1-pro-preview`    | Gemini model to use for receipt parsing                                                                                                                                                      |
+| `GEMINI_TEXT_MODEL`        | No                   | `gemini-3.5-flash`          | Gemini model to use for `/correct` and `/add` proposals                                                                                                                                      |
+| `DEEPSEEK_API_KEY`         | When using deepseek  | —                           | DeepSeek API key. DeepSeek is text-only: no receipt photo reading, no web search                                                                                                             |
+| `DEEPSEEK_MODEL`           | No                   | `deepseek-chat`             | DeepSeek model to use for text tasks                                                                                                                                                         |
+| `DEEPSEEK_BASE_URL`        | No                   | `https://api.deepseek.com`  | DeepSeek API base URL (OpenAI-compatible)                                                                                                                                                    |
+| `SPOONACULAR_API_KEY`      | No                   | —                           | Optional Spoonacular key for the in-progress real-source `/cook` recipe chain (not yet wired into the live pipeline)                                                                         |
+| `COOK_COST_CEILING_MICROS` | No                   | `100000`                    | Per-`/cook` LLM spend ceiling in micro-USD ($0.10); raise if recipes come back empty                                                                                                         |
+| `DATABASE_PATH`            | No                   | `./food.db`                 | Path to the SQLite database file                                                                                                                                                             |
+| `LOG_LEVEL`                | No                   | `INFO`                      | Logging level                                                                                                                                                                                |
+| `ENV`                      | No                   | `dev`                       | Set to `prod` for JSON-structured logs                                                                                                                                                       |
 
 Stars subscriptions renew every 30 days and are managed in Telegram Settings.
 Top-ups expire at the end of the household's current quota period.

@@ -330,7 +330,7 @@ async def handle_add(
                     ingest_shelf_life_source="manual_fallback",
                     expires_on=today + timedelta(days=days),
                     created_via="manual",
-                    created_at=now,
+                    created_at=datetime.now(UTC),
                 )
             )
             session.commit()

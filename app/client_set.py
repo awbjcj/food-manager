@@ -104,9 +104,6 @@ class PerUserClients:
             _translation=translation,
         )
 
-    def image(self, user: UserProvider) -> LLMClient:
-        return _required(resolve(self._image, user.llm_provider), "image")
-
     def image_for_ingest(self) -> LLMClient:
         return _required(resolve(self._image, INGEST_PROVIDER), "image")
 

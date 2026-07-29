@@ -46,7 +46,6 @@ def test_capability_methods_resolve_with_the_users_provider():
 
     assert clients.text(_user("deepseek")) is deepseek
     assert clients.text(_user("anthropic")) is anthropic
-    assert clients.image(_user("deepseek")) is anthropic
 
 
 def test_optional_capabilities_and_translation_preserve_existing_semantics():

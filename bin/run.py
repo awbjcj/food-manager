@@ -28,11 +28,14 @@ from anthropic import AsyncAnthropic
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import app.bot as bot_mod
+import app.client_set as client_set_mod
 import app.cook.service as cook_service_mod
 import app.plan_service as plan_service_mod
 from app import handler_support
 from app.alerts import OwnerAlerter
 from app.backup import BackupError, pre_migration_backup
+from app.billing import meter as meter_mod
+from app.billing.payment import StarsPaymentProvider
 from app.bot import build_dispatcher
 from app.client_set import PerUserClients
 from app.cook.llm import (
@@ -77,6 +80,8 @@ from app.llm import (
     TextLLMProviderSelector,
 )
 from app.nl_intent import IntentAgentSelector, build_intent_agent
+from app.operator import auth as operator_auth
+from app.operator.bot import build_operator_dispatcher
 from app.refine_service import AnthropicSearchClient
 from app.resilience import run_with_restart
 from app.scheduler import (
@@ -382,6 +387,7 @@ async def _amain(settings: Settings) -> None:
     log.info("migration_ok")
 
     bot = Bot(token=settings.telegram_bot_token)
+    payments = StarsPaymentProvider(bot) if settings.billing_enabled else None
     alerter = OwnerAlerter(bot, settings.allowed_telegram_user_id)
     recipe_http = httpx.AsyncClient()
     recipe_sources = [
@@ -425,10 +431,14 @@ async def _amain(settings: Settings) -> None:
     )
     handler_support.DEFAULT_LLM_PROVIDER = settings.llm_provider
     handler_support.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
+    handler_support.OPEN_REGISTRATION = settings.open_registration
     # Keep the historical module attributes coherent for integrations that
     # inspect app.bot, while handler_support remains the runtime source of truth.
     bot_mod.DEFAULT_LLM_PROVIDER = settings.llm_provider
     bot_mod.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
+    bot_mod.OPEN_REGISTRATION = settings.open_registration
+    meter_mod.BILLING_ENABLED = settings.billing_enabled
+    client_set_mod.INGEST_PROVIDER = settings.ingest_provider
     cook_service_mod.COOK_COST_CEILING_MICROS = settings.cook_cost_ceiling_micros
     plan_service_mod.PLAN_COST_CEILING_MICROS = settings.plan_cost_ceiling_micros
 
@@ -461,12 +471,26 @@ async def _amain(settings: Settings) -> None:
     def unschedule(telegram_id: int) -> None:
         unschedule_user_digest(scheduler, telegram_id)
 
+    def on_user_created(user) -> None:
+        reschedule(user)
+        if settings.open_registration:
+            log.info(
+                "household_registered",
+                extra={"telegram_id": user.telegram_id, "household_id": user.household_id},
+            )
+            asyncio.create_task(
+                alerter.alert(
+                    "new_household",
+                    f"telegram_id={user.telegram_id} household={user.household_id}",
+                )
+            )
+
     dispatcher = build_dispatcher(
         bot=bot,
         session_factory=session_factory,
         clients=clients,
         now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
-        on_user_created=reschedule,
+        on_user_created=on_user_created,
         reschedule=reschedule,
         unschedule=unschedule,
         translation_llm=translation_llm,
@@ -474,6 +498,7 @@ async def _amain(settings: Settings) -> None:
         recipe_sources=recipe_sources,
         intent_agent=intent_agent,
         composer=composer,
+        payments=payments,
     )
 
     scheduler.start()
@@ -492,15 +517,41 @@ async def _amain(settings: Settings) -> None:
     async def _alert_polling_crash(exc: Exception) -> None:
         await alerter.alert("polling_crashed", f"{type(exc).__name__}: {exc}")
 
-    try:
-        await run_with_restart(
-            lambda: dispatcher.start_polling(bot),
-            on_crash=_alert_polling_crash,
+    operator_bot = None
+    operator_dispatcher = None
+    if settings.operator_bot_token:
+        operator_auth.OPERATOR_IDS = settings.operator_ids
+        operator_bot = Bot(token=settings.operator_bot_token)
+        operator_dispatcher = build_operator_dispatcher(
+            session_factory=session_factory,
+            now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
+            payments=payments,
         )
+
+    async def _alert_operator_crash(exc: Exception) -> None:
+        await alerter.alert("operator_polling_crashed", f"{type(exc).__name__}: {exc}")
+
+    loops = [
+        run_with_restart(
+            lambda: dispatcher.start_polling(bot), on_crash=_alert_polling_crash
+        )
+    ]
+    if operator_bot is not None and operator_dispatcher is not None:
+        loops.append(
+            run_with_restart(
+                lambda: operator_dispatcher.start_polling(operator_bot),
+                on_crash=_alert_operator_crash,
+            )
+        )
+
+    try:
+        await asyncio.gather(*loops)
     finally:
         scheduler.shutdown(wait=False)
         await recipe_http.aclose()
         await bot.session.close()
+        if operator_bot is not None:
+            await operator_bot.session.close()
 
 
 def main() -> None:

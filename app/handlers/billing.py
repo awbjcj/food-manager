@@ -12,6 +12,7 @@ from app.billing.entitlement import (
     apply_topup,
     effective_tier,
     get_or_create_subscription,
+    utc_naive,
 )
 from app.billing.ledger import record_payment
 from app.billing.meter import snapshot
@@ -43,7 +44,7 @@ async def handle_quota(
             return
         now = now_provider(ctx.user.tz)
         card = snapshot(ctx.session, household_id=ctx.user.household_id, now=now)
-        days = max(0, (card.period_end - now.replace(tzinfo=None)).days)
+        days = max(0, (card.period_end - utc_naive(now)).days)
         await msg.answer(render_quota(card, days_left=days, lang=ctx.user.lang))
 
 
@@ -208,7 +209,7 @@ async def handle_billing(
         if effective_tier(sub) == "free":
             text = t("billing.plan_free", ctx.user.lang)
         else:
-            days = max(0, (sub.period_end - now.replace(tzinfo=None)).days)
+            days = max(0, (sub.period_end - utc_naive(now)).days)
             text = t("billing.plan_family", ctx.user.lang, days=days)
         ctx.session.commit()
         await msg.answer(text)

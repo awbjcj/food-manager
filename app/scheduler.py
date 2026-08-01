@@ -53,6 +53,9 @@ async def send_digest_once(
         if user is None:
             log.warning("digest_skip_unknown_user", extra={"user_id": user_id})
             return False
+        if user.banned:
+            log.info("digest_skip_banned_user", extra={"user_id": user_id})
+            return False
         today = today_provider(user.tz)
         payload = build_digest_payload(session, user_id=user_id, today=today)
         if payload is None:

@@ -59,16 +59,17 @@ def roll_period_if_due(
     end = utc_naive(sub.period_end)
     if moment < end:
         return sub
-    if sub.tier != "free" and sub.telegram_charge_id is not None:
+    skipped = (moment - end) // PERIOD
+    sub.period_start = end + PERIOD * skipped
+    sub.period_end = sub.period_start + PERIOD
+    if sub.tier != "free":
+        # Any elapsed non-free period reverts to free unless it was renewed
+        # (apply_subscription would have pushed period_end into the future
+        # before this ever runs). This also covers subscriptions with no
+        # telegram_charge_id, e.g. migration-backfilled grandfather rows and
+        # operator grants of a tier - without this they would never expire.
         sub.status = "expired"
         sub.seat_cap = limits_for("free").seats
-        skipped = (moment - end) // PERIOD
-        sub.period_start = end + PERIOD * skipped
-        sub.period_end = sub.period_start + PERIOD
-    else:
-        skipped = (moment - end) // PERIOD
-        sub.period_start = end + PERIOD * skipped
-        sub.period_end = sub.period_start + PERIOD
     sub.updated_at = moment
     session.add(sub)
     session.flush()

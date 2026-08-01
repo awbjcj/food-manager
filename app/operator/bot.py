@@ -245,14 +245,66 @@ async def handle_reconcile(msg, *, session_factory, payments=None):
 
 
 OPERATOR_COMMANDS = (
-    ("whois", handle_whois, ("session_factory", "now_provider")),
-    ("grant", handle_grant, ("session_factory", "now_provider")),
-    ("refund", handle_refund, ("session_factory", "now_provider", "payments")),
-    ("ban", handle_ban, ("session_factory",)),
-    ("unban", handle_unban, ("session_factory",)),
-    ("revenue", handle_revenue, ("session_factory", "now_provider")),
-    ("reconcile", handle_reconcile, ("session_factory", "payments")),
+    (
+        "whois",
+        handle_whois,
+        ("session_factory", "now_provider"),
+        "<telegram_id> - look up a user's household: tier, seat usage, bans, quota spend",
+    ),
+    (
+        "grant",
+        handle_grant,
+        ("session_factory", "now_provider"),
+        "<household_id> <receipts> <actions> - comp extra quota to a household",
+    ),
+    (
+        "refund",
+        handle_refund,
+        ("session_factory", "now_provider", "payments"),
+        "<telegram_payment_charge_id> - refund a Stars payment via the rail and downgrade the household",
+    ),
+    (
+        "ban",
+        handle_ban,
+        ("session_factory",),
+        "<telegram_id> - ban a user; they are deauthorized on their next message",
+    ),
+    (
+        "unban",
+        handle_unban,
+        ("session_factory",),
+        "<telegram_id> - lift a ban on a user",
+    ),
+    (
+        "revenue",
+        handle_revenue,
+        ("session_factory", "now_provider"),
+        "[days=30] - total Stars revenue over the trailing window",
+    ),
+    (
+        "reconcile",
+        handle_reconcile,
+        ("session_factory", "payments"),
+        "compare the local ledger against the payment rail and report any drift",
+    ),
 )
+
+
+def _help_text() -> str:
+    lines = [f"/{name} {usage}" for name, _, _, usage in OPERATOR_COMMANDS]
+    return "operator commands:\n" + "\n".join(lines)
+
+
+async def handle_help(msg):
+    if not await require_operator(msg):
+        return
+    await msg.answer(_help_text())
+
+
+async def handle_unknown(msg):
+    if not await require_operator(msg):
+        return
+    await msg.answer(f"unknown command.\n{_help_text()}")
 
 
 def build_operator_dispatcher(
@@ -264,11 +316,13 @@ def build_operator_dispatcher(
         "now_provider": now_provider,
         "payments": payments,
     }
-    for name, handler, dep_names in OPERATOR_COMMANDS:
+    dispatcher.message.register(handle_help, Command("help"))
+    for name, handler, dep_names, _usage in OPERATOR_COMMANDS:
         kwargs = {key: deps[key] for key in dep_names}
 
         async def registered(event, _handler=handler, _kwargs=kwargs):
             await _handler(event, **_kwargs)
 
         dispatcher.message.register(registered, Command(name))
+    dispatcher.message.register(handle_unknown)
     return dispatcher

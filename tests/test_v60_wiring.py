@@ -21,7 +21,7 @@ def test_customer_commands_include_all_billing_surfaces():
 
 
 def test_operator_commands_are_complete():
-    assert {name for name, _handler, _deps in OPERATOR_COMMANDS} == {
+    assert {name for name, _handler, _deps, _usage in OPERATOR_COMMANDS} == {
         "whois",
         "grant",
         "refund",

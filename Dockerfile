@@ -10,7 +10,7 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 COPY app/ ./app/
 COPY bin/ ./bin/
 COPY migrations/ ./migrations/

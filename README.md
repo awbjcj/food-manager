@@ -1,5 +1,8 @@
 # food-manager
 
+[![CI/CD](https://github.com/awbjcj/food-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/awbjcj/food-manager/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A Telegram bot that tracks your household's grocery pantry and sends a daily expiry digest. Send it a photo of a receipt and it extracts the items, estimates shelf lives using your choice of Anthropic, OpenAI, Gemini, or DeepSeek, and reminds you before things go bad. Multiple people can share one household's pantry, shopping list, and food preferences, and the bot speaks English, Chinese, French, or Spanish.
 
 ## How it works
@@ -163,3 +166,23 @@ reverted.
 
 Stars subscriptions renew every 30 days and are managed in Telegram Settings.
 Top-ups expire at the end of the household's current quota period.
+
+## Project docs
+
+- [`docs/adr/`](docs/adr) — architecture decision records
+- [`docs/operations.md`](docs/operations.md) — running and supervising the bot in production
+- [`docs/superpowers/`](docs/superpowers) — the spec + plan for every shipped version, in order
+- [`CONTEXT.md`](CONTEXT.md) — domain glossary (ubiquitous language) used across the codebase
+- [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) — architecture and conventions reference for AI coding agents working in this repo
+
+## Contributing
+
+This is a solo-maintained personal project, built and documented heavily with
+AI coding agents. Issues and pull requests are welcome — for anything beyond a
+small fix, please open an issue first to discuss the change. Run
+`uv run pytest`, `uv run ruff check app tests bin migrations`, and
+`uv run pyright app bin` before submitting a PR; CI runs the same checks.
+
+## License
+
+[MIT](LICENSE)

@@ -9,6 +9,8 @@ packages = ["app"]
 name = "food-manager"
 version = "0.1.0"
 description = "Single-user grocery pantry + expiry-reminder Telegram bot"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "aiogram>=3.30.0,<4.0",
@@ -23,6 +25,9 @@ dependencies = [
     "httpx>=0.28.1",
     "agno>=2.8.5",
 ]
+
+[project.urls]
+Repository = "https://github.com/awbjcj/food-manager"
 
 [dependency-groups]
 dev = [

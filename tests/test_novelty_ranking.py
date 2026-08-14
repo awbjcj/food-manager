@@ -1,15 +1,12 @@
 from datetime import UTC, date, datetime
 
-import pytest
-from sqlmodel import Session, SQLModel, create_engine
-
 from app.cook.models import (
     NutritionScore,
     RecipeCandidate,
     RecipeIngredient,
     SourcedRecipe,
 )
-from app.models import CookedMeal, Household, PantryItem
+from app.models import CookedMeal
 from app.plan_service import _pick
 
 TODAY = date(2026, 8, 14)

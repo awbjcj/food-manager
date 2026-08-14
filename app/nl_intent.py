@@ -29,10 +29,20 @@ MAX_CONTEXT_NAMES = 100
 
 
 class NLIntent(BaseModel):
-    kind: Literal["add", "mark", "shelf_life_question", "pantry_query", "unknown"]
+    kind: Literal[
+        "add",
+        "mark",
+        "shelf_life_question",
+        "pantry_query",
+        "cook",
+        "plan",
+        "cooked",
+        "unknown",
+    ]
     mark_action: Literal["ate", "tossed", "snooze", "freeze"] | None = None
     item_name: str | None = None
     food: str | None = None
+    days: int | None = None
 
 
 class IntentAgent(Protocol):
@@ -53,6 +63,12 @@ Kinds:
 - "shelf_life_question": a question about how long a food keeps
   ("how long does salmon keep?"). Set food.
 - "pantry_query": asking what's in the pantry or what's expiring.
+- "cook": asking what to cook right now ("what's for dinner?", "give me a recipe").
+- "plan": asking for a multi-day meal plan ("plan my week", "plan 3 days").
+  Set days to the requested number when the message names one, else leave it null.
+- "cooked": the user made the meal that was PLANNED for a day ("made tonight's
+  dinner", "cooked the planned meal"). This is about a planned meal, not about
+  one pantry item — "ate the yogurt" is "mark", never "cooked".
 - "unknown": anything else, or when you are unsure.
 
 Rules:

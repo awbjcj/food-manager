@@ -367,6 +367,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "Je ne sais pas combien de temps {name} se conserve.",
         "es": "No estoy seguro de cuánto dura {name}.",
     },
+    "nl.no_plan_today": {
+        "en": "No planned meal for today — try /plan to build a week.",
+        "zh": "今天没有计划的餐点 — 试试 /plan 制定一周计划。",
+        "fr": "Aucun repas prévu aujourd'hui — essayez /plan pour créer une semaine.",
+        "es": "No hay comida planificada para hoy — prueba /plan para crear una semana.",
+    },
     "plan.header": {
         "en": "🗓 Dinner plan — {n} days",
         "zh": "🗓 晚餐计划 — {n} 天",

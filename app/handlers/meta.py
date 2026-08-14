@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from app import handler_support, views
 from app.billing.meter import admit, commit
@@ -12,7 +13,10 @@ from app.commands import (
     CommandError,
     parse_llm_provider,
 )
+from app.cook.cooked_service import open_sheet
+from app.handlers.cook import handle_cook
 from app.handlers.pantry import _run_add_flow
+from app.handlers.plan import handle_plan
 from app.i18n import t
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import LLMProviderNotConfigured
@@ -28,11 +32,13 @@ from app.pantry_service import (
     mark_tossed,
     snooze_item,
 )
+from app.plan_service import tonight_entry
 from app.profile_service import profile_from_household, update_profile_from_sentence
 from app.progress import clear_progress, finish_progress, start_progress
 from app.refine_service import run_receipt_refine
 from app.renderer import (
     CallbackButton,
+    build_cooked_sheet_keyboard,
     build_digest_keyboard,
     build_undo_keyboard,
     render_ingest_reply,
@@ -62,6 +68,8 @@ async def handle_nl_message(
     clients: PerUserClients = EMPTY_CLIENTS,
     on_user_created: Callable[[User], None] = _noop_user_created,
     translation_llm=None,
+    composer=None,
+    recipe_sources=(),
 ) -> None:
     text = (msg.text or "").strip()
     if not text or text.startswith("/"):
@@ -130,6 +138,8 @@ async def handle_nl_message(
             await _dispatch_nl_intent(
                 msg,
                 session=session,
+                session_factory=session_factory,
+                now_provider=now_provider,
                 user=user,
                 today=today,
                 text=text,
@@ -138,6 +148,9 @@ async def handle_nl_message(
                 clients=clients,
                 translation_llm=translation_llm,
                 progress=progress,
+                composer=composer,
+                recipe_sources=recipe_sources,
+                on_user_created=on_user_created,
             )
         except Exception as exc:  # noqa: BLE001 - NL must never break the bot
             log.warning(
@@ -173,10 +186,60 @@ async def _apply_mark(session, *, user, item_id, action, today, clients):
     )
 
 
+def _nl_command_msg(msg, text: str):
+    return SimpleNamespace(
+        text=text,
+        from_user=msg.from_user,
+        chat=msg.chat,
+        answer=msg.answer,
+        photo=None,
+        reply_to_message=None,
+        bot=getattr(msg, "bot", None),
+    )
+
+
+async def _run_cook_from_nl(
+    msg, *, session_factory, now_provider, on_user_created
+) -> None:
+    await handle_cook(
+        _nl_command_msg(msg, "/cook"),
+        session_factory=session_factory,
+        now_provider=now_provider,
+        on_user_created=on_user_created,
+    )
+
+
+async def _run_plan_from_nl(
+    msg,
+    *,
+    session_factory,
+    now_provider,
+    composer,
+    clients,
+    recipe_sources,
+    on_user_created,
+    translation_llm,
+    days,
+) -> None:
+    text = "/plan" if days is None else f"/plan {days}"
+    await handle_plan(
+        _nl_command_msg(msg, text),
+        session_factory=session_factory,
+        now_provider=now_provider,
+        composer=composer,
+        clients=clients,
+        recipe_sources=recipe_sources,
+        on_user_created=on_user_created,
+        translation_llm=translation_llm,
+    )
+
+
 async def _dispatch_nl_intent(
     msg,
     *,
     session,
+    session_factory,
+    now_provider,
     user,
     today,
     text,
@@ -185,6 +248,9 @@ async def _dispatch_nl_intent(
     clients,
     translation_llm,
     progress,
+    composer,
+    recipe_sources,
+    on_user_created,
 ) -> None:
     if intent.kind == "mark" and intent.mark_action and intent.item_name:
         matches = match_items(intent.item_name, pantry)
@@ -261,6 +327,51 @@ async def _dispatch_nl_intent(
             )
         )
         await finish_progress(progress, msg, view.text, keyboard)
+        return
+
+    if intent.kind == "cooked":
+        entry = tonight_entry(session, household_id=user.household_id, today=today)
+        if entry is None:
+            await finish_progress(progress, msg, t("nl.no_plan_today", user.lang))
+            return
+        sheet = open_sheet(
+            session, household_id=user.household_id, entry=entry, today=today
+        )
+        view = await views.cooked_sheet(
+            session, sheet, user=user, translation_llm=translation_llm
+        )
+        keyboard = to_aiogram_keyboard(
+            build_cooked_sheet_keyboard(sheet, lang=user.lang, names=view.names)
+        )
+        await finish_progress(progress, msg, view.text, keyboard)
+        return
+
+    if intent.kind == "cook":
+        await clear_progress(progress)
+        await _run_cook_from_nl(
+            msg,
+            session_factory=session_factory,
+            now_provider=now_provider,
+            on_user_created=on_user_created,
+        )
+        return
+
+    if intent.kind == "plan":
+        if composer is None:
+            await finish_progress(progress, msg, t("nl.hint", user.lang))
+            return
+        await clear_progress(progress)
+        await _run_plan_from_nl(
+            msg,
+            session_factory=session_factory,
+            now_provider=now_provider,
+            composer=composer,
+            clients=clients,
+            recipe_sources=recipe_sources,
+            on_user_created=on_user_created,
+            translation_llm=translation_llm,
+            days=intent.days,
+        )
         return
 
     await finish_progress(progress, msg, t("nl.hint", user.lang))

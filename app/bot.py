@@ -284,6 +284,8 @@ def build_dispatcher(
                 "clients",
                 "on_user_created",
                 "translation_llm",
+                "composer",
+                "recipe_sources",
             ),
             F.text & ~F.text.startswith("/") & ~F.reply_to_message,
         )

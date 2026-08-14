@@ -1,4 +1,5 @@
-from datetime import UTC, datetime, timedelta
+import json
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -7,8 +8,10 @@ from sqlmodel import Session, SQLModel, create_engine
 import app.bot as bot_mod
 import app.handlers.meta as meta_handlers
 from app import handler_support
+from app.billing import meter
 from app.client_set import PerUserClients
-from app.models import Household, PantryItem, User
+from app.i18n import t
+from app.models import Household, MealPlan, MealPlanEntry, PantryItem, User
 from app.nl_intent import NLIntent
 
 
@@ -76,6 +79,54 @@ def _seed_item(session_factory, name, item_id=None):
         db.commit()
         db.refresh(item)
         return item.id
+
+
+def _seed_plan_entry(session_factory, *, entry_date, ingredient="chicken"):
+    with session_factory() as db:
+        plan = MealPlan(
+            household_id=1,
+            start_date=entry_date,
+            days=1,
+            status="active",
+            chat_id=1,
+            created_at=datetime.now(UTC),
+        )
+        db.add(plan)
+        db.commit()
+        db.refresh(plan)
+        recipe_json = json.dumps(
+            {
+                "recipe": {
+                    "title": "Chicken Tikka",
+                    "cuisine": "indian",
+                    "source_url": None,
+                    "ingredients": [{"name": ingredient}],
+                    "method_gist": "Cook.",
+                    "deliciousness": 0.5,
+                },
+                "nutrition": {
+                    "health_score": 50,
+                    "effort": "easy",
+                    "est_minutes": 20,
+                    "rationale": "x",
+                },
+                "expiry_use": 0.0,
+                "final_score": 0.5,
+                "external_id": "spoon:10",
+            }
+        )
+        entry = MealPlanEntry(
+            plan_id=plan.id,
+            day_index=0,
+            date=entry_date,
+            recipe_json=recipe_json,
+            spec_json=(
+                '{"day_index":0,"cuisine":"indian","purpose":"use_it_up",'
+                '"feature_items":[]}'
+            ),
+        )
+        db.add(entry)
+        db.commit()
 
 
 def _nl_msg(text: str):
@@ -309,3 +360,55 @@ async def test_help_shows_overview_with_topic_buttons(session_factory, monkeypat
     keyboard = msg.answer.await_args.kwargs["reply_markup"]
     datas = [b.callback_data for row in keyboard.inline_keyboard for b in row]
     assert datas == ["help:pantry", "help:cook", "help:household", "help:settings"]
+
+
+@pytest.mark.asyncio
+async def test_cooked_intent_without_a_plan_replies_with_a_hint(
+    session_factory, monkeypatch
+):
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
+    msg = _nl_msg("made tonight's dinner")
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
+        intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="cooked")),
+    )
+    assert "No planned meal for today" in _final_text(msg)
+
+
+@pytest.mark.asyncio
+async def test_cooked_intent_opens_the_consume_sheet(session_factory, monkeypatch):
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
+    _seed_item(session_factory, "chicken")
+    _seed_plan_entry(session_factory, entry_date=date(2026, 7, 9))
+    msg = _nl_msg("made tonight's dinner")
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
+        intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="cooked")),
+    )
+    assert "Which did you use up?" in _final_text(msg)
+
+
+@pytest.mark.asyncio
+async def test_plan_intent_is_refused_when_plan_quota_is_exhausted(
+    session_factory, monkeypatch
+):
+    # Free-tier households get 30 actions/period; a "plan" op alone costs
+    # 25 * anthropic's 3x multiplier = 75, so it is refused with no usage
+    # setup needed beyond turning enforcement on.
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
+    monkeypatch.setattr(meter, "BILLING_ENABLED", True)
+    now = datetime(2026, 7, 9, tzinfo=UTC)
+    msg = _nl_msg("plan my week")
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: now,
+        intent_agent=FakeIntentAgentSelector(intent=NLIntent(kind="plan")),
+        composer=object(),
+    )
+    texts = [c.args[0] for c in msg.answer.await_args_list]
+    assert t("quota.degraded.plan", "en") in texts

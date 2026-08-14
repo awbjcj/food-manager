@@ -134,3 +134,24 @@ async def test_shelf_life_unknown_is_honest(session_factory):
             session, household_id=1, food="dragonfruit tart", lang="en"
         )
     assert "not sure" in answer.lower()
+
+
+def test_intent_schema_covers_the_v55_kinds():
+    from app.nl_intent import NLIntent
+
+    for kind in ("cook", "plan", "cooked"):
+        assert NLIntent(kind=kind).kind == kind
+
+
+def test_plan_intent_carries_an_optional_day_count():
+    from app.nl_intent import NLIntent
+
+    assert NLIntent(kind="plan").days is None
+    assert NLIntent(kind="plan", days=5).days == 5
+
+
+def test_instructions_draw_the_mark_versus_cooked_boundary():
+    from app.nl_intent import _INSTRUCTIONS
+
+    assert "cooked" in _INSTRUCTIONS
+    assert "planned meal" in _INSTRUCTIONS

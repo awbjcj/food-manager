@@ -80,7 +80,7 @@ Single-user Telegram bot: user sends grocery receipt photos → Claude parses th
 | `app/week_composer.py`       | Agno meal-plan seam (v5.2): `DaySpec`/`WeekPlanSpec`, per-provider `AgnoWeekComposer`s built at bootstrap, `WeekComposerSelector` (no fallback), pure `heuristic_compose` fallback                                                                                                                                                                                                                                                             |
 | `app/plan_service.py`        | Meal-plan orchestrator (v5.2): `build_plan` (sequential pantry allocation + composer/heuristic), `swap_day`, `aggregate_shopping`, `cancel_active_plans`                                                                                                                                                                                                                                                                                       |
 | `app/cook/affinity.py`       | Affinity (v5.3): recent-signal taste score + steering summary; consumed by `blended_score` and the LLM-tail prompts                                                                                                                                                                                                                                                                                                                            |
-| `app/cook/*`                 | Recipe engine: `models.py` (Purpose/Effort/`RecipeCriteria`/`ScoredCandidate`), `recipe_source.py` (Spoonacular/TheMealDB real-source building blocks, v4.9, not yet wired in), `llm.py` (selection/recipe/nutrition clients), `logic.py` (scoring, shopping-list diff), `service.py` (live LLM-only pipeline), `session_service.py` (`CookSession` cost/state), `favorites_service.py` (`SavedRecipe`), `feedback.py` (liked/disliked signal) |
+| `app/cook/*`                 | Recipe engine: `models.py` (Purpose/Effort/`RecipeCriteria`/`ScoredCandidate`), `recipe_source.py` (Spoonacular/TheMealDB/LLM sources + `ChainedRecipeSource`, v4.9), `llm.py` (selection/recipe/nutrition clients), `logic.py` (scoring, shopping-list diff), `service.py` (live LLM-only pipeline), `session_service.py` (`CookSession` cost/state), `favorites_service.py` (`SavedRecipe`), `feedback.py` (liked/disliked signal) |
 | `bin/run.py`                 | Entry point: loads settings, runs migrations, starts scheduler + polling                                                                                                                                                                                                                                                                                                                                                                       |
 
 ### Key design conventions
@@ -152,14 +152,17 @@ expire quickly), then edit the message in place, falling back to sending a
 fresh message if the edit fails for any reason other than "not modified" (which
 is treated as success, since it means the view didn't need to change).
 
-### Recipe engine: `/cook`, `/shopping`, `/favorites` (v3.5, v4.9 in progress)
+### Recipe engine: `/cook`, `/shopping`, `/favorites` (v3.5, v4.9)
 
 The live `/cook` pipeline (`app/cook/service.py::run_cook`, called from
-`run_cook_and_render` in `bot.py`) is LLM-only, in three metered steps against
-the household's active pantry and `FoodProfile` (`app/profile_service.py`):
-`selection_llm` picks which pantry items to use, `recipe_llm` turns those into
-candidate recipes (regenerating once if every candidate violates a profile
-exclusion), then `nutrition_llm` scores each one. Each step's cost accrues onto
+`run_cook_and_render` in `app/handlers/cook.py`) runs against the household's
+active pantry and `FoodProfile` (`app/profile_service.py`): `selection_llm`
+picks which pantry items to use, then a `source: RecipeSource` produces scored
+candidates. The handler injects that source as a `ChainedRecipeSource` of the
+configured real sources followed by an `LlmRecipeSource` tail, so Spoonacular
+answers when it can and the LLM covers the rest; the tail itself calls
+`recipe_llm` (regenerating once if every candidate violates a profile
+exclusion) then `nutrition_llm`. Each step's cost accrues onto
 the `CookSession` row (`app/cook/session_service.py`) and the pipeline bails
 early once `COOK_COST_CEILING_MICROS` is exceeded (raise it if recipes come
 back empty). Final ranking is `blended_score` (`app/cook/logic.py`): nutrition
@@ -174,12 +177,14 @@ records a `(cuisine, ingredients, verdict)` signal per session, consumed by
 `app/cook/affinity.py` for affinity-weighted scoring (see "Affinity + recipe
 media (v5.3)" below).
 
-**v4.9 (in progress, not yet wired in):** `app/cook/recipe_source.py` has the
-building blocks for a real-source alternative to the LLM-only pipeline —
-`RecipeCriteria`/`Purpose` (use-it-up, quick, healthy, comfort, surprise),
-a Spoonacular `RecipeSource` (`SPOONACULAR_API_KEY`), and TheMealDB fetch
-helpers — but `run_cook` does not call into it yet; see `tests/test_recipe_source.py`
-for the parts already covered in isolation.
+**v4.9 (shipped):** `app/cook/recipe_source.py` holds the source chain —
+`RecipeCriteria`/`Purpose` (use-it-up, quick, healthy, comfort, surprise), a
+Spoonacular `RecipeSource` (`SPOONACULAR_API_KEY`), TheMealDB fetch helpers, the
+`LlmRecipeSource` tail, and `ChainedRecipeSource` (tries each in order, logging
+`recipe_source_failed` and falling through on failure). `bin/run.py` builds the
+configured sources once at bootstrap and threads them to `/cook` and `/plan`;
+with no `SPOONACULAR_API_KEY` the chain is just the LLM tail, which is why the
+LLM-only path still works unchanged.
 
 ### Multi-provider LLM routing (v4.7)
 

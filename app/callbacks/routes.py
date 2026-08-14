@@ -4,6 +4,7 @@ from app.callback_dispatch import CallbackResult
 from app.callbacks import EXPECTED_CALLBACK_ROUTES
 from app.callbacks.actions import handle_callback
 from app.callbacks.cook import handle_cook_callback
+from app.callbacks.cooked import handle_cooked_callback
 from app.callbacks.help import handle_help_callback
 from app.callbacks.items import handle_item_callback
 from app.callbacks.plan import handle_plan_callback
@@ -31,6 +32,20 @@ def build_callback_registry() -> CallbackRegistry:
                 now_provider=context.now_provider,
                 clients=context.clients,
                 recipe_sources=context.recipe_sources,
+                translation_llm=context.translation_llm,
+            )
+
+        return CallbackResult(deferred=run)
+
+    @registry.register(
+        "plan_cooked", "cooked_toggle", "cooked_confirm", "cooked_none"
+    )
+    async def cooked_route(_request, context):
+        async def run():
+            await handle_cooked_callback(
+                context.callback,
+                session_factory=context.session_factory,
+                now_provider=context.now_provider,
                 translation_llm=context.translation_llm,
             )
 

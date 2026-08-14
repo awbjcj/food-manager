@@ -39,6 +39,7 @@ Role = Literal["owner", "member"]
 PlanTier = Literal["free", "family"]
 SubStatus = Literal["active", "past_due", "cancelled", "expired"]
 PaymentKind = Literal["subscription", "topup", "refund", "grant"]
+CookedSource = Literal["plan", "cook"]
 
 
 class Household(SQLModel, table=True):
@@ -190,6 +191,30 @@ class MealPlanEntry(SQLModel, table=True):
     spec_json: str            # the DaySpec that produced it (swap rebuilds criteria from this)
     shopping_json: str = "[]"  # that day's ingredient gap (list[str])
     search_offset: int = 0    # advanced by swap for pagination
+
+
+class CookedMeal(SQLModel, table=True):
+    """A meal the household actually made (v5.5).
+
+    Doubles as the pending consume sheet: `selection_json` holds the pantry ids
+    currently checked, and the row only counts as cooked once `confirmed_at` is
+    set. Keyed by household + recipe rather than by plan, so wiring /cook result
+    cards later is a new call site rather than a migration.
+    """
+
+    __table_args__ = (
+        Index("ix_cooked_household_confirmed", "household_id", "confirmed_at"),
+    )
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    source: str = "plan"
+    plan_entry_id: int | None = Field(default=None, foreign_key="mealplanentry.id")
+    recipe_key: str = Field(index=True)
+    recipe_title: str
+    cooked_on: date
+    selection_json: str = "[]"
+    confirmed_at: datetime | None = None
 
 
 class ShoppingList(SQLModel, table=True):

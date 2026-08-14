@@ -491,3 +491,14 @@ async def test_plan_callback_rejects_cross_household(session_factory, monkeypatc
 
         plan = db.exec(select(MealPlan)).one()
         assert plan.status == "active"
+
+
+def test_plan_keyboard_offers_swap_and_cooked_per_day():
+    from datetime import date
+
+    from app.renderer import build_plan_keyboard
+
+    rows = build_plan_keyboard(12, [(0, date(2026, 8, 14)), (1, date(2026, 8, 15))])
+    assert [b.callback_data for b in rows[0]] == ["plan:swap:12:0", "plan:cooked:12:0"]
+    assert [b.callback_data for b in rows[1]] == ["plan:swap:12:1", "plan:cooked:12:1"]
+    assert [b.callback_data for b in rows[-1]] == ["plan:shop:12", "plan:cancel:12"]

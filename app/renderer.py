@@ -443,7 +443,11 @@ def build_plan_keyboard(
             CallbackButton(
                 text=t("btn.plan.swap", lang, weekday=weekday_abbr(day, lang=lang)),
                 callback_data=f"plan:swap:{plan_id}:{day_index}",
-            )
+            ),
+            CallbackButton(
+                text=t("btn.plan.cooked", lang, weekday=weekday_abbr(day, lang=lang)),
+                callback_data=f"plan:cooked:{plan_id}:{day_index}",
+            ),
         ]
         for day_index, day in day_rows
     ]

@@ -422,6 +422,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "este plan expiró - ejecuta /plan de nuevo",
     },
     "btn.plan.swap": {"en": "🔄 {weekday}", "zh": "🔄 {weekday}", "fr": "🔄 {weekday}", "es": "🔄 {weekday}"},
+    "btn.plan.cooked": {
+        "en": "✅ Cooked {weekday}",
+        "zh": "✅ 已做 {weekday}",
+        "fr": "✅ Cuisiné {weekday}",
+        "es": "✅ Cocinado {weekday}",
+    },
     "btn.plan.shop": {"en": "➕ Shopping list", "zh": "➕ 购物清单", "fr": "➕ Liste de courses", "es": "➕ Lista de compras"},
     "btn.plan.cancel": {"en": "❌ Cancel plan", "zh": "❌ 取消计划", "fr": "❌ Annuler le plan", "es": "❌ Cancelar plan"},
     "btn.open_recipe": {"en": "🔗 Open recipe", "zh": "🔗 查看菜谱", "fr": "🔗 Ouvrir la recette", "es": "🔗 Abrir receta"},

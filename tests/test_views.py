@@ -40,7 +40,7 @@ def _item(index: int, name: str) -> PantryItem:
 @pytest.mark.asyncio
 async def test_digest_preserves_renderer_default_cap_and_complete_metadata(session):
     items = [_item(index, f"Item {index}") for index in range(1, 13)]
-    user = SimpleNamespace(lang="en")
+    user = SimpleNamespace(lang="en", household_id=1)
 
     view = await digest(
         session,

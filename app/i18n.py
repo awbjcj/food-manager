@@ -158,6 +158,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "Ce foyer est complet ({cap} membres).",
         "es": "Este hogar está lleno ({cap} miembros).",
     },
+    "digest.tonight": {
+        "en": "🍽 Tonight: {dish}",
+        "zh": "🍽 今晚：{dish}",
+        "fr": "🍽 Ce soir : {dish}",
+        "es": "🍽 Esta noche: {dish}",
+    },
     "digest.section.expired": {"en": "Expired", "zh": "已过期", "fr": "Périmé", "es": "Caducado"},
     "digest.section.today": {"en": "Today", "zh": "今天", "fr": "Aujourd'hui", "es": "Hoy"},
     "digest.section.tomorrow": {"en": "Tomorrow", "zh": "明天", "fr": "Demain", "es": "Mañana"},

@@ -8,6 +8,8 @@ from datetime import date
 
 from sqlmodel import Session
 
+from app.cook.models import ScoredCandidate
+from app.plan_service import tonight_entry
 from app.renderer import (
     DIGEST_CAP,
     build_nl_picker_keyboard,
@@ -85,6 +87,13 @@ def _digest_view(rendered, names: dict[str, str]) -> LocalizedDigestView:
     )
 
 
+def _tonight_title(session: Session, *, household_id: int, today: date) -> str | None:
+    entry = tonight_entry(session, household_id=household_id, today=today)
+    if entry is None:
+        return None
+    return ScoredCandidate.model_validate_json(entry.recipe_json).recipe.title
+
+
 async def digest(
     session: Session,
     items: list,
@@ -94,14 +103,22 @@ async def digest(
     translation_llm,
     cap: int | None = DIGEST_CAP,
 ) -> LocalizedDigestView:
+    title = _tonight_title(session, household_id=user.household_id, today=today)
     names = await _names_for(
         session,
         lang=user.lang,
-        texts=(item.raw_name for item in items),
+        texts=[*(item.raw_name for item in items), title],
         translation_llm=translation_llm,
     )
     return _digest_view(
-        render_digest(items, today=today, lang=user.lang, names=names, cap=cap),
+        render_digest(
+            items,
+            today=today,
+            lang=user.lang,
+            names=names,
+            cap=cap,
+            tonight=None if title is None else names.get(title, title),
+        ),
         names,
     )
 
@@ -112,13 +129,23 @@ def digest_cached(
     *,
     lang: str,
     today: date,
+    household_id: int,
     cap: int | None = DIGEST_CAP,
 ) -> LocalizedDigestView:
+    title = _tonight_title(session, household_id=household_id, today=today)
     names = cached_names(
-        session, lang=lang, texts=(item.raw_name for item in items)
+        session, lang=lang, texts=[*(item.raw_name for item in items), title]
     )
     return _digest_view(
-        render_digest(items, today=today, lang=lang, names=names, cap=cap), names
+        render_digest(
+            items,
+            today=today,
+            lang=lang,
+            names=names,
+            cap=cap,
+            tonight=None if title is None else names.get(title, title),
+        ),
+        names,
     )
 
 

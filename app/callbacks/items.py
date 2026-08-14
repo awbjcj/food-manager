@@ -203,7 +203,9 @@ async def _refresh_digest_message(
 ) -> None:
     remaining = list_digest_due(session, household_id=household_id, today=today)
     if remaining:
-        view = views.digest_cached(session, remaining, lang=lang, today=today)
+        view = views.digest_cached(
+            session, remaining, lang=lang, today=today, household_id=household_id
+        )
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
                 view.rendered_items,
@@ -234,7 +236,9 @@ async def _refresh_pantry_message(
         today=today,
     )
     if remaining:
-        view = views.digest_cached(session, remaining, lang=lang, today=today, cap=None)
+        view = views.digest_cached(
+            session, remaining, lang=lang, today=today, household_id=household_id, cap=None
+        )
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
                 view.rendered_items,

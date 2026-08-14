@@ -42,6 +42,21 @@ class NotEnoughItemsToPlan(Exception):
     pass
 
 
+def tonight_entry(
+    session: Session, *, household_id: int, today: date
+) -> MealPlanEntry | None:
+    """The active plan's entry for today, if any."""
+    return session.exec(
+        select(MealPlanEntry)
+        .join(MealPlan, MealPlan.id == MealPlanEntry.plan_id)  # type: ignore[arg-type]
+        .where(
+            MealPlan.household_id == household_id,
+            MealPlan.status == "active",
+            MealPlanEntry.date == today,
+        )
+    ).first()
+
+
 def cancel_active_plans(session: Session, *, household_id: int) -> int:
     rows = session.exec(
         select(MealPlan).where(

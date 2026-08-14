@@ -162,6 +162,7 @@ def render_digest(
     lang: str = "en",
     names=None,
     cap: int | None = DIGEST_CAP,
+    tonight: str | None = None,
 ) -> DigestRender:
     total = len(items)
     if total == 0:
@@ -195,8 +196,12 @@ def render_digest(
         assert cap is not None  # narrowed by has_more; keeps `total - cap` type-safe
         lines.append(t("digest.more", lang, n=total - cap))
 
+    text = "\n".join(lines).rstrip()
+    if tonight:
+        text = f"{text}\n{t('digest.tonight', lang, dish=tonight)}"
+
     return DigestRender(
-        text="\n".join(lines).rstrip(),
+        text=text,
         rendered_items=list(capped),
         rendered_item_ids=[item.id for item in capped],
         rendered_count=len(capped),

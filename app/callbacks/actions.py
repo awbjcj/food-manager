@@ -225,7 +225,12 @@ async def handle_callback(
                 await cb.answer("nothing due")
                 return
             view = views.digest_cached(
-                session, rows, lang=user.lang, today=today, cap=None
+                session,
+                rows,
+                lang=user.lang,
+                today=today,
+                household_id=user.household_id,
+                cap=None,
             )
             keyboard = to_aiogram_keyboard(
                 build_digest_keyboard(

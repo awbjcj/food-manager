@@ -15,6 +15,7 @@ from app.cook.logic import (
     violates_exclusions,
 )
 from app.cook.models import Purpose, RecipeCandidate, ScoredCandidate
+from app.cook.novelty import list_recent_cooks, novelty, recipe_key
 from app.cook.recipe_source import RecipeSource, build_criteria
 from app.cook.session_service import accrue_cost
 from app.models import CookSession, PantryItem
@@ -87,7 +88,7 @@ def _shown_external_ids(cook: CookSession) -> set[str]:
 
 
 def _score_sourced(
-    sourced: list, *, selected_items: list[PantryItem], today: date, signals
+    sourced: list, *, selected_items: list[PantryItem], today: date, signals, cooks
 ) -> list[ScoredCandidate]:
     urgent_names = [
         item.normalized_name
@@ -100,22 +101,28 @@ def _score_sourced(
         expiry_use = expiry_utilization(
             recipe_names=ingredient_names, urgent_names=urgent_names
         )
+        candidate = ScoredCandidate(
+            recipe=sourced_recipe.recipe,
+            nutrition=sourced_recipe.nutrition,
+            expiry_use=expiry_use,
+            external_id=sourced_recipe.external_id,
+            final_score=0.0,
+        )
         scored.append(
-            ScoredCandidate(
-                recipe=sourced_recipe.recipe,
-                nutrition=sourced_recipe.nutrition,
-                expiry_use=expiry_use,
-                external_id=sourced_recipe.external_id,
-                final_score=blended_score(
-                    health_0_1=sourced_recipe.nutrition.health_score / 100.0,
-                    expiry_use=expiry_use,
-                    deliciousness=sourced_recipe.recipe.deliciousness,
-                    affinity_0_1=affinity(
-                        cuisine=sourced_recipe.recipe.cuisine,
-                        ingredient_names=ingredient_names,
-                        signals=signals,
-                    ),
-                ),
+            candidate.model_copy(
+                update={
+                    "final_score": blended_score(
+                        health_0_1=sourced_recipe.nutrition.health_score / 100.0,
+                        expiry_use=expiry_use,
+                        deliciousness=sourced_recipe.recipe.deliciousness,
+                        affinity_0_1=affinity(
+                            cuisine=sourced_recipe.recipe.cuisine,
+                            ingredient_names=ingredient_names,
+                            signals=signals,
+                        ),
+                        novelty_0_1=novelty(recipe_key(candidate), cooks, today),
+                    )
+                }
             )
         )
     scored.sort(key=lambda candidate: candidate.final_score, reverse=True)
@@ -210,7 +217,10 @@ async def run_cook(
         return []
 
     pantry_normalized = [item.normalized_name for item in active_items]
-    scored = _score_sourced(safe, selected_items=selected_items, today=today, signals=signals)
+    cooks = list_recent_cooks(session, household_id=cook.household_id, today=today)
+    scored = _score_sourced(
+        safe, selected_items=selected_items, today=today, signals=signals, cooks=cooks
+    )
     _assign_shopping_list(scored, pantry_normalized=pantry_normalized)
 
     cook.candidates_json = json.dumps([candidate.model_dump() for candidate in scored])
@@ -281,7 +291,10 @@ async def run_cook_more(
         return []
 
     pantry_normalized = [item.normalized_name for item in active_items]
-    scored = _score_sourced(fresh, selected_items=selected_items, today=today, signals=signals)
+    cooks = list_recent_cooks(session, household_id=cook.household_id, today=today)
+    scored = _score_sourced(
+        fresh, selected_items=selected_items, today=today, signals=signals, cooks=cooks
+    )
     _assign_shopping_list(scored, pantry_normalized=pantry_normalized)
 
     cook.candidates_json = json.dumps(

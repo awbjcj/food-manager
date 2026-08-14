@@ -24,6 +24,7 @@ from app.cook.logic import (
     violates_exclusions,
 )
 from app.cook.models import Purpose, ScoredCandidate
+from app.cook.novelty import list_recent_cooks, novelty, recipe_key
 from app.cook.recipe_source import build_criteria
 from app.cook.service import MIN_USABLE_ITEMS, URGENT_DAYS
 from app.models import MealPlan, MealPlanEntry
@@ -67,27 +68,40 @@ def aggregate_shopping(entries: Sequence[MealPlanEntry]) -> list[str]:
     return out
 
 
-def _score(sourced, *, urgent_names: list[str], signals) -> ScoredCandidate:
+def _score(sourced, *, urgent_names: list[str], signals, cooks, today: date) -> ScoredCandidate:
     names = [i.name for i in sourced.recipe.ingredients]
     expiry_use = expiry_utilization(recipe_names=names, urgent_names=urgent_names)
-    return ScoredCandidate(
+    candidate = ScoredCandidate(
         recipe=sourced.recipe,
         nutrition=sourced.nutrition,
         expiry_use=expiry_use,
         external_id=sourced.external_id,
-        final_score=blended_score(
-            health_0_1=sourced.nutrition.health_score / 100.0,
-            expiry_use=expiry_use,
-            deliciousness=sourced.recipe.deliciousness,
-            affinity_0_1=affinity(
-                cuisine=sourced.recipe.cuisine, ingredient_names=names, signals=signals
-            ),
-        ),
+        final_score=0.0,
+    )
+    return candidate.model_copy(
+        update={
+            "final_score": blended_score(
+                health_0_1=sourced.nutrition.health_score / 100.0,
+                expiry_use=expiry_use,
+                deliciousness=sourced.recipe.deliciousness,
+                affinity_0_1=affinity(
+                    cuisine=sourced.recipe.cuisine, ingredient_names=names, signals=signals
+                ),
+                novelty_0_1=novelty(recipe_key(candidate), cooks, today),
+            )
+        }
     )
 
 
 def _pick(
-    sourced_list, *, exclusions, taken_ids: set[str], urgent_names: list[str], signals
+    sourced_list,
+    *,
+    exclusions,
+    taken_ids: set[str],
+    urgent_names: list[str],
+    signals,
+    cooks,
+    today: date,
 ) -> ScoredCandidate | None:
     safe = [
         s
@@ -98,7 +112,10 @@ def _pick(
         and (s.external_id is None or s.external_id not in taken_ids)
     ]
     scored = sorted(
-        (_score(s, urgent_names=urgent_names, signals=signals) for s in safe),
+        (
+            _score(s, urgent_names=urgent_names, signals=signals, cooks=cooks, today=today)
+            for s in safe
+        ),
         key=lambda c: c.final_score,
         reverse=True,
     )
@@ -201,6 +218,7 @@ async def build_plan(
     taken_ids: set[str] = set()
     entries: list[MealPlanEntry] = []
     signals = list_recent_signals(session, household_id=household_id)
+    cooks = list_recent_cooks(session, household_id=household_id, today=today)
     for spec in specs[:days]:
         pool_names = [name for name, _ in pool]
         include = [f for f in spec.feature_items if normalize(f) in pool_names]
@@ -224,6 +242,8 @@ async def build_plan(
             taken_ids=taken_ids,
             urgent_names=urgent,
             signals=signals,
+            cooks=cooks,
+            today=today,
         )
         if candidate is None:
             if cost > cost_ceiling_micros:
@@ -299,6 +319,7 @@ async def swap_day(
     include = [f for f in spec.feature_items if normalize(f) in {n for n, _ in pantry}]
     remaining = max(0, cost_ceiling_micros - (plan.cost_micros_usd or 0))
     signals = list_recent_signals(session, household_id=plan.household_id)
+    cooks = list_recent_cooks(session, household_id=plan.household_id, today=today)
     sourced, cost = await _search_day(
         source,
         spec=spec,
@@ -316,6 +337,8 @@ async def swap_day(
         taken_ids=taken_ids,
         urgent_names=urgent,
         signals=signals,
+        cooks=cooks,
+        today=today,
     )
     session.add(plan)
     if candidate is None:

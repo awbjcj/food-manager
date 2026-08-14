@@ -479,7 +479,14 @@ def test_build_plan_keyboard_emits_swap_shop_cancel():
     day_rows = [(0, date(2026, 7, 9)), (1, date(2026, 7, 10))]
     rows = build_plan_keyboard(5, day_rows)
     datas = [b.callback_data for row in rows for b in row]
-    assert datas == ["plan:swap:5:0", "plan:swap:5:1", "plan:shop:5", "plan:cancel:5"]
+    assert datas == [
+        "plan:swap:5:0",
+        "plan:cooked:5:0",
+        "plan:swap:5:1",
+        "plan:cooked:5:1",
+        "plan:shop:5",
+        "plan:cancel:5",
+    ]
 
 
 def test_to_aiogram_keyboard_maps_url_button():

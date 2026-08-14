@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from app.normalization import normalize
 
-BLEND_WEIGHTS = {"health": 0.3, "expiry": 0.3, "deliciousness": 0.2, "affinity": 0.2}
+BLEND_WEIGHTS = {
+    "health": 0.3,
+    "expiry": 0.3,
+    "deliciousness": 0.15,
+    "affinity": 0.15,
+    "novelty": 0.1,
+}
 
 
 def violates_exclusions(ingredient_names, *, exclusions) -> bool:
@@ -24,13 +30,19 @@ def expiry_utilization(*, recipe_names, urgent_names) -> float:
 
 
 def blended_score(
-    *, health_0_1: float, expiry_use: float, deliciousness: float, affinity_0_1: float
+    *,
+    health_0_1: float,
+    expiry_use: float,
+    deliciousness: float,
+    affinity_0_1: float,
+    novelty_0_1: float = 1.0,
 ) -> float:
     return (
         BLEND_WEIGHTS["health"] * health_0_1
         + BLEND_WEIGHTS["expiry"] * expiry_use
         + BLEND_WEIGHTS["deliciousness"] * deliciousness
         + BLEND_WEIGHTS["affinity"] * affinity_0_1
+        + BLEND_WEIGHTS["novelty"] * novelty_0_1
     )
 
 

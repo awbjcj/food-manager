@@ -637,7 +637,11 @@ def test_expiry_utilization_fraction_of_urgent_items_used():
 
 def test_blended_score_weights():
     score = blended_score(
-        health_0_1=1.0, expiry_use=0.0, deliciousness=0.0, affinity_0_1=0.0
+        health_0_1=1.0,
+        expiry_use=0.0,
+        deliciousness=0.0,
+        affinity_0_1=0.0,
+        novelty_0_1=0.0,
     )
     assert abs(score - BLEND_WEIGHTS["health"]) < 1e-9
 

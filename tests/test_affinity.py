@@ -116,7 +116,7 @@ def test_list_recent_signals_windows_and_orders(session_factory):
 def test_blend_weights_sum_to_one_and_include_affinity():
     from app.cook.logic import BLEND_WEIGHTS
 
-    assert set(BLEND_WEIGHTS) == {"health", "expiry", "deliciousness", "affinity"}
+    assert set(BLEND_WEIGHTS) == {"health", "expiry", "deliciousness", "affinity", "novelty"}
     assert abs(sum(BLEND_WEIGHTS.values()) - 1.0) < 1e-9
 
 

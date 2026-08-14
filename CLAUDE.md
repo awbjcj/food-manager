@@ -80,7 +80,10 @@ Single-user Telegram bot: user sends grocery receipt photos → Claude parses th
 | `app/week_composer.py`       | Agno meal-plan seam (v5.2): `DaySpec`/`WeekPlanSpec`, per-provider `AgnoWeekComposer`s built at bootstrap, `WeekComposerSelector` (no fallback), pure `heuristic_compose` fallback                                                                                                                                                                                                                                                             |
 | `app/plan_service.py`        | Meal-plan orchestrator (v5.2): `build_plan` (sequential pantry allocation + composer/heuristic), `swap_day`, `aggregate_shopping`, `cancel_active_plans`                                                                                                                                                                                                                                                                                       |
 | `app/cook/affinity.py`       | Affinity (v5.3): recent-signal taste score + steering summary; consumed by `blended_score` and the LLM-tail prompts                                                                                                                                                                                                                                                                                                                            |
+| `app/cook/novelty.py`        | Novelty (v5.5): confirmed-cook history → the fifth `blended_score` term; `recipe_key` is the dedup identity                                                                                                                                                                                                                                                                                                                                    |
+| `app/cook/cooked_service.py` | `CookedMeal` lifecycle (v5.5): open/toggle/confirm the consume sheet; only confirmed rows count as cooked                                                                                                                                                                                                                                                                                                                                       |
 | `app/cook/*`                 | Recipe engine: `models.py` (Purpose/Effort/`RecipeCriteria`/`ScoredCandidate`), `recipe_source.py` (Spoonacular/TheMealDB/LLM sources + `ChainedRecipeSource`, v4.9), `llm.py` (selection/recipe/nutrition clients), `logic.py` (scoring, shopping-list diff), `service.py` (live LLM-only pipeline), `session_service.py` (`CookSession` cost/state), `favorites_service.py` (`SavedRecipe`), `feedback.py` (liked/disliked signal) |
+| `app/callbacks/cooked.py`    | Cooked-sheet callbacks: `plan:cooked:*` entry point plus the `cooked:*` sheet family                                                                                                                                                                                                                                                                                                                                                           |
 | `bin/run.py`                 | Entry point: loads settings, runs migrations, starts scheduler + polling                                                                                                                                                                                                                                                                                                                                                                       |
 
 ### Key design conventions
@@ -286,6 +289,35 @@ yet wired). Recipe cards also
 carry `image_url` (from Spoonacular/TheMealDB, `None` for LLM-only results)
 surfaced as a `🔗 Open recipe` URL button (`CallbackButton.url`) — no schema
 migration needed since it's not persisted.
+
+### Closing the loop (v5.5)
+
+A planned day can be marked cooked from the plan card (`plan:cooked:<id>:<day>`),
+which opens a consume sheet: every active pantry row whose `normalized_name`
+appears in the recipe — the exact complement of `cook/logic.py::shopping_list` —
+pre-checked, toggled via `cooked:tog:<cooked_id>:<item_id>`, and confirmed
+through the existing `mark_eaten`. The `CookedMeal` row is both the pending
+sheet (`selection_json`) and the permanent record; `confirmed_at` is the only
+thing that makes it count, so an abandoned sheet asserts nothing. It is keyed by
+household + `recipe_key` rather than by plan, so wiring `/cook` result cards
+later (`source="cook"`) is a new call site, not a migration.
+
+Confirmed cooks feed `app/cook/novelty.py`, a fifth `blended_score` term
+(`health 0.30 / expiry 0.30 / deliciousness 0.15 / affinity 0.15 / novelty
+0.10`) that ramps a repeated dish back from a `0.05` floor over
+`NOVELTY_WINDOW_DAYS = 21` — soft-suppressed, never hard-excluded, matching the
+affinity precedent. They also drive the `/stats` `meals_cooked` line (a
+*different* counter from the shipped `stats.cooked`, which counts `/cook`
+sessions that got 👍/👎 feedback).
+
+The morning digest gains a `🍽 Tonight: X` line when an active plan covers
+today. It rides on an existing digest and never manufactures one — the
+silent-day early return in `send_digest_once` is unchanged.
+
+Natural language reaches `cook`, `plan`, and `cooked`. Classification still
+charges `chat`; a dispatched `/cook` or `/plan` pays its own `admit()`, so NL is
+never a cheaper door. `cooked` is free and, with no plan covering today, replies
+with a hint rather than an error.
 
 ### Database
 

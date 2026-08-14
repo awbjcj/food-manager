@@ -1,6 +1,6 @@
 # Deferred Backlog
 
-**Last audited:** 2026-08-13, against `master` at `3533f50`.
+**Last audited:** 2026-08-14, against `master` at `3533f50`.
 
 Every spec in `docs/superpowers/specs/` carries a non-goals section listing what
 it deliberately did not build. Those deferrals were scattered across seventeen

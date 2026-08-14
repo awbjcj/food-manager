@@ -732,6 +732,7 @@ def render_stats(stats: Stats, lang: str = "en") -> str:
     lines.append(t("stats.cooked", lang,
                    feedback_count=stats.cook_feedback_count,
                    liked_count=stats.cook_liked_count))
+    lines.append(t("stats.meals_cooked", lang, count=stats.meals_cooked_count))
     lines.append(t("stats.waste_rate", lang, waste_rate=waste_rate))
     return "\n".join(lines)
 

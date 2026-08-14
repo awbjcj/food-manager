@@ -1,10 +1,29 @@
 from datetime import UTC, datetime
 
+import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.models import CookSession, Household, User
 from app.pantry_service import Stats, compute_stats
 from app.renderer import render_stats
+
+
+@pytest.fixture
+def session():
+    engine = create_engine("sqlite:///:memory:")
+    SQLModel.metadata.create_all(engine)
+    with Session(engine) as s:
+        yield s
+
+
+@pytest.fixture
+def household_id(session):
+    hh = Household(created_at=datetime.now(UTC))
+    session.add(hh)
+    session.commit()
+    session.refresh(hh)
+    assert hh.id is not None
+    return hh.id
 
 
 def test_compute_stats_counts_feedback():
@@ -39,3 +58,40 @@ def test_render_stats_shows_cooked_line():
     text = render_stats(stats)
     assert "Cooked: 3" in text
     assert "liked 2" in text
+
+
+def test_stats_counts_confirmed_cooked_meals(session, household_id):
+    from datetime import UTC, date, datetime
+
+    from app.models import CookedMeal
+    from app.pantry_service import compute_stats
+
+    now = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
+    session.add(
+        CookedMeal(
+            household_id=household_id,
+            source="plan",
+            recipe_key="spoon:10",
+            recipe_title="Chicken Tikka",
+            cooked_on=date(2026, 8, 13),
+            confirmed_at=now,
+        )
+    )
+    session.add(
+        CookedMeal(
+            household_id=household_id,
+            source="plan",
+            recipe_key="spoon:20",
+            recipe_title="Korma",
+            cooked_on=date(2026, 8, 13),
+        )
+    )
+    session.commit()
+    stats = compute_stats(session, household_id=household_id, now=now)
+    assert stats.meals_cooked_count == 1
+
+
+def test_stats_renders_the_meals_cooked_line():
+    from app.i18n import t
+
+    assert t("stats.meals_cooked", "en", count=3) == "  Meals cooked: 3"

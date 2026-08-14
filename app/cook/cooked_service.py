@@ -16,7 +16,7 @@ from datetime import date, datetime
 from sqlmodel import Session, select
 
 from app.cook.models import ScoredCandidate
-from app.cook.novelty import recipe_key
+from app.cook.novelty import count_confirmed, recipe_key
 from app.models import CookedMeal, MealPlanEntry, PantryItem
 from app.normalization import normalize
 from app.pantry_service import ListFilter, list_active, mark_eaten
@@ -195,12 +195,13 @@ def confirm(
     return ConfirmResult(eaten_names=eaten, skipped=skipped)
 
 
-def count_confirmed(session: Session, *, household_id: int, since: date) -> int:
-    rows = session.exec(
-        select(CookedMeal).where(
-            CookedMeal.household_id == household_id,
-            CookedMeal.confirmed_at.is_not(None),  # type: ignore[union-attr]
-            CookedMeal.cooked_on >= since,
-        )
-    ).all()
-    return len(list(rows))
+__all__ = [
+    "ConfirmResult",
+    "ConsumeCandidate",
+    "CookedSheet",
+    "confirm",
+    "count_confirmed",
+    "load_sheet",
+    "open_sheet",
+    "toggle",
+]

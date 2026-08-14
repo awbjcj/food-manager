@@ -693,6 +693,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "  Ajouts :     {count}  ({cost_total} $ total{unknown})",
         "es": "  Agregar:     {count}  (${cost_total} total{unknown})",
     },
+    "stats.meals_cooked": {
+        "en": "  Meals cooked: {count}",
+        "zh": "  已做餐数：{count}",
+        "fr": "  Repas cuisinés : {count}",
+        "es": "  Comidas cocinadas: {count}",
+    },
     "stats.unknown_suffix": {
         "en": ", {n} unknown",
         "zh": "，{n} 个未知",

@@ -277,6 +277,7 @@ class Stats:
     cook_count: int = 0
     cook_feedback_count: int = 0
     cook_liked_count: int = 0
+    meals_cooked_count: int = 0
     text_llm: TextLLMCost = field(default_factory=lambda: TextLLMCost(
         correction_proposal_count=0,
         correction_cost_micros=0,
@@ -355,6 +356,10 @@ def compute_stats(session: Session, *, household_id: int, now: datetime) -> Stat
         ),
     )
 
+    # Local imports: app.cook's __init__ imports back from this module, so a
+    # top-level `from app.cook...` import here would cycle regardless of
+    # which app.cook submodule is named.
+    from app.cook.novelty import count_confirmed
     from app.models import CookSession  # local import; avoids top-level churn
 
     cook_rows = list(
@@ -370,6 +375,9 @@ def compute_stats(session: Session, *, household_id: int, now: datetime) -> Stat
         1 for row in cook_rows if row.feedback in ("liked", "disliked")
     )
     cook_liked_count = sum(1 for row in cook_rows if row.feedback == "liked")
+    meals_cooked = count_confirmed(
+        session, household_id=household_id, since=since.date()
+    )
 
     return Stats(
         receipt_count=len(receipts),
@@ -386,6 +394,7 @@ def compute_stats(session: Session, *, household_id: int, now: datetime) -> Stat
         cook_count=len(cook_rows),
         cook_feedback_count=cook_feedback_count,
         cook_liked_count=cook_liked_count,
+        meals_cooked_count=meals_cooked,
         text_llm=text_llm,
     )
 

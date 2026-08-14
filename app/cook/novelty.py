@@ -56,3 +56,18 @@ def novelty(key: str, cooks: Sequence[CookedMeal], today: date) -> float:
         return 1.0
     days_since = min(gaps)  # most recent cook governs
     return max(NOVELTY_FLOOR, min(1.0, days_since / NOVELTY_WINDOW_DAYS))
+
+
+def count_confirmed(session: Session, *, household_id: int, since: date) -> int:
+    """Confirmed `CookedMeal` rows on/after `since` — lives here (not
+    `cooked_service`) so `pantry_service.compute_stats` can import it without
+    a circular import (`cooked_service` itself imports from `pantry_service`).
+    """
+    rows = session.exec(
+        select(CookedMeal).where(
+            CookedMeal.household_id == household_id,
+            CookedMeal.confirmed_at.is_not(None),  # type: ignore[union-attr]
+            CookedMeal.cooked_on >= since,
+        )
+    ).all()
+    return len(list(rows))

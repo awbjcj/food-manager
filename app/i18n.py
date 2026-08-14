@@ -1358,6 +1358,42 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "Un nouveau membre (id {id}) a rejoint votre foyer.",
         "es": "Un nuevo miembro (id {id}) se unió a tu hogar.",
     },
+    "cooked.header": {
+        "en": "🍳 Cooked: {dish}\n\nWhich did you use up?",
+        "zh": "🍳 已做：{dish}\n\n用完了哪些？",
+        "fr": "🍳 Cuisiné : {dish}\n\nQu'avez-vous utilisé ?",
+        "es": "🍳 Cocinado: {dish}\n\n¿Qué usaste?",
+    },
+    "cooked.empty": {
+        "en": "🍳 Cooked: {dish}\n\nNothing in your pantry matched this recipe.",
+        "zh": "🍳 已做：{dish}\n\n库存中没有与此食谱匹配的食材。",
+        "fr": "🍳 Cuisiné : {dish}\n\nRien dans votre garde-manger ne correspond à cette recette.",
+        "es": "🍳 Cocinado: {dish}\n\nNada en tu despensa coincide con esta receta.",
+    },
+    "cooked.done": {
+        "en": "🍳 Marked cooked. Ate: {names}",
+        "zh": "🍳 已记录。吃掉：{names}",
+        "fr": "🍳 Enregistré. Consommé : {names}",
+        "es": "🍳 Registrado. Comido: {names}",
+    },
+    "cooked.done_none": {
+        "en": "🍳 Marked cooked. Pantry unchanged.",
+        "zh": "🍳 已记录。库存未变。",
+        "fr": "🍳 Enregistré. Garde-manger inchangé.",
+        "es": "🍳 Registrado. Despensa sin cambios.",
+    },
+    "btn.cooked.confirm": {
+        "en": "Confirm",
+        "zh": "确认",
+        "fr": "Confirmer",
+        "es": "Confirmar",
+    },
+    "btn.cooked.none": {
+        "en": "Nothing used",
+        "zh": "没有用完",
+        "fr": "Rien utilisé",
+        "es": "Nada usado",
+    },
 }
 
 

@@ -12,6 +12,7 @@ from app.renderer import (
     DIGEST_CAP,
     build_nl_picker_keyboard,
     render_cook_result,
+    render_cooked_sheet,
     render_correct_menu,
     render_digest,
     render_favorites,
@@ -296,4 +297,18 @@ async def recook(
             recipe, shopping=shopping_items, lang=user.lang, names=names
         ),
         names,
+    )
+
+
+async def cooked_sheet(
+    session: Session, sheet, *, user, translation_llm
+) -> LocalizedView:
+    names = await _names_for(
+        session,
+        lang=user.lang,
+        texts=[sheet.recipe_title, *(c.raw_name for c in sheet.candidates)],
+        translation_llm=translation_llm,
+    )
+    return LocalizedView(
+        render_cooked_sheet(sheet, lang=user.lang, names=names), names
     )

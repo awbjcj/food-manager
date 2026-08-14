@@ -456,6 +456,42 @@ def build_plan_keyboard(
     return rows
 
 
+def render_cooked_sheet(sheet, *, lang: str = "en", names=None) -> str:
+    resolved = names or {}
+    dish = resolved.get(sheet.recipe_title, sheet.recipe_title)
+    key = "cooked.header" if sheet.candidates else "cooked.empty"
+    return t(key, lang, dish=dish)
+
+
+def build_cooked_sheet_keyboard(
+    sheet, *, lang: str = "en", names=None
+) -> list[list[CallbackButton]]:
+    resolved = names or {}
+    rows = [
+        [
+            CallbackButton(
+                text=f"{'✅' if c.item_id in sheet.selected_ids else '⬜'} "
+                f"{resolved.get(c.raw_name, c.raw_name)}",
+                callback_data=f"cooked:tog:{sheet.cooked_id}:{c.item_id}",
+            )
+        ]
+        for c in sheet.candidates
+    ]
+    rows.append(
+        [
+            CallbackButton(
+                text=t("btn.cooked.confirm", lang),
+                callback_data=f"cooked:ok:{sheet.cooked_id}",
+            ),
+            CallbackButton(
+                text=t("btn.cooked.none", lang),
+                callback_data=f"cooked:none:{sheet.cooked_id}",
+            ),
+        ]
+    )
+    return rows
+
+
 def build_nl_picker_keyboard(items, *, names=None) -> list[list[CallbackButton]]:
     """One labeled row per candidate item; tapping opens its v4.8 card."""
     resolved = names or {}

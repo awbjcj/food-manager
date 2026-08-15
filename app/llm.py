@@ -62,9 +62,18 @@ class LLMResult(BaseModel):
 CacheAction = Literal["move", "add_new", "leave"]
 
 
+class NameTranslationItem(BaseModel):
+    lang: str
+    text: str
+
+
 class CorrectionDiff(BaseModel):
     name: str | None = None
-    name_translations: dict[str, str] = Field(default_factory=dict)
+    # A list of {lang, text}, not dict[str, str]: OpenAI's structured-output
+    # strict mode requires additionalProperties: false on every object, which
+    # a free-form dict can't satisfy (see test_correction_diff_schema_has_no_
+    # openai_incompatible_dict_fields).
+    name_translations: list[NameTranslationItem] = Field(default_factory=list)
     category: Category | None = None
     expires_on: date | None = None
     shelf_life_days: int | None = Field(default=None, ge=1, le=730)
@@ -461,7 +470,7 @@ Return ONLY valid JSON with exactly these snake_case keys. No prose.
 Output schema (all keys required; use null for unchanged fields):
 {
   "name":            string or null,           // corrected canonical English item name, null if unchanged
-  "name_translations": object,                 // if name changes: display names keyed by en|zh|fr|es; otherwise {}
+  "name_translations": array,                  // if name changes: [{"lang": "en"|"zh"|"fr"|"es", "text": string}, ...]; otherwise []
   "category":        string or null,           // one of: dairy|produce|meat|seafood|bakery|pantry|frozen|beverage|other, null if unchanged
   "expires_on":      "YYYY-MM-DD" or null,     // new expiry date, null if not stated
   "shelf_life_days": integer 1..730 or null,   // new shelf life in days, null if not stated
@@ -483,9 +492,10 @@ Rules:
   - Set ONLY the fields the user actually wants to change. Leave the
     others null.
   - If the user corrects the item name in any language, set name to the
-    canonical English grocery name and fill name_translations for all display
-    languages: en, zh, fr, es. The en value must exactly match name.
-  - If the name is unchanged, name_translations must be {}.
+    canonical English grocery name and fill name_translations with one entry
+    per display language: en, zh, fr, es. The en entry's text must exactly
+    match name.
+  - If the name is unchanged, name_translations must be [].
   - Never set both shelf_life_days and expires_on; prefer the one
     the user stated more explicitly.
   - cache_action="move" when the user clarifies a misidentified item.

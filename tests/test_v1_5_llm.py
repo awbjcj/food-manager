@@ -200,6 +200,27 @@ def test_cost_micros_prices_openai_models():
     assert _cost_micros(usage, "gpt-unknown") is None
 
 
+def test_correction_diff_schema_has_no_openai_incompatible_dict_fields():
+    """OpenAI's structured-output strict mode requires additionalProperties:
+    false on every object; a bare dict[str, str] field compiles to
+    additionalProperties: {"type": "string"}, which the API rejects with a
+    400 (this is what broke every /correct call on the OpenAI provider)."""
+    schema = CorrectionDiff.model_json_schema()
+
+    def _walk(node):
+        if isinstance(node, dict):
+            additional = node.get("additionalProperties")
+            if additional not in (None, False):
+                raise AssertionError(f"disallowed additionalProperties: {node}")
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(schema)
+
+
 @pytest.mark.asyncio
 async def test_openai_text_llm_parse_add_uses_mini_model_and_wrapper_schema():
     parsed = ProposedAddItems(items=[

@@ -96,6 +96,7 @@ def _build_plan_entry(session_factory, *, lang: str) -> tuple[int, int]:
         db.add(plan)
         db.commit()
         db.refresh(plan)
+        assert plan.id is not None
         candidate = ScoredCandidate(
             recipe=RecipeCandidate(
                 title="Chicken Tikka",
@@ -137,7 +138,6 @@ def _build_plan_entry(session_factory, *, lang: str) -> tuple[int, int]:
             )
         )
         db.commit()
-        assert plan.id is not None
         return plan.id, 0
 
 

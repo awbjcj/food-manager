@@ -19,7 +19,7 @@ from app.correction_service import (
     propose_add,
     propose_correct,
 )
-from app.llm import CorrectionDiff, ProposedAddItem
+from app.llm import CorrectionDiff, NameTranslationItem, ProposedAddItem
 from app.models import Household, NameTranslation, PantryItem, User
 from app.pantry_service import compute_stats, mark_eaten
 from app.pending_service import (
@@ -48,10 +48,22 @@ def session():
             db.refresh(household)
         assert households[0].id is not None
         assert households[1].id is not None
-        db.add(User(telegram_id=1, chat_id=1, household_id=households[0].id,
-                    created_at=datetime.now(UTC)))
-        db.add(User(telegram_id=2, chat_id=2, household_id=households[1].id,
-                    created_at=datetime.now(UTC)))
+        db.add(
+            User(
+                telegram_id=1,
+                chat_id=1,
+                household_id=households[0].id,
+                created_at=datetime.now(UTC),
+            )
+        )
+        db.add(
+            User(
+                telegram_id=2,
+                chat_id=2,
+                household_id=households[1].id,
+                created_at=datetime.now(UTC),
+            )
+        )
         db.commit()
         yield db
 
@@ -128,9 +140,12 @@ def test_pending_create_load_terminal_expire_and_sweep(session):
         chat_id=1,
         now=now,
     )
-    assert expire_for_item(
-        session, household_id=1, item_id=42, exclude_pending_id=fresh.id
-    ) == 1
+    assert (
+        expire_for_item(
+            session, household_id=1, item_id=42, exclude_pending_id=fresh.id
+        )
+        == 1
+    )
     session.commit()
     session.refresh(old)
     session.refresh(fresh)
@@ -145,15 +160,17 @@ def test_pending_create_load_terminal_expire_and_sweep(session):
 @pytest.mark.asyncio
 async def test_propose_correct_back_computes_days_and_snapshot(session):
     item = _item(session)
-    fake = FakeTextLLMClient(canned_correct=(
-        CorrectionDiff(
-            expires_on=date(2026, 6, 5),
-            cache_action="leave",
-            rationale="date update",
-            confidence=0.8,
-        ),
-        100,
-    ))
+    fake = FakeTextLLMClient(
+        canned_correct=(
+            CorrectionDiff(
+                expires_on=date(2026, 6, 5),
+                cache_action="leave",
+                rationale="date update",
+                confidence=0.8,
+            ),
+            100,
+        )
+    )
 
     payload, cost = await propose_correct(
         session,
@@ -174,24 +191,28 @@ async def test_propose_correct_back_computes_days_and_snapshot(session):
 
 
 @pytest.mark.asyncio
-async def test_propose_correct_localized_name_carries_all_translations_and_expiry(session):
+async def test_propose_correct_localized_name_carries_all_translations_and_expiry(
+    session,
+):
     item = _item(session)
-    fake = FakeTextLLMClient(canned_correct=(
-        CorrectionDiff(
-            name="豆奶",
-            name_translations={
-                "en": "Soy Milk",
-                "zh": "豆奶",
-                "fr": "lait de soja",
-                "es": "leche de soja",
-            },
-            expires_on=date(2026, 6, 10),
-            cache_action="move",
-            rationale="localized name and date",
-            confidence=0.9,
-        ),
-        150,
-    ))
+    fake = FakeTextLLMClient(
+        canned_correct=(
+            CorrectionDiff(
+                name="豆奶",
+                name_translations=[
+                    NameTranslationItem(lang="en", text="Soy Milk"),
+                    NameTranslationItem(lang="zh", text="豆奶"),
+                    NameTranslationItem(lang="fr", text="lait de soja"),
+                    NameTranslationItem(lang="es", text="leche de soja"),
+                ],
+                expires_on=date(2026, 6, 10),
+                cache_action="move",
+                rationale="localized name and date",
+                confidence=0.9,
+            ),
+            150,
+        )
+    )
 
     payload, cost = await propose_correct(
         session,
@@ -213,17 +234,22 @@ async def test_propose_correct_localized_name_carries_all_translations_and_expir
         "fr": "lait de soja",
         "es": "leche de soja",
     }
-    assert correct_payload_from_json(correct_payload_to_json(payload)).name_translations == payload.name_translations
+    assert (
+        correct_payload_from_json(correct_payload_to_json(payload)).name_translations
+        == payload.name_translations
+    )
     assert cost == 150
 
 
 @pytest.mark.asyncio
 async def test_propose_correct_rejects_null_and_out_of_range(session):
     item = _item(session)
-    null_fake = FakeTextLLMClient(canned_correct=(
-        CorrectionDiff(cache_action="leave", rationale="no change", confidence=0.5),
-        100,
-    ))
+    null_fake = FakeTextLLMClient(
+        canned_correct=(
+            CorrectionDiff(cache_action="leave", rationale="no change", confidence=0.5),
+            100,
+        )
+    )
     with pytest.raises(NullDiff):
         await propose_correct(
             session,
@@ -234,15 +260,17 @@ async def test_propose_correct_rejects_null_and_out_of_range(session):
             today=date(2026, 5, 27),
         )
 
-    range_fake = FakeTextLLMClient(canned_correct=(
-        CorrectionDiff(
-            expires_on=date(2026, 5, 25),
-            cache_action="leave",
-            rationale="bad date",
-            confidence=0.8,
-        ),
-        100,
-    ))
+    range_fake = FakeTextLLMClient(
+        canned_correct=(
+            CorrectionDiff(
+                expires_on=date(2026, 5, 25),
+                cache_action="leave",
+                rationale="bad date",
+                confidence=0.8,
+            ),
+            100,
+        )
+    )
     with pytest.raises(ProposeCorrectError):
         await propose_correct(
             session,
@@ -256,7 +284,9 @@ async def test_propose_correct_rejects_null_and_out_of_range(session):
 
 def test_apply_correct_cache_actions(session):
     item = _item(session)
-    put_cached(session, 1, "milk", days=7, category="dairy", confidence=0.9, source="llm")
+    put_cached(
+        session, 1, "milk", days=7, category="dairy", confidence=0.9, source="llm"
+    )
     payload = CorrectPayload(
         diff={
             "name": {"old": "Milk", "new": "Heavy Cream"},
@@ -331,29 +361,40 @@ def test_apply_correct_upserts_name_translations(session):
 
     assert session.get(NameTranslation, ("en", "Soy Milk")) is None
     assert session.get(NameTranslation, ("zh", "Soy Milk")).translated_text == "豆奶"
-    assert session.get(NameTranslation, ("fr", "Soy Milk")).translated_text == "lait de soja"
-    assert session.get(NameTranslation, ("es", "Soy Milk")).translated_text == "leche de soja"
+    assert (
+        session.get(NameTranslation, ("fr", "Soy Milk")).translated_text
+        == "lait de soja"
+    )
+    assert (
+        session.get(NameTranslation, ("es", "Soy Milk")).translated_text
+        == "leche de soja"
+    )
 
 
 @pytest.mark.asyncio
 async def test_propose_add_payload_roundtrip_and_apply(session):
     put_cached(session, 1, "oat milk", days=14, category="beverage", confidence=0.9)
-    fake = FakeTextLLMClient(canned_add=([
-        ProposedAddItem(
-            name="Oat Milk",
-            category="beverage",
-            explicit_user_expiry=False,
-            estimated_shelf_life_days=8,
-            confidence=0.7,
-        ),
-        ProposedAddItem(
-            name="Star Fruit",
-            category="produce",
-            explicit_user_expiry=False,
-            estimated_shelf_life_days=6,
-            confidence=0.7,
-        ),
-    ], 201))
+    fake = FakeTextLLMClient(
+        canned_add=(
+            [
+                ProposedAddItem(
+                    name="Oat Milk",
+                    category="beverage",
+                    explicit_user_expiry=False,
+                    estimated_shelf_life_days=8,
+                    confidence=0.7,
+                ),
+                ProposedAddItem(
+                    name="Star Fruit",
+                    category="produce",
+                    explicit_user_expiry=False,
+                    estimated_shelf_life_days=6,
+                    confidence=0.7,
+                ),
+            ],
+            201,
+        )
+    )
 
     proposals, total = await propose_add(
         session,

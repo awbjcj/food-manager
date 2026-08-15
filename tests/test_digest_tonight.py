@@ -39,6 +39,7 @@ def _item(household_id):
         expires_on=date(2026, 8, 16),
         shelf_life_days=2,
         shelf_life_source="llm",
+        ingest_shelf_life_source="llm",
         created_via="manual",
         created_at=datetime.now(UTC),
     )
@@ -56,6 +57,7 @@ def _plan(session, household_id, *, status="active", entry_date=TODAY):
     session.add(plan)
     session.commit()
     session.refresh(plan)
+    assert plan.id is not None
     entry = MealPlanEntry(
         plan_id=plan.id,
         day_index=0,

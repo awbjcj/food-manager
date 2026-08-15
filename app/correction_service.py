@@ -170,11 +170,13 @@ async def propose_correct(
     ):
         raise NullDiff()
 
+    diff_name_translations = {entry.lang: entry.text for entry in diff.name_translations}
+
     raw_new_name = diff.name.strip() if diff.name is not None else None
     if raw_new_name == "":
         raise ProposeCorrectError("name cannot be empty")
     corrected_name = (
-        diff.name_translations.get("en", "").strip()
+        diff_name_translations.get("en", "").strip()
         if raw_new_name is not None
         else None
     )
@@ -182,7 +184,7 @@ async def propose_correct(
         corrected_name = raw_new_name
     name_translations = (
         _clean_name_translations(
-            diff.name_translations,
+            diff_name_translations,
             canonical_name=corrected_name,
         )
         if corrected_name is not None and corrected_name != item.raw_name

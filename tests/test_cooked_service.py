@@ -115,6 +115,7 @@ def entry(session, household):
     session.add(plan)
     session.commit()
     session.refresh(plan)
+    assert plan.id is not None
     row = MealPlanEntry(
         plan_id=plan.id,
         day_index=0,

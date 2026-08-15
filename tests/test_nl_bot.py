@@ -94,6 +94,7 @@ def _seed_plan_entry(session_factory, *, entry_date, ingredient="chicken"):
         db.add(plan)
         db.commit()
         db.refresh(plan)
+        assert plan.id is not None
         recipe_json = json.dumps(
             {
                 "recipe": {

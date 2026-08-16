@@ -196,7 +196,7 @@ async def handle_billing(
     session_factory,
     now_provider: NowProvider,
     on_user_created: Callable[[User], None] = _noop_user_created,
-):
+) -> None:
     async with _request(
         msg, session_factory=session_factory, on_user_created=on_user_created
     ) as ctx:

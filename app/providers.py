@@ -27,16 +27,17 @@ ALL_PROVIDERS: tuple[Provider, ...] = ("anthropic", "openai", "gemini", "deepsee
 # A coarse description of what each provider's API can serve. "text" covers the
 # JSON tasks every provider can do (corrections, /add, profile, cook selection &
 # nutrition, translation). "image" is receipt photo understanding; "search" is a
-# built-in web-search tool. DeepSeek's public API is text-only: no image input
-# and no API-level web-search tool, so it is deliberately "text" only and those
-# two capabilities fall back to a capable provider.
+# built-in web-search tool. DeepSeek's public API has no image input, so image
+# capability still falls back to another provider; it does have a native
+# web_search tool on its Responses API (app.deepseek_llm), so "search" is no
+# longer fallback-only for it.
 Capability = Literal["image", "text", "search"]
 
 PROVIDER_CAPABILITIES: dict[Provider, frozenset[Capability]] = {
     "anthropic": frozenset({"image", "text", "search"}),
     "openai": frozenset({"image", "text", "search"}),
     "gemini": frozenset({"image", "text", "search"}),
-    "deepseek": frozenset({"text"}),
+    "deepseek": frozenset({"text", "search"}),
 }
 
 

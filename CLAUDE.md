@@ -44,7 +44,7 @@ Single-user Telegram bot: user sends grocery receipt photos → Claude parses th
 | `app/providers.py`           | Canonical `Provider` type, `PROVIDER_CAPABILITIES`/`supports()`, `LLMProviderNotConfigured`, and the generic `ProviderSelector` base (with fallback) reused by every seam                                                                                                                                                                                                                                                                      |
 | `app/llm.py`                 | `LLMClient` Protocol + Anthropic/OpenAI clients; capability selectors (subclass `ProviderSelector`); `ParsedItem`/`LLMResult` models                                                                                                                                                                                                                                                                                                           |
 | `app/gemini_llm.py`          | All Google Gemini clients (native `google-genai`): image, text, profile, cook, translation, search                                                                                                                                                                                                                                                                                                                                             |
-| `app/deepseek_llm.py`        | DeepSeek text-only clients (OpenAI-compatible `chat.completions`): text, profile, selection, nutrition, translation                                                                                                                                                                                                                                                                                                                            |
+| `app/deepseek_llm.py`        | DeepSeek clients (OpenAI-Responses-API-compatible): text, profile, selection, nutrition, translation, and search (native `web_search` tool); still no image client                                                                                                                                                                                                                                                                            |
 | `app/translation_llm.py`     | `TranslationLLMClient` Protocol + Anthropic/OpenAI clients + selector (translates dynamic names)                                                                                                                                                                                                                                                                                                                                               |
 | `app/translation_service.py` | `translate_texts()`: lazy LLM translate + `NameTranslation` cache, English fallback                                                                                                                                                                                                                                                                                                                                                            |
 | `app/i18n.py`                | Static `MESSAGES` catalog, `t(key, lang, **kw)`, locale date/weekday helpers                                                                                                                                                                                                                                                                                                                                                                   |
@@ -197,8 +197,9 @@ migration needed); `app/providers.py` is the single source of truth for the
 `Provider` type and the capability matrix.
 
 - **Capabilities differ per provider.** `anthropic`/`openai`/`gemini` are full
-  providers (image + web search + text); **DeepSeek's API is text-only** (no
-  image input, no API-level web-search tool). `PROVIDER_CAPABILITIES` /
+  providers (image + web search + text); **DeepSeek still can't read receipt
+  photos**, but does have a native `web_search` tool on its Responses API, so
+  it is `text` + `search`, not `text`-only. `PROVIDER_CAPABILITIES` /
   `supports(provider, capability)` encode this.
 - **One generic selector.** Every seam (image, text, profile, cook
   selection/recipe/nutrition, translation, search) is a thin subclass of
@@ -210,7 +211,7 @@ migration needed); `app/providers.py` is the single source of truth for the
   choice is always honoured).
 - **Selectability floor is text.** `_available_llm_providers` (bot.py) lists
   providers that can serve the _text_ tasks, so DeepSeek is selectable even
-  though it can't read photos; `/llm` status flags text-only providers.
+  though it can't read photos; `/llm` status flags image-incapable providers.
 - **Seed defaults must be capable.** `bin/run.py::_capable_default` ensures an
   image/search/recipe selector is seeded with a provider that actually has the
   capability (a DeepSeek global default falls back to gemini/anthropic). Settings

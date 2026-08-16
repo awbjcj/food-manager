@@ -79,6 +79,26 @@ def _gemini_cost(response, model: str) -> int | None:
         return None
 
 
+# Google Search grounding is a tool charge on top of token costs (confirmed
+# against the Gemini pricing page on 2026-08-15): Gemini 3.x bills per search
+# query the model executes; Gemini 2.5 and older bill per grounded prompt
+# regardless of how many queries that prompt issued.
+_GEMINI_SEARCH_COST_MICROS_PER_QUERY_V3 = 14_000
+_GEMINI_SEARCH_COST_MICROS_PER_PROMPT_LEGACY = 35_000
+
+
+def _gemini_search_cost_micros(response, model: str) -> int:
+    """Grounding fee from ``candidates[0].grounding_metadata.web_search_queries``."""
+    candidates = getattr(response, "candidates", None) or []
+    metadata = getattr(candidates[0], "grounding_metadata", None) if candidates else None
+    queries = [q for q in (getattr(metadata, "web_search_queries", None) or []) if q]
+    if not queries:
+        return 0
+    if model.startswith("gemini-3"):
+        return len(queries) * _GEMINI_SEARCH_COST_MICROS_PER_QUERY_V3
+    return _GEMINI_SEARCH_COST_MICROS_PER_PROMPT_LEGACY
+
+
 def _usage_dict(response) -> dict[str, Any] | None:
     usage = getattr(response, "usage_metadata", None)
     if usage is None:
@@ -368,6 +388,8 @@ class GeminiSearchClient(ShelfLifeSearchClient):
             return ShelfLifeSearchResult(days=None, confidence=0.0, cost_micros_usd=None)
 
         cost = _gemini_cost(response, self._model)
+        if cost is not None:
+            cost += _gemini_search_cost_micros(response, self._model)
         try:
             data = _json_object(response.text)
             return ShelfLifeSearchResult(

@@ -51,6 +51,7 @@ from app.db import make_engine, make_session_factory
 from app.deepseek_llm import (
     DeepSeekNutritionLLM,
     DeepSeekProfileLLMClient,
+    DeepSeekSearchClient,
     DeepSeekSelectionLLM,
     DeepSeekTextLLMClient,
     DeepSeekTranslationLLMClient,
@@ -307,8 +308,10 @@ def _build_llm_clients(settings: Settings) -> LLMBundle:
             api_key=settings.deepseek_api_key,
             base_url=settings.deepseek_base_url,
         )
-        # Text-only: no image / search / search-backed recipe client; those fall
-        # back to a capable provider via the selectors.
+        # Still image-incapable: no image extraction / search-backed recipe
+        # client here; those fall back to a capable provider via the selectors.
+        # Search itself is native (DeepSeekSearchClient, via the Responses API
+        # web_search tool) and no longer falls back.
         text_clients["deepseek"] = DeepSeekTextLLMClient(
             deepseek_sdk, settings.deepseek_model
         )
@@ -322,6 +325,9 @@ def _build_llm_clients(settings: Settings) -> LLMBundle:
             deepseek_sdk, settings.deepseek_model
         )
         translation_clients["deepseek"] = DeepSeekTranslationLLMClient(
+            deepseek_sdk, settings.deepseek_model
+        )
+        search_clients["deepseek"] = DeepSeekSearchClient(
             deepseek_sdk, settings.deepseek_model
         )
 

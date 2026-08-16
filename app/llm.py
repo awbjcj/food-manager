@@ -202,7 +202,12 @@ _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "gemini-3.5-flash": {"input": 1.5, "output": 9.0},
     "gemini-3.1-pro-preview": {"input": 2.0, "output": 12.0},
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.5},
-    "deepseek-chat": {"input": 0.27, "output": 1.1},
+    # Cache-miss input rate (conservative, matching this table's treatment of
+    # every other provider's cache pricing as out of scope). These rates hold
+    # through 16:00 UTC on 2026-08-16, after which DeepSeek switches to
+    # peak/off-peak billing this table does not model; update then.
+    "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
+    "deepseek-v4-pro": {"input": 0.435, "output": 0.87},
 }
 
 _OPENAI_WEB_SEARCH_TOOL = {
@@ -236,6 +241,55 @@ def _cost_micros(message, model: str) -> int | None:
         )
     except Exception:  # noqa: BLE001 - cost estimate is best-effort
         return None
+
+
+# Server-side web-search tool fees, billed per call/query in addition to token
+# costs (confirmed against each provider's pricing page on 2026-08-15). Both are
+# $10 per 1,000 searches today, but tracked as separate constants since they are
+# independent provider prices that can diverge.
+_ANTHROPIC_SEARCH_COST_MICROS_PER_QUERY = 10_000
+_OPENAI_SEARCH_COST_MICROS_PER_QUERY = 10_000
+
+
+def _anthropic_search_cost_micros(message) -> int:
+    """Web-search tool fee from ``usage.server_tool_use.web_search_requests``.
+
+    Zero (a safe no-op) for any response shape without that field, so this is
+    safe to call unconditionally regardless of whether the web_search tool was
+    attached to the request.
+    """
+    usage = getattr(message, "usage", None)
+    server_tool_use = getattr(usage, "server_tool_use", None)
+    requests = getattr(server_tool_use, "web_search_requests", None) or 0
+    return requests * _ANTHROPIC_SEARCH_COST_MICROS_PER_QUERY
+
+
+def _web_search_call_count(response) -> int:
+    """Count of ``web_search_call`` items in a Responses-API-shaped ``output``.
+
+    Zero (a safe no-op) for any response shape without an ``output`` list (e.g.
+    Chat Completions or Anthropic messages), so this is safe to call
+    unconditionally regardless of whether the web_search tool was attached.
+    """
+    return sum(
+        1
+        for item in getattr(response, "output", None) or []
+        if getattr(item, "type", None) == "web_search_call"
+    )
+
+
+def _openai_search_cost_micros(response) -> int:
+    """OpenAI's $10/1,000-calls web-search tool fee."""
+    return _web_search_call_count(response) * _OPENAI_SEARCH_COST_MICROS_PER_QUERY
+
+
+def _add_cost(base: int | None, extra: int) -> int | None:
+    """Add a deterministic extra charge onto a best-effort token cost.
+
+    ``None`` (unknown cost) stays ``None`` — an extra known charge doesn't turn
+    an incomplete estimate into a complete one.
+    """
+    return None if base is None else base + extra
 
 
 def _usage_dict(message) -> dict[str, Any] | None:
@@ -459,7 +513,10 @@ class OpenAILLMClient(LLMClient):
 
         return LLMResult(
             parse=parsed,
-            cost_micros_usd=_cost_micros(response, self._model),
+            cost_micros_usd=_add_cost(
+                _cost_micros(response, self._model),
+                _openai_search_cost_micros(response),
+            ),
             provider_usage=_usage_dict(response),
         )
 
@@ -745,7 +802,10 @@ class OpenAITextLLMClient(TextLLMClient):
         )
         return (
             CorrectionDiff.model_validate(_extract_openai_parsed(response)),
-            _cost_micros(response, self._model),
+            _add_cost(
+                _cost_micros(response, self._model),
+                _openai_search_cost_micros(response),
+            ),
         )
 
     async def parse_add(
@@ -768,7 +828,10 @@ class OpenAITextLLMClient(TextLLMClient):
             ProposedAddItems,
         )
         parsed = ProposedAddItems.model_validate(_extract_openai_parsed(response))
-        return parsed.items, _cost_micros(response, self._model)
+        return parsed.items, _add_cost(
+            _cost_micros(response, self._model),
+            _openai_search_cost_micros(response),
+        )
 
 
 class AnthropicProfileLLMClient(ProfileUpdateLLMClient):
@@ -797,7 +860,10 @@ class OpenAIProfileLLMClient(ProfileUpdateLLMClient):
         )
         return (
             FoodProfile.model_validate(_extract_openai_parsed(response)),
-            _cost_micros(response, self._delegate._model),
+            _add_cost(
+                _cost_micros(response, self._delegate._model),
+                _openai_search_cost_micros(response),
+            ),
         )
 
 

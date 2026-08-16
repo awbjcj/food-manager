@@ -65,9 +65,15 @@ async def with_transport_retry[T](
 
     `log_event` is the structured-log stem: a retry logs ``f"{log_event}_retrying"``
     and the final failure logs ``f"{log_event}_final"`` (preserving the existing
-    event names so log-based alerting keeps working). On success, logs
-    ``f"{log_event}_timing"`` with `duration_ms`/`attempts`. `clock` feeds the
-    success timing log; inject a fake in tests.
+    event names so log-based alerting keeps working). Every call site names its
+    stem ``"<provider>_llm_failed"``, which reads fine for those two failure
+    events but is misleading on the *success* path — a stem ending in
+    ``_failed`` would make even a clean, first-try call log an INFO line named
+    e.g. ``gemini_llm_failed_timing``, easily mistaken for an error while
+    skimming logs. So the success log strips a trailing ``_failed`` off the
+    stem before appending ``_timing`` (``gemini_llm_timing``), while the two
+    failure events keep the original stem unchanged. `clock` feeds the success
+    timing log; inject a fake in tests.
     """
     started = clock()
     for attempt in range(attempts):
@@ -87,7 +93,7 @@ async def with_transport_retry[T](
             await sleep(2**attempt)
             continue
         log.info(
-            f"{log_event}_timing",
+            f"{log_event.removesuffix('_failed')}_timing",
             extra={
                 "duration_ms": int((clock() - started) * 1000),
                 "attempts": attempt + 1,

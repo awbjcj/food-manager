@@ -565,7 +565,7 @@ def test_render_stats_en_unchanged():
     assert "Tracked items: 42" in text
     assert "Removed (wrong import): 2" in text
     assert "Cache hit rate: 72.5%" in text
-    assert "LLM spend: total $0.092  avg $0.018 / receipt" in text
+    assert "LLM spend: total $0.092 avg $0.018 / receipt" in text
     assert "Waste rate: 18.2%" in text
 
 

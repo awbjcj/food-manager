@@ -9,9 +9,12 @@ from app.cook.models import NutritionScores, RecipeCandidates, SelectedItems
 from app.llm import (
     _OPENAI_REASONING,
     _OPENAI_WEB_SEARCH_TOOL,
+    _add_cost,
+    _anthropic_search_cost_micros,
     _cost_micros,
     _extract_json_text,
     _extract_openai_parsed,
+    _openai_search_cost_micros,
 )
 from app.llm_transport import is_retryable_transport_error, with_transport_retry
 
@@ -94,7 +97,7 @@ class _AnthropicJSONClient:
         unknown_cost = False
         for attempt in range(2):
             msg = await self._create_message(system, user_content, tools)
-            cost = _cost_micros(msg, self._model)
+            cost = _add_cost(_cost_micros(msg, self._model), _anthropic_search_cost_micros(msg))
             if cost is None:
                 unknown_cost = True
             else:
@@ -187,7 +190,7 @@ class _OpenAIJSONClient:
         unknown_cost = False
         for attempt in range(2):
             resp = await self._create_response(system, user_content, tools, model_cls)
-            cost = _cost_micros(resp, self._model)
+            cost = _add_cost(_cost_micros(resp, self._model), _openai_search_cost_micros(resp))
             if cost is None:
                 unknown_cost = True
             else:

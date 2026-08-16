@@ -200,6 +200,31 @@ def test_cost_micros_prices_openai_models():
     assert _cost_micros(usage, "gpt-unknown") is None
 
 
+def test_openai_search_cost_micros_counts_web_search_call_items():
+    from types import SimpleNamespace
+
+    from app.llm import _add_cost, _cost_micros, _openai_search_cost_micros
+
+    response = SimpleNamespace(
+        usage=SimpleNamespace(input_tokens=1000, output_tokens=200),
+        output=[
+            SimpleNamespace(type="web_search_call"),
+            SimpleNamespace(type="message"),
+            SimpleNamespace(type="web_search_call"),
+        ],
+    )
+    # 2 web_search_call items * $10/1000 = 20_000 micros
+    assert _openai_search_cost_micros(response) == 20_000
+    # gpt-5.4: 1000*2.5 + 200*15 = 5500, plus the 20_000 search fee
+    assert _add_cost(_cost_micros(response, "gpt-5.4"), _openai_search_cost_micros(response)) == 25_500
+
+    no_search = SimpleNamespace(output=[SimpleNamespace(type="message")])
+    assert _openai_search_cost_micros(no_search) == 0
+
+    no_output = SimpleNamespace()
+    assert _openai_search_cost_micros(no_output) == 0
+
+
 def test_correction_diff_schema_has_no_openai_incompatible_dict_fields():
     """OpenAI's structured-output strict mode requires additionalProperties:
     false on every object; a bare dict[str, str] field compiles to

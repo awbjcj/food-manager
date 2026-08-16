@@ -30,8 +30,8 @@ from app.settings import Settings
 def test_capability_matrix():
     assert supports("gemini", "image") and supports("gemini", "search")
     assert supports("deepseek", "text")
+    assert supports("deepseek", "search")
     assert not supports("deepseek", "image")
-    assert not supports("deepseek", "search")
     assert set(ALL_PROVIDERS) == {"anthropic", "openai", "gemini", "deepseek"}
 
 
@@ -126,18 +126,18 @@ def test_build_llm_clients_capability_matrix():
 
     # Text is the floor every provider meets.
     assert bundle.text.available_providers == ("anthropic", "deepseek", "gemini", "openai")
-    # Image excludes deepseek (text-only).
+    # Image excludes deepseek (still no image input).
     assert bundle.image.available_providers == ("anthropic", "gemini", "openai")
-    # Search wired for anthropic + gemini only.
+    # Search now wired for deepseek too (native web_search tool).
     assert bundle.search is not None
-    assert bundle.search.available_providers == ("anthropic", "gemini")
-    # Recipe (search-backed) excludes deepseek.
+    assert bundle.search.available_providers == ("anthropic", "deepseek", "gemini")
+    # Recipe (search-backed) excludes deepseek — no image, so no recipe client.
     assert "deepseek" not in bundle.recipe.available_providers
 
-    # A deepseek user's text task uses deepseek, but a photo falls back.
+    # A deepseek user's text and search tasks use deepseek directly; a photo falls back.
     assert type(bundle.text.for_provider("deepseek")).__name__ == "DeepSeekTextLLMClient"
+    assert type(bundle.search.for_provider("deepseek")).__name__ == "DeepSeekSearchClient"
     assert bundle.image.for_provider("deepseek") is bundle.image.for_provider("anthropic")
-    assert bundle.search.for_provider("deepseek") is bundle.search.for_provider("anthropic")
 
 
 def test_build_llm_clients_deepseek_default_seeds_capable_image():
@@ -149,57 +149,123 @@ def test_build_llm_clients_deepseek_default_seeds_capable_image():
         GEMINI_API_KEY="g",
     )
     bundle = _build_llm_clients(settings)
-    # Image/search seed defaults must be capable even though the global default
-    # (deepseek) is not — they fall back to gemini.
-    assert bundle.search is not None
+    # Image seed default must be capable even though the global default
+    # (deepseek) is not — it falls back to gemini.
     assert bundle.image.for_provider("deepseek") is bundle.image.for_provider("gemini")
-    assert bundle.search.for_provider("deepseek") is bundle.search.for_provider("gemini")
+    # Search is deepseek's own native client now — deepseek is capable, so the
+    # global default itself seeds the search selector; no fallback needed.
+    assert bundle.search is not None
+    assert type(bundle.search.for_provider("deepseek")).__name__ == "DeepSeekSearchClient"
+    assert bundle.search.default_provider == "deepseek"
 
 
 # --------------------------------------------------------------------------- #
-# DeepSeek client: chat.completions JSON + schema repair (faked SDK)
+# DeepSeek client: Responses API structured output (faked SDK)
 # --------------------------------------------------------------------------- #
-class _FakeChatCompletions:
-    def __init__(self, contents):
-        self._contents = list(contents)
+class _FakeResponsesOutputContent:
+    type = "output_text"
+
+    def __init__(self, parsed):
+        self.parsed = parsed
+
+
+class _FakeResponsesMessageOutput:
+    type = "message"
+
+    def __init__(self, parsed):
+        self.content = [_FakeResponsesOutputContent(parsed)]
+
+
+class _FakeDeepSeekResponse:
+    def __init__(
+        self, parsed, *, input_tokens=10, output_tokens=5, web_search_calls=0
+    ):
+        self.output = [_FakeResponsesMessageOutput(parsed)] + [
+            SimpleNamespace(type="web_search_call") for _ in range(web_search_calls)
+        ]
+        self.output_parsed = None  # force _extract_openai_parsed to walk .output
+        self.usage = SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens)
+
+
+class _FakeResponses:
+    def __init__(self, responses):
+        self._responses = list(responses)
         self.calls: list[dict] = []
+
+    async def parse(self, **kwargs):
+        self.calls.append(kwargs)
+        return self._responses.pop(0)
 
     async def create(self, **kwargs):
         self.calls.append(kwargs)
-        content = self._contents.pop(0)
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
-            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5),
-        )
+        return self._responses.pop(0)
 
 
-class FakeOpenAISDK:
-    def __init__(self, contents):
-        self.chat = SimpleNamespace(completions=_FakeChatCompletions(contents))
+class FakeDeepSeekSDK:
+    def __init__(self, responses):
+        self.responses = _FakeResponses(responses)
 
 
 async def test_deepseek_parse_add_happy_path():
-    sdk = FakeOpenAISDK(
-        ['{"items":[{"name":"Oat Milk","explicit_user_expiry":false,"confidence":0.9}]}']
+    from app.llm import ProposedAddItem
+
+    sdk = FakeDeepSeekSDK(
+        [
+            _FakeDeepSeekResponse(
+                ProposedAddItems(
+                    items=[
+                        ProposedAddItem(
+                            name="Oat Milk",
+                            explicit_user_expiry=False,
+                            confidence=0.9,
+                        )
+                    ]
+                )
+            )
+        ]
     )
-    client = DeepSeekTextLLMClient(sdk, "deepseek-chat")
+    client = DeepSeekTextLLMClient(sdk, "deepseek-v4-flash")
     from datetime import date
 
     items, cost = await client.parse_add(
         user_text="oat milk", today=date(2026, 6, 29), tz="UTC"
     )
     assert [i.name for i in items] == ["Oat Milk"]
-    assert cost == round(10 * 0.27 + 5 * 1.1)  # 8
-    # response_format pins JSON object mode
-    assert sdk.chat.completions.calls[0]["response_format"] == {"type": "json_object"}
+    assert cost == round(10 * 0.14 + 5 * 0.28)  # deepseek-v4-flash pricing
+    # every text call carries the native web_search tool
+    assert sdk.responses.calls[0]["tools"] == [
+        {"type": "web_search", "search_context_size": "low"}
+    ]
 
 
-async def test_deepseek_schema_repair_retries_once():
-    sdk = FakeOpenAISDK(['not json', '{"item_ids":[1,2],"rationale":"x"}'])
-    client = DeepSeekSelectionLLM(sdk, "deepseek-chat")
+async def test_deepseek_selection_has_no_web_search_tool():
+    from app.cook.models import SelectedItems
+
+    sdk = FakeDeepSeekSDK(
+        [_FakeDeepSeekResponse(SelectedItems(item_ids=[1, 2], rationale="x"))]
+    )
+    client = DeepSeekSelectionLLM(sdk, "deepseek-v4-flash")
     selected, _cost = await client.select_items(prompt="pick stuff")
     assert selected.item_ids == [1, 2]
-    assert len(sdk.chat.completions.calls) == 2  # one repair round-trip
+    # selection is not a web-search-eligible seam, matching OpenAISelectionLLM
+    assert sdk.responses.calls[0]["tools"] == []
+
+
+async def test_deepseek_search_tool_cost_is_unknown_when_invoked():
+    """DeepSeek doesn't publish a web_search price, so a response with a
+    web_search_call in it must report cost as unknown, not silently
+    under-priced at token cost alone."""
+    from app.deepseek_llm import DeepSeekSearchClient
+
+    sdk = FakeDeepSeekSDK(
+        [_FakeDeepSeekResponse({"days": 10, "confidence": 0.9}, web_search_calls=1)]
+    )
+    sdk.responses._responses[0].output_text = '{"days": 10, "confidence": 0.9}'
+    client = DeepSeekSearchClient(sdk, "deepseek-v4-flash")
+    result = await client.lookup_shelf_life(name="milk", category="dairy")
+    assert result.days == 10
+    assert result.confidence == 0.9
+    assert result.cost_micros_usd is None
 
 
 # --------------------------------------------------------------------------- #
@@ -278,3 +344,35 @@ async def test_gemini_search_uses_grounding_and_parses_json():
     cfg = client.aio.models.calls[0]["config"]
     assert cfg.tools
     assert cfg.response_schema is None
+
+
+async def test_gemini_search_adds_grounding_query_fee_for_v3_model():
+    response = _gemini_response('{"days": 5, "confidence": 0.9}')
+    response.candidates = [
+        SimpleNamespace(
+            grounding_metadata=SimpleNamespace(web_search_queries=["milk shelf life", ""])
+        )
+    ]
+    client = FakeGenAIClient([response])
+    res = await GeminiSearchClient(client, "gemini-3.1-pro-preview").lookup_shelf_life(
+        name="milk", category="dairy"
+    )
+    # tokens: 10*2.0 + 4*12.0 = 68; grounding: 1 non-empty query * $14/1000 = 14_000
+    assert res.cost_micros_usd == 68 + 14_000
+
+
+async def test_gemini_search_adds_grounding_prompt_fee_for_legacy_model():
+    response = _gemini_response('{"days": 5, "confidence": 0.9}')
+    response.candidates = [
+        SimpleNamespace(
+            grounding_metadata=SimpleNamespace(
+                web_search_queries=["milk shelf life", "milk expiry"]
+            )
+        )
+    ]
+    client = FakeGenAIClient([response])
+    res = await GeminiSearchClient(client, "gemini-2.5-flash").lookup_shelf_life(
+        name="milk", category="dairy"
+    )
+    # tokens: 10*0.3 + 4*2.5 = 13; grounding: billed per PROMPT (not per query) = $35/1000
+    assert res.cost_micros_usd == 13 + 35_000

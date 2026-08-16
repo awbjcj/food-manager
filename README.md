@@ -21,7 +21,7 @@ A Telegram bot that tracks your household's grocery pantry and sends a daily exp
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
 - A Telegram bot token — create one via `@BotFather`
-- An API key for at least one LLM provider capable of reading receipt photos: Anthropic, OpenAI, or Gemini (DeepSeek is text-only and can't be the sole provider)
+- An API key for at least one LLM provider capable of reading receipt photos: Anthropic, OpenAI, or Gemini (DeepSeek can't read photos and can't be the sole provider)
 - Your Telegram user ID — get it from `@userinfobot`
 
 ## Local dev
@@ -52,8 +52,8 @@ uv run python bin/run.py
   message. Tap **Apply** to commit or **Cancel** to discard. Proposals
   expire after 10 minutes.
 - `/llm [anthropic|openai|gemini|deepseek]` shows or changes the per-user LLM
-  provider. DeepSeek is text-only (no photo reading, no web search) — those
-  calls fall back to a capable provider automatically.
+  provider. DeepSeek still can't read receipt photos — photo calls fall back
+  to a capable provider automatically — but does have native web search.
 - Any mutation to a pantry item (mark eaten / tossed / removed / snoozed /
   corrected / moved to fridge or freezer) invalidates pending corrections for
   that item in the same transaction.
@@ -154,8 +154,8 @@ reverted.
 | `GEMINI_API_KEY`           | When using gemini    | —                           | Google Gemini API key (native `google-genai` SDK)                                                                                                                                            |
 | `GEMINI_MODEL`             | No                   | `gemini-3.1-pro-preview`    | Gemini model to use for receipt parsing                                                                                                                                                      |
 | `GEMINI_TEXT_MODEL`        | No                   | `gemini-3.5-flash`          | Gemini model to use for `/correct` and `/add` proposals                                                                                                                                      |
-| `DEEPSEEK_API_KEY`         | When using deepseek  | —                           | DeepSeek API key. DeepSeek is text-only: no receipt photo reading, no web search                                                                                                             |
-| `DEEPSEEK_MODEL`           | No                   | `deepseek-chat`             | DeepSeek model to use for text tasks                                                                                                                                                         |
+| `DEEPSEEK_API_KEY`         | When using deepseek  | —                           | DeepSeek API key. DeepSeek still can't read receipt photos, but now has native web search                                                                                                    |
+| `DEEPSEEK_MODEL`           | No                   | `deepseek-v4-flash`         | DeepSeek model to use for text and search tasks                                                                                                                                              |
 | `DEEPSEEK_BASE_URL`        | No                   | `https://api.deepseek.com`  | DeepSeek API base URL (OpenAI-compatible)                                                                                                                                                    |
 | `SPOONACULAR_API_KEY`      | No                   | —                           | Optional Spoonacular key for the in-progress real-source `/cook` recipe chain (not yet wired into the live pipeline)                                                                         |
 | `COOK_COST_CEILING_MICROS` | No                   | `100000`                    | Per-`/cook` LLM spend ceiling in micro-USD ($0.10); raise if recipes come back empty                                                                                                         |

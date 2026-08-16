@@ -32,10 +32,14 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-3.1-pro-preview", alias="GEMINI_MODEL")
     gemini_text_model: str = Field(default="gemini-3.5-flash", alias="GEMINI_TEXT_MODEL")
-    # DeepSeek is OpenAI-compatible and text-only (no image/search). One model
-    # field suffices since it serves only the text capabilities.
+    # DeepSeek is OpenAI-Responses-API-compatible; it has no image capability,
+    # but does have a native web_search tool. One model field suffices since
+    # a single model serves both the text and search capabilities.
     deepseek_api_key: str | None = Field(default=None, alias="DEEPSEEK_API_KEY")
-    deepseek_model: str = Field(default="deepseek-chat", alias="DEEPSEEK_MODEL")
+    # deepseek-chat is a Chat Completions-only alias; the Responses API this
+    # module now uses (app.deepseek_llm) only documents deepseek-v4-flash and
+    # deepseek-v4-pro as supported models.
+    deepseek_model: str = Field(default="deepseek-v4-flash", alias="DEEPSEEK_MODEL")
     deepseek_base_url: str = Field(
         default="https://api.deepseek.com", alias="DEEPSEEK_BASE_URL"
     )
@@ -70,9 +74,9 @@ class Settings(BaseSettings):
                 f"{self.llm_provider.upper()}_API_KEY is required when "
                 f"LLM_PROVIDER={self.llm_provider}"
             )
-        # A text-only default provider (e.g. deepseek) cannot read receipt photos
-        # or run web searches; those fall back to a capable provider, so at least
-        # one image/search-capable key must be configured or the bot can't ingest.
+        # An image-incapable default provider (e.g. deepseek) cannot read
+        # receipt photos; that falls back to a capable provider, so at least
+        # one image-capable key must be configured or the bot can't ingest.
         if not supports(self.llm_provider, "image"):
             capable = [
                 provider

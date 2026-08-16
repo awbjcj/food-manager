@@ -1,18 +1,26 @@
-"""DeepSeek clients (OpenAI-compatible ``chat.completions``).
+"""DeepSeek clients (OpenAI-Responses-API-compatible endpoint).
 
-DeepSeek's public API is **text-only** — no image input and no API-level
-web-search tool — so this module implements only the text capabilities
-(correction/add, profile, cook selection & nutrition, translation). Image
-extraction, web search, and the search-backed recipe step are not implemented
-here; for a DeepSeek user they fall back to a capable provider via the selectors
-in ``app.providers``.
+DeepSeek's Responses API (https://api-docs.deepseek.com/guides/responses_api)
+mirrors OpenAI's Responses API wire shape closely enough that this module
+reuses app.llm's OpenAI-shaped helpers (``_cost_micros``,
+``_extract_openai_parsed``, ``_web_search_call_count``) directly instead of
+re-deriving them. DeepSeek is reached through the OpenAI SDK pointed at
+``DEEPSEEK_BASE_URL`` (unchanged); only the endpoint moved from
+``.chat.completions`` to ``.responses``. Structured output (``text_format=``)
+means the model is schema-guaranteed to return valid JSON, so — like the
+OpenAI clients this mirrors — there is no "ask for JSON, validate, repair
+once" loop here anymore.
 
-DeepSeek is reached through the OpenAI SDK pointed at ``DEEPSEEK_BASE_URL``, but
-it speaks the **Chat Completions** API, not the Responses API the existing
-``OpenAI*`` clients use — so it cannot reuse them. Instead every client shares
-``_DeepSeekJSONClient``, which mirrors the Anthropic text client's proven
-"ask for JSON, validate, repair once" loop. ``response_format=json_object``
-constrains the model to a JSON object; the schema lives in each system prompt.
+DeepSeek's ``web_search``/``web_search_2025_08_26`` tool is native and
+server-side (queries execute on DeepSeek's infrastructure, not the caller's),
+but its per-call price is undisclosed — unlike OpenAI's published $10/1,000
+calls. A response with search invoked therefore reports its cost as unknown
+(``None``) rather than silently under-pricing it; see
+``_deepseek_cost_micros``.
+
+DeepSeek is still image-incapable (no image extraction client here); it now
+has a search capability via the native web_search tool, reflected in
+``app.providers.PROVIDER_CAPABILITIES``.
 """
 
 from __future__ import annotations
@@ -26,102 +34,85 @@ from typing import Any
 from app.cook.llm import NUTRITION_SYSTEM_PROMPT, SELECTION_SYSTEM_PROMPT
 from app.cook.models import NutritionScores, SelectedItems
 from app.llm import (
-    _PRICE_MICROS_PER_TOKEN_BY_MODEL,
+    _OPENAI_REASONING,
+    _OPENAI_WEB_SEARCH_TOOL,
     CORRECTION_SYSTEM_PROMPT,
     OPENAI_ADD_SYSTEM_PROMPT,
     PROFILE_SYSTEM_PROMPT,
     CorrectionDiff,
     ProposedAddItem,
     ProposedAddItems,
+    _cost_micros,
+    _extract_openai_parsed,
+    _web_search_call_count,
 )
 from app.llm_transport import with_transport_retry
 from app.profile_service import FoodProfile
+from app.refine_service import SEARCH_SYSTEM_PROMPT
+from app.shelf_life_search import ShelfLifeSearchClient, ShelfLifeSearchResult
 from app.translation_llm import _TRANSLATE_SYSTEM_PROMPT, TranslationList, _user_msg
 
 log = logging.getLogger(__name__)
 
-SCHEMA_REPAIR_INSTRUCTION = (
-    "Your last response did not match the schema. Return ONLY valid JSON "
-    "matching the schema."
-)
 
-# json_object mode requires an object root, so translation returns {"items":[...]}
-# rather than the bare array the Anthropic translation client uses.
-_DEEPSEEK_TRANSLATE_SYSTEM_PROMPT = (
-    _TRANSLATE_SYSTEM_PROMPT
-    + '\nReturn ONLY a JSON object {"items": [<translated strings>]} with the '
-    "same length and order as the input. No prose."
-)
+def _deepseek_cost_micros(response, model: str) -> int | None:
+    """Token cost via the shared OpenAI-shaped helper.
 
-
-def _chat_cost(response, model: str) -> int | None:
-    """Best-effort cost in micro-USD from Chat Completions ``usage`` tokens."""
-    price = _PRICE_MICROS_PER_TOKEN_BY_MODEL.get(model)
-    if price is None:
+    Unknown (``None``), not silently under-priced, whenever the web_search
+    tool was invoked — DeepSeek does not publish a per-search rate for it.
+    """
+    base = _cost_micros(response, model)
+    if base is None:
         return None
-    usage = getattr(response, "usage", None)
-    if usage is None:
+    calls = _web_search_call_count(response)
+    if calls:
+        log.info("deepseek_web_search_cost_unknown", extra={"search_calls": calls})
         return None
-    try:
-        in_tokens = getattr(usage, "prompt_tokens", None) or 0
-        out_tokens = getattr(usage, "completion_tokens", None) or 0
-        return round(in_tokens * price["input"] + out_tokens * price["output"])
-    except Exception:  # noqa: BLE001 - cost estimate is best-effort
-        return None
+    return base
 
 
-class _DeepSeekJSONClient:
-    """Shared Chat Completions call: JSON object out, validate, repair once."""
+class _DeepSeekResponsesClient:
+    """Shared DeepSeek Responses-API call: structured output, retry, cost."""
 
-    def __init__(self, sdk, model: str, *, sleep=asyncio.sleep):
+    def __init__(
+        self, sdk, model: str, *, web_search: bool = False, sleep=asyncio.sleep
+    ):
         self._sdk = sdk
         self._model = model
+        self._web_search = web_search
         self._sleep = sleep
 
-    async def _create(self, system: str, messages: list[dict[str, str]]):
+    async def _create_response(self, system: str, user_text: str, text_format):
         return await with_transport_retry(
-            lambda: self._sdk.chat.completions.create(
+            lambda: self._sdk.responses.parse(
                 model=self._model,
-                max_tokens=1024,
-                response_format={"type": "json_object"},
-                messages=[{"role": "system", "content": system}, *messages],
+                input=[
+                    {"role": "system", "content": system},
+                    {
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": user_text}],
+                    },
+                ],
+                tools=[_OPENAI_WEB_SEARCH_TOOL] if self._web_search else [],
+                reasoning=_OPENAI_REASONING,
+                text_format=text_format,
+                max_output_tokens=1024,
             ),
             log_event="deepseek_llm_failed",
             sleep=self._sleep,
         )
 
-    async def call(self, system: str, user_text: str, parse_fn):
-        messages: list[dict[str, str]] = [{"role": "user", "content": user_text}]
-        total_cost = 0
-        unknown_cost = False
-        for attempt in (0, 1):
-            response = await self._create(system, messages)
-            cost = _chat_cost(response, self._model)
-            if cost is None:
-                unknown_cost = True
-            else:
-                total_cost += cost
-            text = response.choices[0].message.content or ""
-            try:
-                return parse_fn(text), None if unknown_cost else total_cost
-            except Exception as exc:
-                if attempt == 1:
-                    log.warning(
-                        "deepseek_schema_failed_final",
-                        extra={"error_class": type(exc).__name__},
-                    )
-                    raise
-                messages = [
-                    *messages,
-                    {"role": "assistant", "content": text},
-                    {"role": "user", "content": SCHEMA_REPAIR_INSTRUCTION},
-                ]
-        raise RuntimeError("unreachable")
+    async def call(self, system: str, user_text: str, model_cls):
+        response = await self._create_response(system, user_text, model_cls)
+        parsed = model_cls.model_validate(_extract_openai_parsed(response))
+        return parsed, _deepseek_cost_micros(response, self._model)
 
 
 class DeepSeekTextLLMClient:
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
-        self._client = _DeepSeekJSONClient(sdk, model, sleep=sleep)
+        self._client = _DeepSeekResponsesClient(
+            sdk, model, web_search=True, sleep=sleep
+        )
 
     async def parse_correct(
         self,
@@ -139,11 +130,7 @@ class DeepSeekTextLLMClient:
                 "user_text": user_text,
             }
         )
-
-        def _parse(text: str) -> CorrectionDiff:
-            return CorrectionDiff.model_validate(json.loads(text))
-
-        return await self._client.call(CORRECTION_SYSTEM_PROMPT, user_msg, _parse)
+        return await self._client.call(CORRECTION_SYSTEM_PROMPT, user_msg, CorrectionDiff)
 
     async def parse_add(
         self,
@@ -155,60 +142,117 @@ class DeepSeekTextLLMClient:
         user_msg = json.dumps(
             {"today": today.isoformat(), "tz": tz, "user_text": user_text}
         )
-
-        def _parse(text: str) -> list[ProposedAddItem]:
-            return ProposedAddItems.model_validate(json.loads(text)).items
-
-        return await self._client.call(OPENAI_ADD_SYSTEM_PROMPT, user_msg, _parse)
+        parsed, cost = await self._client.call(
+            OPENAI_ADD_SYSTEM_PROMPT, user_msg, ProposedAddItems
+        )
+        return parsed.items, cost
 
 
 class DeepSeekProfileLLMClient:
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
-        self._client = _DeepSeekJSONClient(sdk, model, sleep=sleep)
+        self._client = _DeepSeekResponsesClient(
+            sdk, model, web_search=True, sleep=sleep
+        )
 
     async def parse_profile_update(
         self, *, current: FoodProfile, sentence: str
     ) -> tuple[FoodProfile, int | None]:
         user_msg = json.dumps({"current": current.model_dump(), "sentence": sentence})
-
-        def _parse(text: str) -> FoodProfile:
-            return FoodProfile.model_validate(json.loads(text))
-
-        return await self._client.call(PROFILE_SYSTEM_PROMPT, user_msg, _parse)
+        return await self._client.call(PROFILE_SYSTEM_PROMPT, user_msg, FoodProfile)
 
 
 class DeepSeekSelectionLLM:
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
-        self._client = _DeepSeekJSONClient(sdk, model, sleep=sleep)
+        self._client = _DeepSeekResponsesClient(sdk, model, sleep=sleep)
 
     async def select_items(self, *, prompt: str) -> tuple[SelectedItems, int | None]:
-        def _parse(text: str) -> SelectedItems:
-            return SelectedItems.model_validate(json.loads(text))
-
-        return await self._client.call(SELECTION_SYSTEM_PROMPT, prompt, _parse)
+        return await self._client.call(SELECTION_SYSTEM_PROMPT, prompt, SelectedItems)
 
 
 class DeepSeekNutritionLLM:
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
-        self._client = _DeepSeekJSONClient(sdk, model, sleep=sleep)
+        self._client = _DeepSeekResponsesClient(sdk, model, sleep=sleep)
 
     async def score(self, *, prompt: str) -> tuple[NutritionScores, int | None]:
-        def _parse(text: str) -> NutritionScores:
-            return NutritionScores.model_validate(json.loads(text))
-
-        return await self._client.call(NUTRITION_SYSTEM_PROMPT, prompt, _parse)
+        return await self._client.call(NUTRITION_SYSTEM_PROMPT, prompt, NutritionScores)
 
 
 class DeepSeekTranslationLLMClient:
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
-        self._client = _DeepSeekJSONClient(sdk, model, sleep=sleep)
+        self._sdk = sdk
+        self._model = model
+        self._sleep = sleep
 
     async def translate(
         self, *, texts: list[str], lang: str
     ) -> tuple[list[str], int | None]:
-        def _parse(text: str) -> list[str]:
-            return [str(x) for x in TranslationList.model_validate(json.loads(text)).items]
-
-        return await self._client.call(
-            _DEEPSEEK_TRANSLATE_SYSTEM_PROMPT, _user_msg(texts, lang), _parse
+        response = await with_transport_retry(
+            lambda: self._sdk.responses.parse(
+                model=self._model,
+                input=[
+                    {"role": "system", "content": _TRANSLATE_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": _user_msg(texts, lang)}
+                        ],
+                    },
+                ],
+                text_format=TranslationList,
+                max_output_tokens=1024,
+            ),
+            log_event="deepseek_llm_failed",
+            sleep=self._sleep,
         )
+        parsed = TranslationList.model_validate(_extract_openai_parsed(response))
+        return [str(x) for x in parsed.items], _deepseek_cost_micros(response, self._model)
+
+
+class DeepSeekSearchClient(ShelfLifeSearchClient):
+    """Shelf-life lookup via DeepSeek's native ``web_search`` tool."""
+
+    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
+        self._sdk = sdk
+        self._model = model
+        self._sleep = sleep
+
+    async def lookup_shelf_life(
+        self, *, name: str, category: str | None
+    ) -> ShelfLifeSearchResult:
+        prompt = f"Item: {name}" + (f" (category: {category})" if category else "")
+        try:
+            response = await with_transport_retry(
+                lambda: self._sdk.responses.create(
+                    model=self._model,
+                    input=[
+                        {"role": "system", "content": SEARCH_SYSTEM_PROMPT},
+                        {
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": prompt}],
+                        },
+                    ],
+                    tools=[_OPENAI_WEB_SEARCH_TOOL],
+                ),
+                log_event="deepseek_llm_failed",
+                sleep=self._sleep,
+            )
+        except Exception as exc:  # noqa: BLE001 - search must degrade to unknown, not crash
+            log.warning(
+                "search_transport_failed", extra={"error_class": type(exc).__name__}
+            )
+            return ShelfLifeSearchResult(days=None, confidence=0.0, cost_micros_usd=None)
+
+        cost = _deepseek_cost_micros(response, self._model)
+        try:
+            text = response.output_text
+            data = json.loads(text[text.index("{") : text.rindex("}") + 1])
+            return ShelfLifeSearchResult(
+                days=int(data["days"]),
+                confidence=float(data["confidence"]),
+                cost_micros_usd=cost,
+            )
+        except Exception as exc:  # noqa: BLE001 - search must degrade to unknown, not crash
+            log.warning(
+                "search_parse_failed", extra={"error_class": type(exc).__name__}
+            )
+            return ShelfLifeSearchResult(days=None, confidence=0.0, cost_micros_usd=cost)

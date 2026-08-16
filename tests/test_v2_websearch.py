@@ -356,7 +356,7 @@ async def test_propose_add_no_search_client_uses_estimate(session):
 async def test_anthropic_search_client_parses_days_and_cost():
     msg = MagicMock()
     msg.content = [MagicMock(type="text", text='{"days": 14, "confidence": 0.9}')]
-    msg.usage = MagicMock(input_tokens=100, output_tokens=10)
+    msg.usage = MagicMock(input_tokens=100, output_tokens=10, server_tool_use=None)
     sdk = MagicMock()
     sdk.messages.create = AsyncMock(return_value=msg)
     client = AnthropicSearchClient(sdk=sdk, model="claude-sonnet-4-6")
@@ -364,6 +364,23 @@ async def test_anthropic_search_client_parses_days_and_cost():
     assert result.days == 14
     assert result.confidence == 0.9
     assert result.cost_micros_usd == 450  # 100*3 + 10*15 (sonnet pricing)
+
+
+@pytest.mark.asyncio
+async def test_anthropic_search_client_adds_web_search_tool_fee():
+    msg = MagicMock()
+    msg.content = [MagicMock(type="text", text='{"days": 14, "confidence": 0.9}')]
+    msg.usage = MagicMock(
+        input_tokens=100,
+        output_tokens=10,
+        server_tool_use=MagicMock(web_search_requests=1),
+    )
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(return_value=msg)
+    client = AnthropicSearchClient(sdk=sdk, model="claude-sonnet-4-6")
+    result = await client.lookup_shelf_life(name="Kefir", category="dairy")
+    # 100*3 + 10*15 (sonnet pricing) + 10_000 ($10/1000 web_search_requests)
+    assert result.cost_micros_usd == 450 + 10_000
 
 
 @pytest.mark.asyncio

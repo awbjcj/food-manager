@@ -12,6 +12,7 @@ from app.correction_service import (
     apply_correct,
     correct_payload_from_json,
 )
+from app.i18n import t
 from app.models import PantryItem
 from app.pending_service import (
     expire_for_item,
@@ -43,7 +44,7 @@ async def _handle_pending_callback(
 ) -> None:
     pending = load_pending(session, household_id=household_id, pending_id=pending_id)
     if pending is None:
-        await cb.answer("not found")
+        await cb.answer(t("toast.not_found", lang))
         return
 
     now = utc_naive(datetime.now(UTC))
@@ -54,14 +55,14 @@ async def _handle_pending_callback(
             session.add(pending)
             session.commit()
         await edit_or_resend(cb, render_terminal_state(terminal, lang=lang))
-        await cb.answer(f"already {terminal}")
+        await cb.answer(t("toast.already_status", lang, status=terminal))
         return
 
     if verb == "cancel":
         mark_cancelled(session, pending=pending)
         session.commit()
         await edit_or_resend(cb, render_terminal_state("cancelled", lang=lang))
-        await cb.answer("cancelled")
+        await cb.answer(t("toast.cancelled", lang))
         return
 
     if pending.action_type == "correct":
@@ -71,14 +72,14 @@ async def _handle_pending_callback(
         if item is None:
             mark_cancelled(session, pending=pending)
             session.commit()
-            await edit_or_resend(cb, "Item gone - proposal cancelled.")
-            await cb.answer("item gone")
+            await edit_or_resend(cb, t("pending.item_gone_body", lang))
+            await cb.answer(t("toast.item_gone", lang))
             return
         if item.status != "active":
             mark_cancelled(session, pending=pending)
             session.commit()
-            await edit_or_resend(cb, "Item is no longer active - proposal cancelled.")
-            await cb.answer("item no longer active")
+            await edit_or_resend(cb, t("pending.item_inactive_body", lang))
+            await cb.answer(t("toast.item_inactive", lang))
             return
         assert item.id is not None
         expire_for_item(
@@ -101,14 +102,14 @@ async def _handle_pending_callback(
                 "action": "correct",
             },
         )
-        await cb.answer("applied")
+        await cb.answer(t("toast.applied", lang))
         return
 
     if pending.action_type != "add":
         log.warning(
             "unknown_pending_action_type", extra={"action_type": pending.action_type}
         )
-        await cb.answer("unknown action")
+        await cb.answer(t("toast.unknown_action", lang))
         return
     payload = add_payload_from_json(pending.proposed_json)
     new_id = apply_add(session, household_id=household_id, payload=payload, today=today)
@@ -123,4 +124,4 @@ async def _handle_pending_callback(
         "item_action_applied",
         extra={"user_id": cb.from_user.id, "item_id": new_id, "action": "add"},
     )
-    await cb.answer("added")
+    await cb.answer(t("toast.added", lang))

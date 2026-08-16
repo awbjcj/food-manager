@@ -69,7 +69,7 @@ async def handle_cook(
         keyboard = to_aiogram_keyboard(
             build_cook_round_keyboard(cook.id, MEAL_TYPES, round_name="meal")
         )
-        sent = await msg.answer("What are you cooking?", reply_markup=keyboard)
+        sent = await msg.answer(t("cook.what_cooking", user.lang), reply_markup=keyboard)
         set_cook_message_id(session, cook=cook, message_id=sent.message_id)
 
 
@@ -144,7 +144,7 @@ async def run_cook_and_render(
                 bot,
                 chat_id=cook.chat_id,
                 message_id=cook.message_id,
-                text="Couldn't load your household profile - try /cook again.",
+                text=t("cook.no_profile_body", user.lang),
             )
             return
         profile = profile_from_household(household)
@@ -194,7 +194,7 @@ async def run_cook_and_render(
                 bot,
                 chat_id=chat_id,
                 message_id=message_id,
-                text="Not enough usable items - send a receipt or /add a few things.",
+                text=t("cook.not_enough_items", user.lang),
             )
             return
         except Exception as exc:  # noqa: BLE001 - /cook must never crash the bot
@@ -206,7 +206,7 @@ async def run_cook_and_render(
                 bot,
                 chat_id=chat_id,
                 message_id=message_id,
-                text="Couldn't build a recipe right now - try /cook again.",
+                text=t("cook.build_failed", user.lang),
             )
             return
         finally:

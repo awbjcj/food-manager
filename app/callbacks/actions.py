@@ -29,6 +29,7 @@ from app.cook import (
     save_candidate,
     set_feedback,
 )
+from app.i18n import DEFAULT_LANG, t
 from app.pantry_service import (
     NotOwnerOrMissing,
     active_pantry_names,
@@ -65,7 +66,7 @@ async def handle_callback(
     try:
         action = parse_callback(cb.data)
     except CommandError:
-        await cb.answer("unrecognized action")
+        await cb.answer(t("toast.unrecognized_action", DEFAULT_LANG))
         return
 
     with session_factory() as session:
@@ -107,13 +108,17 @@ async def handle_callback(
                 session, household_id=user.household_id, cook_id=cook_id
             )
             if cook is None or cook.status != "done":
-                await cb.answer("this cook session expired - start a new /cook")
+                await cb.answer(t("toast.cook_expired", user.lang))
                 return
             verdict = "liked" if action.verb == "cook_like" else "disliked"
             set_feedback(
                 session, cook=cook, feedback=verdict, now=now_provider(user.tz)
             )
-            await cb.answer("got it 👍" if verdict == "liked" else "noted 👎")
+            await cb.answer(
+                t("toast.liked", user.lang)
+                if verdict == "liked"
+                else t("toast.disliked", user.lang)
+            )
             return
 
         if action.verb in ("cook_save", "cook_shop"):
@@ -123,7 +128,7 @@ async def handle_callback(
                 session, household_id=user.household_id, cook_id=cook_id
             )
             if cook is None or cook.status != "done":
-                await cb.answer("this cook session expired - start a new /cook")
+                await cb.answer(t("toast.cook_expired", user.lang))
                 return
             try:
                 raw_cards = _json.loads(cook.candidates_json or "[]")
@@ -131,7 +136,7 @@ async def handle_callback(
             except (TypeError, ValueError):
                 cards = []
             if not cards:
-                await cb.answer("nothing to use here")
+                await cb.answer(t("toast.nothing_to_use", user.lang))
                 return
             index = cook.chosen_index or 0
             if index < 0 or index >= len(cards):
@@ -144,7 +149,11 @@ async def handle_callback(
                     candidate=candidate,
                     now=now_provider(user.tz),
                 )
-                await cb.answer("already saved" if result.duplicate else "saved ★")
+                await cb.answer(
+                    t("toast.already_saved", user.lang)
+                    if result.duplicate
+                    else t("toast.saved", user.lang)
+                )
                 return
             pantry = active_pantry_names(
                 session, household_id=user.household_id, today=today
@@ -159,11 +168,13 @@ async def handle_callback(
                 now=now_provider(user.tz),
             )
             if add_result.added:
-                await cb.answer(f"added {len(add_result.added)} to shopping list")
+                await cb.answer(
+                    t("toast.added_to_shopping", user.lang, n=len(add_result.added))
+                )
             elif add_result.already:
-                await cb.answer("already on your list")
+                await cb.answer(t("toast.already_on_list", user.lang))
             else:
-                await cb.answer("you have everything!")
+                await cb.answer(t("toast.have_everything", user.lang))
             return
 
         if action.verb == "shop_done":
@@ -192,7 +203,11 @@ async def handle_callback(
                 else None
             )
             await edit_or_resend(cb, view.text, keyboard)
-            await cb.answer("bought ✓" if ok else "already done")
+            await cb.answer(
+                t("toast.bought", user.lang)
+                if ok
+                else t("toast.already_done", user.lang)
+            )
             return
 
         if action.verb == "fav_cook":
@@ -202,7 +217,7 @@ async def handle_callback(
                 session, household_id=user.household_id, recipe_id=recipe_id
             )
             if saved is None:
-                await cb.answer("not found")
+                await cb.answer(t("toast.not_found", user.lang))
                 return
             shopping = recook_shopping_list(
                 session, household_id=user.household_id, saved=saved, today=today
@@ -216,13 +231,13 @@ async def handle_callback(
                 translation_llm=translation_llm,
             )
             await cb.message.answer(view.text)
-            await cb.answer("here's the plan")
+            await cb.answer(t("toast.heres_plan", user.lang))
             return
 
         if action.verb == "show_all":
             rows = list_digest_due(session, household_id=user.household_id, today=today)
             if not rows:
-                await cb.answer("nothing due")
+                await cb.answer(t("toast.nothing_due", user.lang))
                 return
             view = views.digest_cached(
                 session,
@@ -278,7 +293,11 @@ async def handle_callback(
                     now=now,
                 )
             await edit_or_resend(cb, render_undo_result(result, lang=user.lang))
-            await cb.answer("undone" if result.removed_ids else "nothing undone")
+            await cb.answer(
+                t("toast.undone", user.lang)
+                if result.removed_ids
+                else t("toast.nothing_undone", user.lang)
+            )
             return
 
         item_id = action.item_id
@@ -332,10 +351,10 @@ async def handle_callback(
                         now=now,
                     )
             else:
-                await dispatch_answer(cb, "unrecognized action")
+                await dispatch_answer(cb, t("toast.unrecognized_action", user.lang))
                 return
         except NotOwnerOrMissing:
-            await dispatch_answer(cb, "item not found")
+            await dispatch_answer(cb, t("toast.item_not_found", user.lang))
             await refresh_items_for_origin()
             return
         if result.applied:
@@ -350,8 +369,8 @@ async def handle_callback(
         # Acknowledge before the (slow) translate+render in the refresh.
         await dispatch_answer(
             cb,
-            f"#{item_id} -> {action.verb}"
+            t("toast.item_updated", user.lang, id=item_id, action=action.verb)
             if result.applied
-            else f"#{item_id} already updated",
+            else t("toast.item_already_updated", user.lang, id=item_id),
         )
         await refresh_items_for_origin()

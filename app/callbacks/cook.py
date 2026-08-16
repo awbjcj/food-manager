@@ -27,7 +27,7 @@ from app.handlers.cook import (
     _cuisine_round_keyboard,
     run_cook_and_render,
 )
-from app.i18n import t
+from app.i18n import DEFAULT_LANG, t
 from app.models import CookSession, Household
 from app.pending_service import (
     utc_naive,
@@ -93,14 +93,14 @@ async def handle_cook_callback(
     try:
         action = parse_callback(cb.data or "")
     except CommandError:
-        await cb.answer("unrecognized action")
+        await cb.answer(t("toast.unrecognized_action", DEFAULT_LANG))
         return
     if (
         action.verb
         not in ("cook_pick", "cook_alt", "cook_more_opts", "cook_more", "cook_adjust")
         or action.item_id is None
     ):
-        await cb.answer("unrecognized action")
+        await cb.answer(t("toast.unrecognized_action", DEFAULT_LANG))
         return
 
     with session_factory() as session:
@@ -116,14 +116,14 @@ async def handle_cook_callback(
             session, household_id=user.household_id, cook_id=action.item_id
         )
         if cook is None or cook.status not in ("collecting", "ready", "done"):
-            await cb.answer("this cook session expired - start a new /cook")
+            await cb.answer(t("toast.cook_expired", user.lang))
             return
         now = utc_naive(now_provider(user.tz))
         if cook.status in ("collecting", "ready") and cook.expires_at <= now:
             cook.status = "expired"
             session.add(cook)
             session.commit()
-            await cb.answer("this cook session expired - start a new /cook")
+            await cb.answer(t("toast.cook_expired", user.lang))
             return
 
         if action.verb == "cook_alt":
@@ -152,18 +152,18 @@ async def handle_cook_callback(
                     )
                 ),
             )
-            await cb.answer("showing alternatives")
+            await cb.answer(t("toast.showing_alternatives", user.lang))
             return
 
         if action.verb == "cook_more":
             if cook.status != "done":
-                await cb.answer("cook is still in progress")
+                await cb.answer(t("toast.cook_in_progress", user.lang))
                 return
             if cook.expires_at <= now:
                 cook.status = "expired"
                 session.add(cook)
                 session.commit()
-                await cb.answer("this cook session expired - start a new /cook")
+                await cb.answer(t("toast.cook_expired", user.lang))
                 return
             decision = admit(
                 session,
@@ -188,7 +188,7 @@ async def handle_cook_callback(
             )
             session.commit()
             if claim.rowcount == 0:
-                await cb.answer("already searching")
+                await cb.answer(t("toast.already_searching", user.lang))
                 return
             await cb.answer()
             cook = load_cook_session(
@@ -228,7 +228,7 @@ async def handle_cook_callback(
                         "cook_more_failed", extra={"error_class": type(exc).__name__}
                     )
                     await edit_or_resend(
-                        cb, "Couldn't fetch more recipes right now - try again."
+                        cb, t("cook.fetch_more_failed", user.lang)
                     )
                     return
                 if not cards:
@@ -271,13 +271,13 @@ async def handle_cook_callback(
 
         if action.verb == "cook_adjust":
             if cook.status != "done":
-                await cb.answer("cook is still in progress")
+                await cb.answer(t("toast.cook_in_progress", user.lang))
                 return
             if cook.expires_at <= now:
                 cook.status = "expired"
                 session.add(cook)
                 session.commit()
-                await cb.answer("this cook session expired - start a new /cook")
+                await cb.answer(t("toast.cook_expired", user.lang))
                 return
             assert cook.id is not None
             claim = session.exec(
@@ -293,15 +293,15 @@ async def handle_cook_callback(
             )
             session.commit()
             if claim.rowcount == 0:
-                await cb.answer("already cooking")
+                await cb.answer(t("toast.already_cooking", user.lang))
                 return
             household = session.get(Household, user.household_id)
             if household is None:
-                await cb.answer("couldn't load your household profile")
+                await cb.answer(t("toast.no_household_profile", user.lang))
                 return
             await edit_or_resend(
                 cb,
-                "Which cuisine?",
+                t("cook.which_cuisine", user.lang),
                 to_aiogram_keyboard(
                     _cuisine_round_keyboard(
                         cook.id, _cuisine_options(household), lang=user.lang
@@ -318,7 +318,7 @@ async def handle_cook_callback(
                 or cook.cuisine is not None
                 or action.round_name != "cuisine_full"
             ):
-                await cb.answer("unrecognized action")
+                await cb.answer(t("toast.unrecognized_action", user.lang))
                 return
             assert cook.id is not None
             rows = build_cook_round_keyboard(
@@ -326,26 +326,26 @@ async def handle_cook_callback(
                 [*SPOONACULAR_CUISINES, "Surprise me"],
                 round_name="cuisine_full",
             )
-            await edit_or_resend(cb, "Which cuisine?", to_aiogram_keyboard(rows))
+            await edit_or_resend(cb, t("cook.which_cuisine", user.lang), to_aiogram_keyboard(rows))
             await cb.answer()
             return
 
         option_index = action.option_index
         if option_index is None:
-            await cb.answer("unrecognized action")
+            await cb.answer(t("toast.unrecognized_action", user.lang))
             return
 
         household = session.get(Household, user.household_id)
         if household is None:
-            await cb.answer("couldn't load your household profile")
+            await cb.answer(t("toast.no_household_profile", user.lang))
             return
 
         if cook.meal_type is None:
             if action.round_name == "cuisine":
-                await cb.answer("unrecognized action")
+                await cb.answer(t("toast.unrecognized_action", user.lang))
                 return
             if option_index < 0 or option_index >= len(MEAL_TYPES):
-                await cb.answer("unrecognized action")
+                await cb.answer(t("toast.unrecognized_action", user.lang))
                 return
             assert cook.id is not None
             keyboard = to_aiogram_keyboard(
@@ -355,10 +355,10 @@ async def handle_cook_callback(
             )
             if not await edit_or_resend(
                 cb,
-                "Which cuisine?",
+                t("cook.which_cuisine", user.lang),
                 keyboard,
             ):
-                await cb.answer("couldn't update this cook session - try /cook again")
+                await cb.answer(t("toast.cook_update_failed", user.lang))
                 return
             cook.meal_type = MEAL_TYPES[option_index]
             session.add(cook)
@@ -367,12 +367,12 @@ async def handle_cook_callback(
             return
 
         if action.round_name == "meal":
-            await cb.answer("already answered")
+            await cb.answer(t("toast.already_answered", user.lang))
             return
 
         if cook.cuisine is None:
             if action.round_name not in ("cuisine", "cuisine_full"):
-                await cb.answer("unrecognized action")
+                await cb.answer(t("toast.unrecognized_action", user.lang))
                 return
             cuisine_options = (
                 _cuisine_options(household)
@@ -380,7 +380,7 @@ async def handle_cook_callback(
                 else [*SPOONACULAR_CUISINES, "Surprise me"]
             )
             if option_index < 0 or option_index >= len(cuisine_options):
-                await cb.answer("unrecognized action")
+                await cb.answer(t("toast.unrecognized_action", user.lang))
                 return
             chosen_cuisine = cuisine_options[option_index]
             result = session.exec(
@@ -396,7 +396,7 @@ async def handle_cook_callback(
             )
             session.commit()
             if result.rowcount == 0:
-                await cb.answer("already cooking")
+                await cb.answer(t("toast.already_cooking", user.lang))
                 return
             assert cook.id is not None
             keyboard = to_aiogram_keyboard(
@@ -415,11 +415,11 @@ async def handle_cook_callback(
             return
 
         if action.round_name != "purpose":
-            await cb.answer("unrecognized action")
+            await cb.answer(t("toast.unrecognized_action", user.lang))
             return
 
         if option_index < 0 or option_index >= len(PURPOSE_OPTIONS):
-            await cb.answer("unrecognized action")
+            await cb.answer(t("toast.unrecognized_action", user.lang))
             return
         chosen_purpose = PURPOSE_OPTIONS[option_index][0]
         result = session.exec(
@@ -435,16 +435,16 @@ async def handle_cook_callback(
         )
         session.commit()
         if result.rowcount == 0:
-            await cb.answer("already cooking")
+            await cb.answer(t("toast.already_cooking", user.lang))
             return
         assert cook.id is not None
         cook = load_cook_session(
             session, household_id=user.household_id, cook_id=cook.id
         )
         if cook is None:
-            await cb.answer("this cook session expired - start a new /cook")
+            await cb.answer(t("toast.cook_expired", user.lang))
             return
-        await edit_or_resend(cb, "Thinking...")
+        await edit_or_resend(cb, t("cook.thinking", user.lang))
         await cb.answer()
         user_id = user.telegram_id
         household_id = user.household_id

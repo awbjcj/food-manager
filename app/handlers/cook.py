@@ -22,6 +22,7 @@ from app.cook import (
 )
 from app.cook.options import (
     DEFAULT_CUISINES,
+    FEATURED_CUISINES,
     SURPRISE_CUISINE,
     canonical_cuisine,
     localized_cuisines,
@@ -80,10 +81,16 @@ async def handle_cook(
 
 
 def _cuisine_options(household: Household) -> list[str]:
+    """The quick cuisine menu: the household's own preferences first, padded
+    out with featured cuisines so a household with only one or two saved
+    preferences still sees a full menu of alternatives, not just their own
+    picks plus "Surprise me"."""
+
     try:
         prefs = _json.loads(household.preferred_cuisines_json or "[]")
     except (TypeError, ValueError):
         prefs = []
+    slots = len(DEFAULT_CUISINES) - 1  # cuisine slots before "Surprise me"
     options: list[str] = []
     seen: set[str] = set()
     for preference in prefs:
@@ -92,11 +99,17 @@ def _cuisine_options(household: Household) -> list[str]:
             continue
         seen.add(cuisine.casefold())
         options.append(cuisine)
-    if not options:
-        options = list(DEFAULT_CUISINES)
-    elif SURPRISE_CUISINE not in options:
-        options = options[: len(DEFAULT_CUISINES) - 1] + [SURPRISE_CUISINE]
-    return options[: len(DEFAULT_CUISINES)]
+        if len(options) >= slots:
+            break
+    for cuisine in FEATURED_CUISINES:
+        if len(options) >= slots:
+            break
+        if cuisine.casefold() not in seen:
+            seen.add(cuisine.casefold())
+            options.append(cuisine)
+    if SURPRISE_CUISINE.casefold() not in seen:
+        options.append(SURPRISE_CUISINE)
+    return options
 
 
 def _cuisine_round_keyboard(

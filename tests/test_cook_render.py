@@ -9,6 +9,7 @@ from app.cook.models import (
 )
 from app.cook.options import (
     ALL_CUISINES,
+    DEFAULT_CUISINES,
     FEATURED_CUISINES,
     MORE_CUISINES,
     canonical_cuisine,
@@ -209,6 +210,35 @@ def test_cuisine_quick_and_more_tiers_are_disjoint_and_cover_provider_choices():
     assert set(FEATURED_CUISINES) | set(MORE_CUISINES) == set(ALL_CUISINES)
     assert more_cuisines(FEATURED_CUISINES) == MORE_CUISINES
     assert "African" not in more_cuisines(["African", "Italian", "Surprise me"])
+
+
+def test_quick_cuisine_menu_pads_a_narrow_household_preference_with_featured_options():
+    from types import SimpleNamespace
+
+    from app.handlers.cook import _cuisine_options
+
+    household = SimpleNamespace(preferred_cuisines_json='["chinese"]')
+    options = _cuisine_options(household)
+
+    assert options[0] == "Chinese"
+    assert options[-1] == "Surprise me"
+    assert len(options) == len(DEFAULT_CUISINES)
+    assert len(set(options)) == len(options)
+    # a household that only saved one Asian cuisine still sees other
+    # Asian-friendly alternatives, not just their single pick.
+    assert {"Japanese", "Thai", "Indian", "Korean"} <= set(options)
+
+
+def test_quick_cuisine_menu_deduplicates_a_preference_that_is_already_surprise_me():
+    from types import SimpleNamespace
+
+    from app.handlers.cook import _cuisine_options
+
+    household = SimpleNamespace(preferred_cuisines_json='["Surprise me"]')
+    options = _cuisine_options(household)
+
+    assert options.count("Surprise me") == 1
+    assert len(options) == len(set(options))
 
 
 def test_full_cuisine_keyboard_includes_a_back_button_to_the_quick_menu():

@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 
 from app.commands import CommandError, parse_callback
@@ -17,6 +19,7 @@ from app.cook.options import (
     localized_meal_types,
     more_cuisines,
 )
+from app.models import Household
 from app.renderer import (
     build_cook_result_keyboard,
     build_cook_round_keyboard,
@@ -213,11 +216,11 @@ def test_cuisine_quick_and_more_tiers_are_disjoint_and_cover_provider_choices():
 
 
 def test_quick_cuisine_menu_pads_a_narrow_household_preference_with_featured_options():
-    from types import SimpleNamespace
-
     from app.handlers.cook import _cuisine_options
 
-    household = SimpleNamespace(preferred_cuisines_json='["chinese"]')
+    household = Household(
+        created_at=datetime.now(UTC), preferred_cuisines_json='["chinese"]'
+    )
     options = _cuisine_options(household)
 
     assert options[0] == "Chinese"
@@ -230,11 +233,11 @@ def test_quick_cuisine_menu_pads_a_narrow_household_preference_with_featured_opt
 
 
 def test_quick_cuisine_menu_deduplicates_a_preference_that_is_already_surprise_me():
-    from types import SimpleNamespace
-
     from app.handlers.cook import _cuisine_options
 
-    household = SimpleNamespace(preferred_cuisines_json='["Surprise me"]')
+    household = Household(
+        created_at=datetime.now(UTC), preferred_cuisines_json='["Surprise me"]'
+    )
     options = _cuisine_options(household)
 
     assert options.count("Surprise me") == 1

@@ -7,6 +7,7 @@ Telegram keyboards, but keep the canonical list for callback-index lookups.
 
 from __future__ import annotations
 
+import string
 from collections.abc import Iterable
 
 from app.i18n import t
@@ -86,7 +87,7 @@ def canonical_cuisine(value: object) -> str | None:
     if not text:
         return None
     normalized = " ".join(text.split()).casefold()
-    return _CUISINE_BY_NORMALIZED.get(normalized, text.title())
+    return _CUISINE_BY_NORMALIZED.get(normalized, string.capwords(text))
 
 
 def localized_cuisine(cuisine: str, lang: str) -> str:
@@ -116,9 +117,3 @@ def more_cuisines(first_level: Iterable[str]) -> list[str]:
 
 def localized_meal_types(lang: str) -> list[str]:
     return [t(MEAL_TYPE_I18N_KEYS[meal_type], lang) for meal_type in MEAL_TYPES]
-
-
-# ``SPOONACULAR_CUISINES`` was historically imported by callers as the list
-# rendered by the "more cuisines" button.  Keep the name as a compatibility
-# alias while exposing the unambiguous ``ALL_CUISINES`` above.
-SPOONACULAR_CUISINES = MORE_CUISINES

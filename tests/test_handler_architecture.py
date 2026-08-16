@@ -61,4 +61,4 @@ def test_dispatcher_rosters_cover_every_supported_entry_point():
         "buy",
         "billing",
     }
-    assert len(EXPECTED_CALLBACK_ROUTES) == 36
+    assert len(EXPECTED_CALLBACK_ROUTES) == 37

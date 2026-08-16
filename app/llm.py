@@ -333,18 +333,13 @@ def _extract_openai_parsed(response):
     # pretending that DeepSeek returned an OpenAI ParsedResponse.
     output_text = getattr(response, "output_text", None)
     if isinstance(output_text, str) and output_text.strip():
-        text = output_text.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if lines and lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            text = "\n".join(lines).strip()
+        text = _strip_markdown_fence(output_text.strip())
         try:
             return json.loads(text)
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"OpenAI response output_text was not valid JSON: {exc}"
+            ) from exc
 
     raise ValueError("no parsed content in OpenAI response")
 
@@ -659,6 +654,19 @@ Add any newly stated allergy to "exclusions". No prose.
 """
 
 
+def _strip_markdown_fence(text: str) -> str:
+    """Strip a leading/trailing ``` fence some providers wrap JSON in."""
+
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
 def _extract_json_text(message) -> str:
     chunks: list[str] = []
     for block in message.content:
@@ -666,15 +674,7 @@ def _extract_json_text(message) -> str:
             chunks.append(block.text)
     if not chunks:
         raise ValueError("no text block in text-LLM response")
-    text = "\n".join(chunks).strip()
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-    return text
+    return _strip_markdown_fence("\n".join(chunks).strip())
 
 
 class AnthropicTextLLMClient(TextLLMClient):

@@ -38,11 +38,6 @@ from app.commands import (
     CommandError,
     parse_callback_request,
 )
-from app.cook.options import (
-    DEFAULT_CUISINES,  # noqa: F401 - compatibility re-export
-    MEAL_TYPES,  # noqa: F401 - compatibility re-export
-    SPOONACULAR_CUISINES,  # noqa: F401 - compatibility re-export
-)
 from app.handlers.billing import (
     COMMANDS as BILLING_COMMANDS,
 )

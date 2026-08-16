@@ -162,6 +162,7 @@ UNMETERED = frozenset(
         "cook_adjust",
         "cook_alt",
         "cook_like",
+        "cook_more_back",
         "cook_more_opts",
         "cook_save",
         "cook_shop",

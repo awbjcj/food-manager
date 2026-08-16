@@ -11,6 +11,7 @@ from app.cook.options import (
     ALL_CUISINES,
     FEATURED_CUISINES,
     MORE_CUISINES,
+    canonical_cuisine,
     localized_cuisines,
     localized_meal_types,
     more_cuisines,
@@ -188,14 +189,17 @@ def test_parse_more_adjust_and_extended_round_callbacks():
         and full_cuisine.round_name == "cuisine_full"
     )
 
+    back = parse_callback("cookback:5")
+    assert back.verb == "cook_more_back" and back.item_id == 5
+
 
 def test_full_cuisine_keyboard_index_matches_the_displayed_option():
-    from app.bot import SPOONACULAR_CUISINES
+    # MORE_CUISINES is what the real cook_more_opts handler passes as options
+    # for the "cuisine_full" round; unlike the first-tier menu it has no
+    # trailing "Surprise me" entry.
+    rows = build_cook_round_keyboard(5, MORE_CUISINES, round_name="cuisine_full")
 
-    options = [*SPOONACULAR_CUISINES, "Surprise me"]
-    rows = build_cook_round_keyboard(5, options, round_name="cuisine_full")
-
-    assert rows[7][0].text == options[7]
+    assert rows[7][0].text == MORE_CUISINES[7]
     assert rows[7][0].callback_data == "cookpick:5:cuisine_full:7"
 
 
@@ -205,6 +209,21 @@ def test_cuisine_quick_and_more_tiers_are_disjoint_and_cover_provider_choices():
     assert set(FEATURED_CUISINES) | set(MORE_CUISINES) == set(ALL_CUISINES)
     assert more_cuisines(FEATURED_CUISINES) == MORE_CUISINES
     assert "African" not in more_cuisines(["African", "Italian", "Surprise me"])
+
+
+def test_full_cuisine_keyboard_includes_a_back_button_to_the_quick_menu():
+    from app.handlers.cook import _cuisine_full_round_keyboard
+
+    rows = _cuisine_full_round_keyboard(5, MORE_CUISINES, lang="en")
+
+    assert rows[-1][0].text == "⬅ Back"
+    assert rows[-1][0].callback_data == "cookback:5"
+    # the back row must not shift any option's callback index
+    assert rows[0][0].callback_data == "cookpick:5:cuisine_full:0"
+
+
+def test_canonical_cuisine_preserves_apostrophes_in_unknown_values():
+    assert canonical_cuisine("world's fare") == "World's Fare"
 
 
 def test_cuisine_labels_are_localized_without_changing_canonical_values():

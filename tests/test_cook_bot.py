@@ -232,7 +232,7 @@ def test_cook_pick_advances_cuisine_to_purpose_then_ready_once(monkeypatch):
 
 
 def test_more_cuisines_selection_uses_the_full_list_index(monkeypatch):
-    from app.bot import SPOONACULAR_CUISINES
+    from app.cook.options import MORE_CUISINES
 
     monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
     engine = _engine_with_user()
@@ -286,8 +286,75 @@ def test_more_cuisines_selection_uses_the_full_list_index(monkeypatch):
     with Session(engine) as db:
         cook = db.get(CookSession, cook_id)
         assert cook is not None
-        assert cook.cuisine == SPOONACULAR_CUISINES[7]
+        assert cook.cuisine == MORE_CUISINES[7]
         assert cook.purpose is None
+        assert cook.status == "collecting"
+    assert spawned == []
+
+
+def test_more_cuisines_back_button_returns_to_the_quick_menu(monkeypatch):
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
+    engine = _engine_with_user()
+    asyncio.run(
+        handle_cook(_Msg(), session_factory=lambda: Session(engine), now_provider=_NOW)
+    )
+    with Session(engine) as db:
+        cook_id = db.exec(__import__("sqlmodel").select(CookSession)).one().id
+
+    spawn, spawned = _recording_spawn()
+    asyncio.run(
+        handle_cook_callback(
+            _Cb(f"cookpick:{cook_id}:meal:0"),
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
+
+    expand_cb = _Cb(f"cookmore:{cook_id}:cuisine_full")
+    asyncio.run(
+        handle_cook_callback(
+            expand_cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
+    assert expand_cb.message.edit_text.await_args is not None
+    expanded_keyboard = expand_cb.message.edit_text.await_args.kwargs["reply_markup"]
+    expanded_callbacks = [
+        button.callback_data
+        for row in expanded_keyboard.inline_keyboard
+        for button in row
+    ]
+    assert f"cookback:{cook_id}" in expanded_callbacks
+
+    back_cb = _Cb(f"cookback:{cook_id}")
+    asyncio.run(
+        handle_cook_callback(
+            back_cb,
+            session_factory=lambda: Session(engine),
+            now_provider=_NOW,
+            spawn=spawn,
+            bot=None,
+            **_fakes(),
+        )
+    )
+    assert back_cb.message.edit_text.await_args is not None
+    quick_keyboard = back_cb.message.edit_text.await_args.kwargs["reply_markup"]
+    quick_callbacks = [
+        button.callback_data for row in quick_keyboard.inline_keyboard for button in row
+    ]
+    assert f"cookpick:{cook_id}:cuisine:0" in quick_callbacks
+
+    with Session(engine) as db:
+        cook = db.get(CookSession, cook_id)
+        assert cook is not None
+        assert cook.cuisine is None
         assert cook.status == "collecting"
     assert spawned == []
 

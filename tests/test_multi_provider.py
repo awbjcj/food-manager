@@ -270,6 +270,25 @@ async def test_deepseek_selection_accepts_responses_output_text():
     assert selected.item_ids == [1, 2]
 
 
+async def test_deepseek_selection_raises_on_malformed_output_text():
+    """A non-JSON output_text must fail loudly with the parse error, not be
+    swallowed into the generic "no parsed content" message."""
+    sdk = FakeDeepSeekSDK(
+        [
+            SimpleNamespace(
+                output_parsed=None,
+                output=[],
+                output_text="not json",
+                usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+            )
+        ]
+    )
+    client = DeepSeekSelectionLLM(sdk, "deepseek-v4-flash")
+
+    with pytest.raises(ValueError, match="not valid JSON"):
+        await client.select_items(prompt="pick stuff")
+
+
 async def test_deepseek_search_tool_cost_is_unknown_when_invoked():
     """DeepSeek doesn't publish a web_search price, so a response with a
     web_search_call in it must report cost as unknown, not silently

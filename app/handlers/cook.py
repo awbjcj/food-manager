@@ -22,7 +22,6 @@ from app.cook import (
 )
 from app.cook.options import (
     DEFAULT_CUISINES,
-    MEAL_TYPES,  # noqa: F401 - compatibility re-export
     SURPRISE_CUISINE,
     canonical_cuisine,
     localized_cuisines,
@@ -111,6 +110,23 @@ def _cuisine_round_keyboard(
             CallbackButton(
                 text=t("btn.more_cuisines", lang),
                 callback_data=f"cookmore:{cook_id}:cuisine_full",
+            )
+        ]
+    )
+    return rows
+
+
+def _cuisine_full_round_keyboard(
+    cook_id: int, options: list[str], *, lang: str = "en"
+) -> list[list[CallbackButton]]:
+    rows = build_cook_round_keyboard(
+        cook_id, localized_cuisines(options, lang), round_name="cuisine_full"
+    )
+    rows.append(
+        [
+            CallbackButton(
+                text=t("btn.back", lang),
+                callback_data=f"cookback:{cook_id}",
             )
         ]
     )

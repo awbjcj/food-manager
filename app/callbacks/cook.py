@@ -23,12 +23,11 @@ from app.cook import (
 )
 from app.cook.options import (
     MEAL_TYPES,
-    MORE_CUISINES,
-    localized_cuisines,
     more_cuisines,
 )
 from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
 from app.handlers.cook import (
+    _cuisine_full_round_keyboard,
     _cuisine_options,
     _cuisine_round_keyboard,
     run_cook_and_render,
@@ -45,10 +44,6 @@ from app.renderer import (
     build_cook_round_keyboard,
 )
 from app.telegram_ui import to_aiogram_keyboard
-
-# Compatibility export: callers historically imported this name from the
-# callback module for the expanded cuisine menu.
-SPOONACULAR_CUISINES = MORE_CUISINES
 
 _SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
@@ -76,7 +71,14 @@ async def handle_cook_callback(
         return
     if (
         action.verb
-        not in ("cook_pick", "cook_alt", "cook_more_opts", "cook_more", "cook_adjust")
+        not in (
+            "cook_pick",
+            "cook_alt",
+            "cook_more_opts",
+            "cook_more_back",
+            "cook_more",
+            "cook_adjust",
+        )
         or action.item_id is None
     ):
         await cb.answer(t("toast.unrecognized_action", DEFAULT_LANG))
@@ -305,12 +307,29 @@ async def handle_cook_callback(
                 await cb.answer(t("toast.no_household_profile", user.lang))
                 return
             expanded_cuisines = more_cuisines(_cuisine_options(household))
-            rows = build_cook_round_keyboard(
-                cook.id,
-                localized_cuisines(expanded_cuisines, user.lang),
-                round_name="cuisine_full",
-            )
+            rows = _cuisine_full_round_keyboard(cook.id, expanded_cuisines, lang=user.lang)
             await edit_or_resend(cb, t("cook.which_cuisine", user.lang), to_aiogram_keyboard(rows))
+            await cb.answer()
+            return
+
+        if action.verb == "cook_more_back":
+            if cook.status != "collecting" or cook.meal_type is None or cook.cuisine is not None:
+                await cb.answer(t("toast.unrecognized_action", user.lang))
+                return
+            assert cook.id is not None
+            household = session.get(Household, user.household_id)
+            if household is None:
+                await cb.answer(t("toast.no_household_profile", user.lang))
+                return
+            await edit_or_resend(
+                cb,
+                t("cook.which_cuisine", user.lang),
+                to_aiogram_keyboard(
+                    _cuisine_round_keyboard(
+                        cook.id, _cuisine_options(household), lang=user.lang
+                    )
+                ),
+            )
             await cb.answer()
             return
 

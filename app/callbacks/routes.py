@@ -52,7 +52,12 @@ def build_callback_registry() -> CallbackRegistry:
         return CallbackResult(deferred=run)
 
     @registry.register(
-        "cook_pick", "cook_alt", "cook_more", "cook_adjust", "cook_more_opts"
+        "cook_pick",
+        "cook_alt",
+        "cook_more",
+        "cook_adjust",
+        "cook_more_opts",
+        "cook_more_back",
     )
     async def cook_route(_request, context):
         if not context.clients.cook_configured:

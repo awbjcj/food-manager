@@ -251,6 +251,25 @@ async def test_deepseek_selection_has_no_web_search_tool():
     assert sdk.responses.calls[0]["tools"] == []
 
 
+async def test_deepseek_selection_accepts_responses_output_text():
+    """DeepSeek returns structured JSON in output_text, not parsed fields."""
+    sdk = FakeDeepSeekSDK(
+        [
+            SimpleNamespace(
+                output_parsed=None,
+                output=[],
+                output_text='{"item_ids": [1, 2], "rationale": "coherent"}',
+                usage=SimpleNamespace(input_tokens=10, output_tokens=5),
+            )
+        ]
+    )
+    client = DeepSeekSelectionLLM(sdk, "deepseek-v4-flash")
+
+    selected, _cost = await client.select_items(prompt="pick stuff")
+
+    assert selected.item_ids == [1, 2]
+
+
 async def test_deepseek_search_tool_cost_is_unknown_when_invoked():
     """DeepSeek doesn't publish a web_search price, so a response with a
     web_search_call in it must report cost as unknown, not silently

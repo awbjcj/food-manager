@@ -324,6 +324,28 @@ def _extract_openai_parsed(response):
             parsed = getattr(item, "parsed", None)
             if parsed is not None:
                 return parsed
+
+    # DeepSeek's Responses API is wire-compatible with OpenAI's endpoint, but
+    # its response does not populate the SDK-only ``output_parsed``/``parsed``
+    # convenience fields.  The model's structured JSON is exposed through the
+    # documented ``output_text`` property instead.  Decode that value here so
+    # provider-specific clients can share this extraction seam without
+    # pretending that DeepSeek returned an OpenAI ParsedResponse.
+    output_text = getattr(response, "output_text", None)
+    if isinstance(output_text, str) and output_text.strip():
+        text = output_text.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
     raise ValueError("no parsed content in OpenAI response")
 
 

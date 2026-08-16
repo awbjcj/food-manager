@@ -20,6 +20,14 @@ from app.cook import (
 from app.cook import (
     set_message_id as set_cook_message_id,
 )
+from app.cook.options import (
+    DEFAULT_CUISINES,
+    MEAL_TYPES,  # noqa: F401 - compatibility re-export
+    SURPRISE_CUISINE,
+    canonical_cuisine,
+    localized_cuisines,
+    localized_meal_types,
+)
 from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
 from app.i18n import t
 from app.models import Household, User
@@ -30,9 +38,6 @@ from app.renderer import (
     build_cook_round_keyboard,
 )
 from app.telegram_ui import to_aiogram_keyboard
-
-MEAL_TYPES = ["Dinner", "Lunch", "Breakfast", "Dessert", "Snack", "Surprise me"]
-DEFAULT_CUISINES = ["Italian", "Mexican", "Chinese", "American", "Surprise me"]
 
 _SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
@@ -67,7 +72,9 @@ async def handle_cook(
         )
         assert cook.id is not None
         keyboard = to_aiogram_keyboard(
-            build_cook_round_keyboard(cook.id, MEAL_TYPES, round_name="meal")
+            build_cook_round_keyboard(
+                cook.id, localized_meal_types(user.lang), round_name="meal"
+            )
         )
         sent = await msg.answer(t("cook.what_cooking", user.lang), reply_markup=keyboard)
         set_cook_message_id(session, cook=cook, message_id=sent.message_id)
@@ -78,18 +85,27 @@ def _cuisine_options(household: Household) -> list[str]:
         prefs = _json.loads(household.preferred_cuisines_json or "[]")
     except (TypeError, ValueError):
         prefs = []
-    options = [str(c).title() for c in prefs if str(c).strip()]
+    options: list[str] = []
+    seen: set[str] = set()
+    for preference in prefs:
+        cuisine = canonical_cuisine(preference)
+        if cuisine is None or cuisine.casefold() in seen:
+            continue
+        seen.add(cuisine.casefold())
+        options.append(cuisine)
     if not options:
         options = list(DEFAULT_CUISINES)
-    elif "Surprise me" not in options:
-        options = options[:4] + ["Surprise me"]
-    return options[:5]
+    elif SURPRISE_CUISINE not in options:
+        options = options[: len(DEFAULT_CUISINES) - 1] + [SURPRISE_CUISINE]
+    return options[: len(DEFAULT_CUISINES)]
 
 
 def _cuisine_round_keyboard(
     cook_id: int, options: list[str], *, lang: str = "en"
 ) -> list[list[CallbackButton]]:
-    rows = build_cook_round_keyboard(cook_id, options, round_name="cuisine")
+    rows = build_cook_round_keyboard(
+        cook_id, localized_cuisines(options, lang), round_name="cuisine"
+    )
     rows.append(
         [
             CallbackButton(

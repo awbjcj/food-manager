@@ -7,6 +7,14 @@ from app.cook.models import (
     RecipeIngredient,
     ScoredCandidate,
 )
+from app.cook.options import (
+    ALL_CUISINES,
+    FEATURED_CUISINES,
+    MORE_CUISINES,
+    localized_cuisines,
+    localized_meal_types,
+    more_cuisines,
+)
 from app.renderer import (
     build_cook_result_keyboard,
     build_cook_round_keyboard,
@@ -189,6 +197,36 @@ def test_full_cuisine_keyboard_index_matches_the_displayed_option():
 
     assert rows[7][0].text == options[7]
     assert rows[7][0].callback_data == "cookpick:5:cuisine_full:7"
+
+
+def test_cuisine_quick_and_more_tiers_are_disjoint_and_cover_provider_choices():
+    assert len(FEATURED_CUISINES) == 12
+    assert set(FEATURED_CUISINES).isdisjoint(MORE_CUISINES)
+    assert set(FEATURED_CUISINES) | set(MORE_CUISINES) == set(ALL_CUISINES)
+    assert more_cuisines(FEATURED_CUISINES) == MORE_CUISINES
+    assert "African" not in more_cuisines(["African", "Italian", "Surprise me"])
+
+
+def test_cuisine_labels_are_localized_without_changing_canonical_values():
+    assert localized_cuisines(["Italian", "Middle Eastern"], "zh") == [
+        "意大利菜",
+        "中东菜",
+    ]
+    assert localized_cuisines(["Italian", "Middle Eastern"], "fr") == [
+        "Cuisine italienne",
+        "Cuisine du Moyen-Orient",
+    ]
+
+
+def test_meal_labels_are_localized_for_the_first_cook_round():
+    assert localized_meal_types("es") == [
+        "Cena",
+        "Almuerzo",
+        "Desayuno",
+        "Postre",
+        "Tentempié",
+        "Sorpréndeme",
+    ]
 
 
 def test_render_stats_includes_cook_line():

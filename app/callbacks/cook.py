@@ -21,6 +21,12 @@ from app.cook import (
     load_cook_session,
     run_cook_more,
 )
+from app.cook.options import (
+    MEAL_TYPES,
+    MORE_CUISINES,
+    localized_cuisines,
+    more_cuisines,
+)
 from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
 from app.handlers.cook import (
     _cuisine_options,
@@ -40,36 +46,9 @@ from app.renderer import (
 )
 from app.telegram_ui import to_aiogram_keyboard
 
-MEAL_TYPES = ["Dinner", "Lunch", "Breakfast", "Dessert", "Snack", "Surprise me"]
-SPOONACULAR_CUISINES = [
-    "African",
-    "Asian",
-    "American",
-    "British",
-    "Cajun",
-    "Caribbean",
-    "Chinese",
-    "Eastern European",
-    "European",
-    "French",
-    "German",
-    "Greek",
-    "Indian",
-    "Irish",
-    "Italian",
-    "Japanese",
-    "Jewish",
-    "Korean",
-    "Latin American",
-    "Mediterranean",
-    "Mexican",
-    "Middle Eastern",
-    "Nordic",
-    "Southern",
-    "Spanish",
-    "Thai",
-    "Vietnamese",
-]
+# Compatibility export: callers historically imported this name from the
+# callback module for the expanded cuisine menu.
+SPOONACULAR_CUISINES = MORE_CUISINES
 
 _SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
@@ -321,9 +300,14 @@ async def handle_cook_callback(
                 await cb.answer(t("toast.unrecognized_action", user.lang))
                 return
             assert cook.id is not None
+            household = session.get(Household, user.household_id)
+            if household is None:
+                await cb.answer(t("toast.no_household_profile", user.lang))
+                return
+            expanded_cuisines = more_cuisines(_cuisine_options(household))
             rows = build_cook_round_keyboard(
                 cook.id,
-                [*SPOONACULAR_CUISINES, "Surprise me"],
+                localized_cuisines(expanded_cuisines, user.lang),
                 round_name="cuisine_full",
             )
             await edit_or_resend(cb, t("cook.which_cuisine", user.lang), to_aiogram_keyboard(rows))
@@ -377,7 +361,7 @@ async def handle_cook_callback(
             cuisine_options = (
                 _cuisine_options(household)
                 if action.round_name == "cuisine"
-                else [*SPOONACULAR_CUISINES, "Surprise me"]
+                else more_cuisines(_cuisine_options(household))
             )
             if option_index < 0 or option_index >= len(cuisine_options):
                 await cb.answer(t("toast.unrecognized_action", user.lang))

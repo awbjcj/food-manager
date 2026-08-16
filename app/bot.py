@@ -38,6 +38,11 @@ from app.commands import (
     CommandError,
     parse_callback_request,
 )
+from app.cook.options import (
+    DEFAULT_CUISINES,  # noqa: F401 - compatibility re-export
+    MEAL_TYPES,  # noqa: F401 - compatibility re-export
+    SPOONACULAR_CUISINES,  # noqa: F401 - compatibility re-export
+)
 from app.handlers.billing import (
     COMMANDS as BILLING_COMMANDS,
 )
@@ -114,38 +119,6 @@ DEFAULT_DIGEST_HOUR = 8
 DEFAULT_LLM_PROVIDER = "anthropic"
 ALLOWED_TELEGRAM_USER_ID: int = 0
 OPEN_REGISTRATION: bool = False
-MEAL_TYPES = ["Dinner", "Lunch", "Breakfast", "Dessert", "Snack", "Surprise me"]
-DEFAULT_CUISINES = ["Italian", "Mexican", "Chinese", "American", "Surprise me"]
-SPOONACULAR_CUISINES = [
-    "African",
-    "Asian",
-    "American",
-    "British",
-    "Cajun",
-    "Caribbean",
-    "Chinese",
-    "Eastern European",
-    "European",
-    "French",
-    "German",
-    "Greek",
-    "Indian",
-    "Irish",
-    "Italian",
-    "Japanese",
-    "Jewish",
-    "Korean",
-    "Latin American",
-    "Mediterranean",
-    "Mexican",
-    "Middle Eastern",
-    "Nordic",
-    "Southern",
-    "Spanish",
-    "Thai",
-    "Vietnamese",
-]
-
 _SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
 log = logging.getLogger(__name__)

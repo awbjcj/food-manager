@@ -54,6 +54,17 @@ from app.translation_llm import _TRANSLATE_SYSTEM_PROMPT, TranslationList, _user
 
 log = logging.getLogger(__name__)
 
+# DeepSeek's reasoning models (called here with reasoning={"effort": "low"})
+# count their "thinking" tokens against max_output_tokens alongside the
+# visible reply, the same way Gemini 2.5+/3.x do (see gemini_llm.py's
+# _THINKING_HEADROOM_TOKENS). A budget sized for the JSON reply alone gets
+# eaten by thinking, truncating output_text mid-JSON so it fails to parse —
+# observed as /cook succeeding at the HTTP layer (200 OK, timing logged) but
+# still failing the pipeline immediately after. This headroom is added on
+# top of each call's intended *output* size; it is only a cap (unused tokens
+# cost nothing), so it is deliberately generous.
+_REASONING_HEADROOM_TOKENS = 8192
+
 
 def _deepseek_cost_micros(response, model: str) -> int | None:
     """Token cost via the shared OpenAI-shaped helper.
@@ -96,7 +107,7 @@ class _DeepSeekResponsesClient:
                 tools=[_OPENAI_WEB_SEARCH_TOOL] if self._web_search else [],
                 reasoning=_OPENAI_REASONING,
                 text_format=text_format,
-                max_output_tokens=1024,
+                max_output_tokens=1024 + _REASONING_HEADROOM_TOKENS,
             ),
             log_event="deepseek_llm_failed",
             sleep=self._sleep,
@@ -199,7 +210,7 @@ class DeepSeekTranslationLLMClient:
                     },
                 ],
                 text_format=TranslationList,
-                max_output_tokens=1024,
+                max_output_tokens=1024 + _REASONING_HEADROOM_TOKENS,
             ),
             log_event="deepseek_llm_failed",
             sleep=self._sleep,

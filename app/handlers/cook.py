@@ -244,7 +244,8 @@ async def run_cook_and_render(
             return
         except Exception as exc:  # noqa: BLE001 - /cook must never crash the bot
             log.warning(
-                "cook_pipeline_failed", extra={"error_class": type(exc).__name__}
+                "cook_pipeline_failed",
+                extra={"error_class": type(exc).__name__, "error": str(exc)},
             )
             mark_status(session, cook=cook, status="cancelled")
             await _safe_edit_bot(

@@ -206,7 +206,8 @@ async def handle_cook_callback(
                         )
                 except Exception as exc:  # noqa: BLE001 - show-more must never crash the bot
                     log.warning(
-                        "cook_more_failed", extra={"error_class": type(exc).__name__}
+                        "cook_more_failed",
+                        extra={"error_class": type(exc).__name__, "error": str(exc)},
                     )
                     await edit_or_resend(
                         cb, t("cook.fetch_more_failed", user.lang)

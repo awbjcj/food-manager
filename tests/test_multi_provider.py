@@ -251,6 +251,24 @@ async def test_deepseek_selection_has_no_web_search_tool():
     assert sdk.responses.calls[0]["tools"] == []
 
 
+async def test_deepseek_selection_requests_headroom_beyond_the_reply_budget():
+    """DeepSeek's reasoning tokens count against max_output_tokens, so the
+    request must ask for more than the intended JSON reply size or a real
+    call can truncate mid-JSON and fail to parse (observed as /cook failing
+    right after a 200 OK, reasoning-only response)."""
+    from app.cook.models import SelectedItems
+    from app.deepseek_llm import _REASONING_HEADROOM_TOKENS
+
+    sdk = FakeDeepSeekSDK(
+        [_FakeDeepSeekResponse(SelectedItems(item_ids=[1, 2], rationale="x"))]
+    )
+    client = DeepSeekSelectionLLM(sdk, "deepseek-v4-flash")
+    await client.select_items(prompt="pick stuff")
+
+    assert sdk.responses.calls[0]["reasoning"] == {"effort": "low"}
+    assert sdk.responses.calls[0]["max_output_tokens"] == 1024 + _REASONING_HEADROOM_TOKENS
+
+
 async def test_deepseek_selection_accepts_responses_output_text():
     """DeepSeek returns structured JSON in output_text, not parsed fields."""
     sdk = FakeDeepSeekSDK(

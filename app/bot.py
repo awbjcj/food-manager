@@ -49,7 +49,7 @@ from app.handlers.cook import (
     COMMANDS as COOK_COMMANDS,
 )
 from app.handlers.cook import (
-    handle_cook,  # noqa: F401 - compatibility re-export
+    handle_cook,
     run_cook_and_render,  # noqa: F401 - compatibility re-export
 )
 from app.handlers.household import (
@@ -75,7 +75,7 @@ from app.handlers.meta import (
     handle_llm,  # noqa: F401 - compatibility re-export
     handle_nl_message,
     handle_photo,
-    handle_prefs,  # noqa: F401 - compatibility re-export
+    handle_prefs,
 )
 from app.handlers.pantry import (
     COMMANDS as PANTRY_COMMANDS,
@@ -89,7 +89,7 @@ from app.handlers.pantry import (
     handle_list,  # noqa: F401 - compatibility re-export
     handle_pantry,
     handle_snooze,  # noqa: F401 - compatibility re-export
-    handle_stats,  # noqa: F401 - compatibility re-export
+    handle_stats,
     handle_toss,  # noqa: F401 - compatibility re-export
 )
 from app.handlers.plan import (
@@ -160,6 +160,11 @@ _QUICK_ACCESS_COMMANDS = {
         handle_pantry,
         ("session_factory", "now_provider", "on_user_created", "translation_llm"),
     ),
+    "qa_cook": (
+        "cook",
+        handle_cook,
+        ("session_factory", "now_provider", "on_user_created"),
+    ),
     "qa_plan": (
         "plan",
         handle_plan_current,
@@ -174,6 +179,16 @@ _QUICK_ACCESS_COMMANDS = {
         "favorites",
         handle_favorites,
         ("session_factory", "on_user_created", "translation_llm"),
+    ),
+    "qa_prefs": (
+        "prefs",
+        handle_prefs,
+        ("session_factory", "clients", "now_provider", "on_user_created"),
+    ),
+    "qa_stats": (
+        "stats",
+        handle_stats,
+        ("session_factory", "now_provider", "on_user_created"),
     ),
 }
 

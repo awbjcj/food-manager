@@ -1,5 +1,8 @@
 interface TelegramWebApp {
   initData: string
+  initDataUnsafe?: {
+    user?: { language_code?: string }
+  }
   ready(): void
   expand(): void
   close(): void

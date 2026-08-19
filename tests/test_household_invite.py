@@ -5,6 +5,7 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.bot import (
+    _QUICK_ACCESS_COMMANDS,
     authorize_and_get_user,
     handle_household,
     handle_invite,
@@ -636,6 +637,23 @@ async def test_handle_start_routes_existing_member_quick_access(session, monkeyp
 
     quick_access.assert_awaited_once_with("qa_pantry", msg)
     msg.answer.assert_not_awaited()
+
+
+def test_mini_app_shortcuts_cover_the_core_zero_input_commands():
+    commands = {
+        payload: route[0]
+        for payload, route in _QUICK_ACCESS_COMMANDS.items()
+    }
+
+    assert {
+        "qa_pantry": "pantry",
+        "qa_cook": "cook",
+        "qa_plan": "plan",
+        "qa_shopping": "shopping",
+        "qa_favorites": "favorites",
+        "qa_prefs": "prefs",
+        "qa_stats": "stats",
+    }.items() <= commands.items()
 
 
 @pytest.mark.asyncio

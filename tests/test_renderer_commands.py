@@ -277,17 +277,16 @@ def test_render_digest_buckets_and_keyboard():
         _pantry_item("Greek Yogurt", today + timedelta(days=5), 45),
     ]
     rendered = render_digest(items, today=today)
-    assert "Expired (1)" in rendered.text
+    assert "🔴 EXPIRED" in rendered.text
     assert "#41 Spinach" in rendered.text
     assert "🔴 #41 Spinach" in rendered.text
-    assert "Today (2)" in rendered.text
-    assert "Tomorrow (1)" in rendered.text
-    assert "This week (1)" in rendered.text
-    assert "🔴 #42 Whole Milk 1 gal - today" in rendered.text
-    assert "🟡 #44 Sliced Bread - May 28 (1d)" in rendered.text
+    assert "🟠 TODAY" in rendered.text
+    assert "🟢 THIS WEEK" in rendered.text
+    assert "🟡 #42 Whole Milk 1 gal · today" in rendered.text
+    assert "🟡 #44 Sliced Bread · tomorrow" in rendered.text
     keyboard = build_digest_keyboard([items[1]], has_more=False, today=today)
     assert keyboard[0][0].callback_data == "item:open:42"
-    assert keyboard[0][0].text == "🔴 #42 Whole Milk 1 gal"
+    assert keyboard[0][0].text == "🟡 #42 Whole Milk 1 gal"
 
 
 def test_render_digest_truncates_at_10():
@@ -344,7 +343,10 @@ def test_card_keyboard_hides_freeze_when_frozen():
 
 def test_render_item_card_reuses_item_line_shape():
     text = render_item_card(_card_item(), today=date(2026, 6, 9), lang="en")
-    assert text == "🔴 #3 spinach - today"
+    assert text.startswith("🟡 #3 spinach · today")
+    assert "Quantity · 1" in text
+    assert "Stored · Pantry" in text
+    assert "Shelf life · 7 days" in text
 
 
 def test_correct_menu_keyboard_and_header():
@@ -376,7 +378,7 @@ def test_remove_confirm():
 def test_render_list_and_stats():
     text = render_list([_pantry_item("Milk", date(2026, 5, 30), 1)], today=date(2026, 5, 26))
     assert "#1 Milk" in text and "May 30" in text
-    assert "Other (1)" in text
+    assert "OTHER · 1" in text
     assert "no items" in render_list([], today=date(2026, 5, 26)).lower()
     stats = Stats(
         receipt_count=5,
@@ -428,8 +430,10 @@ def test_render_plan_shows_header_days_and_fire_flag():
     text = render_plan(rows)
     assert text == (
         "🗓 Dinner plan — 2 days\n"
+        "\n"
         "Thu: Yogurt Bowl (italian, 20m)🔥\n"
         "  Recipe: https://x\n"
+        "\n"
         "Fri: Pasta (italian, 30m)\n"
         "  Recipe: https://x"
     )
@@ -447,7 +451,7 @@ def test_render_plan_omits_link_line_when_day_has_no_source_url():
     candidate = ScoredCandidate(recipe=rec, nutrition=nut, expiry_use=0.5, final_score=0.5)
     rows = [(date(2026, 7, 9), candidate, False)]
     text = render_plan(rows)
-    assert text == "🗓 Dinner plan — 1 days\nThu: Soup (thai, 15m)"
+    assert text == "🗓 Dinner plan — 1 days\n\nThu: Soup (thai, 15m)"
 
 
 def test_parse_plan_arg():

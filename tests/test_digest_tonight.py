@@ -100,4 +100,4 @@ def test_digest_without_tonight_is_byte_identical(session, household_id):
 
 def test_digest_appends_the_tonight_line(session, household_id):
     rendered = render_digest([_item(household_id)], today=TODAY, tonight="Chicken Tikka")
-    assert rendered.text.endswith("\n🍽 Tonight: Chicken Tikka")
+    assert rendered.text.endswith("\n🍽 Tonight · Chicken Tikka")

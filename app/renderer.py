@@ -27,7 +27,7 @@ URGENCY_SOON_DAYS = 3
 
 def _urgency_icon(expires_on: date, *, today: date) -> str:
     delta = (expires_on - today).days
-    if delta <= 0:
+    if delta < 0:
         return "🔴"
     if delta <= URGENCY_SOON_DAYS:
         return "🟡"
@@ -60,9 +60,11 @@ def render_item_line(item, *, today: date, lang: str = "en", names=None) -> str:
         tail = t("item.tail.expired", lang, n=-delta)
     elif delta == 0:
         tail = t("item.tail.today", lang)
+    elif delta == 1:
+        tail = t("item.tail.tomorrow", lang)
     else:
         tail = f"{_fmt_date(item.expires_on, today=today, lang=lang)} {t('item.tail.days', lang, n=delta)}"
-    return f"{icon} {badge}#{item.id} {qty}{name} - {tail}"
+    return f"{icon} {badge}#{item.id} {qty}{name} · {tail}"
 
 
 def _fmt_cost(micros: int | None, *, lang: str = "en") -> str:
@@ -169,25 +171,38 @@ def render_digest(
         return DigestRender(text="", rendered_count=0, total_count=0, has_more=False)
 
     capped = items if cap is None else items[:cap]
-    buckets: dict[str, list] = {"expired": [], "today": [], "tomorrow": [], "this_week": []}
+    buckets: dict[str, list] = {
+        "expired": [],
+        "today": [],
+        "this_week": [],
+        "later": [],
+    }
     for item in capped:
         if item.expires_on < today:
             buckets["expired"].append(item)
         elif item.expires_on == today:
             buckets["today"].append(item)
-        elif item.expires_on == today + timedelta(days=1):
-            buckets["tomorrow"].append(item)
-        else:
+        elif item.expires_on <= today + timedelta(days=7):
             buckets["this_week"].append(item)
+        else:
+            buckets["later"].append(item)
 
     def line_for(item) -> str:
         return "  " + render_item_line(item, today=today, lang=lang, names=names)
 
     title = t("digest.title", lang, weekday=weekday_abbr(today, lang=lang), date=_fmt_date(today, today=today, lang=lang))
-    lines = [title, ""]
-    for key in ("expired", "today", "tomorrow", "this_week"):
+    summary_key = "digest.attention" if cap is not None else "pantry.tracked"
+    lines = [title, t(summary_key, lang, n=total), ""]
+    section_icons = {
+        "expired": "🔴",
+        "today": "🟠",
+        "this_week": "🟢",
+        "later": "⚪",
+    }
+    for key in ("expired", "today", "this_week", "later"):
         if buckets[key]:
-            lines.append(f"{t(f'digest.section.{key}', lang)} ({len(buckets[key])})")
+            heading = t(f"digest.section.{key}", lang).upper()
+            lines.append(f"{section_icons[key]} {heading}")
             lines.extend(line_for(item) for item in buckets[key])
             lines.append("")
 
@@ -198,7 +213,7 @@ def render_digest(
 
     text = "\n".join(lines).rstrip()
     if tonight:
-        text = f"{text}\n{t('digest.tonight', lang, dish=tonight)}"
+        text = f"{text}\n\n{t('digest.tonight', lang, dish=tonight)}"
 
     return DigestRender(
         text=text,
@@ -229,12 +244,29 @@ def build_digest_keyboard(
         buttons[i:i + 2] for i in range(0, len(buttons), 2)
     ]
     if has_more:
-        rows.append([CallbackButton(text=t("btn.show_all", lang), callback_data="show:all")])
+        rows.append(
+            [
+                CallbackButton(
+                    text=t("btn.show_all", lang), callback_data="show:all"
+                )
+            ]
+        )
     return rows
 
 
 def render_item_card(item, *, today: date, lang: str = "en", names=None) -> str:
-    return render_item_line(item, today=today, lang=lang, names=names)
+    storage = getattr(item, "storage", "default")
+    storage_label = t(f"storage.{storage}", lang)
+    qty = _qty_prefix(item.qty, item.unit).strip() or "1"
+    return "\n".join(
+        [
+            render_item_line(item, today=today, lang=lang, names=names),
+            "",
+            t("item.detail.quantity", lang, value=qty),
+            t("item.detail.storage", lang, value=storage_label),
+            t("item.detail.shelf_life", lang, days=item.shelf_life_days),
+        ]
+    )
 
 
 def render_correct_menu(item, *, today: date, lang: str = "en", names=None) -> str:
@@ -384,7 +416,13 @@ def _render_card(
 ) -> str:
     r = card.recipe
     n = card.nutrition
-    header = f"{'* ' if rank == 0 else ''}{_name(names, r.title)} ({_name(names, r.cuisine)})"
+    header = t(
+        "cook.card.title",
+        lang,
+        marker="🍳" if rank == 0 else "↳",
+        title=_name(names, r.title),
+        cuisine=_name(names, r.cuisine),
+    )
     lines = [
         header,
         t("cook.health", lang, score=n.health_score, effort=n.effort, minutes=n.est_minutes),
@@ -422,7 +460,7 @@ def render_cook_result(
 def render_plan(
     rows: list, *, lang: str = "en", names: Mapping[str, str] | None = None
 ) -> str:
-    lines = [t("plan.header", lang, n=len(rows))]
+    lines = [t("plan.header", lang, n=len(rows)), ""]
     for day, candidate, uses_expiring in rows:
         lines.append(
             t(
@@ -437,7 +475,8 @@ def render_plan(
         )
         if candidate.recipe.source_url:
             lines.append(t("cook.recipe_link", lang, url=candidate.recipe.source_url))
-    return "\n".join(lines)
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def build_plan_keyboard(
@@ -563,10 +602,10 @@ def render_shopping_list(
 ) -> str:
     if not items:
         return t("shopping.empty", lang)
-    lines = [t("shopping.title", lang)]
+    lines = [t("shopping.title", lang, n=len(items)), ""]
     for item in items:
         qty = _qty_prefix(item.qty, item.unit) if item.qty is not None else ""
-        lines.append(f"  - {qty}{_name(names, item.name_raw)}")
+        lines.append(f"☐ {qty}{_name(names, item.name_raw)}")
     return "\n".join(lines)
 
 
@@ -585,9 +624,12 @@ def render_favorites(
 ) -> str:
     if not recipes:
         return t("favorites.empty", lang)
-    lines = [t("favorites.title", lang)]
+    lines = [t("favorites.title", lang, n=len(recipes)), ""]
     for recipe in recipes:
-        lines.append(f"  #{recipe.id} {_name(names, recipe.title)} ({_name(names, recipe.cuisine)})")
+        lines.append(
+            f"★ #{recipe.id} {_name(names, recipe.title)}"
+            f" · {_name(names, recipe.cuisine)}"
+        )
     return "\n".join(lines)
 
 
@@ -605,7 +647,15 @@ def render_recook(
     lang: str = "en",
     names: Mapping[str, str] | None = None,
 ) -> str:
-    lines = [f"{_name(names, recipe.title)} ({_name(names, recipe.cuisine)})"]
+    lines = [
+        t(
+            "cook.card.title",
+            lang,
+            marker="🍳",
+            title=_name(names, recipe.title),
+            cuisine=_name(names, recipe.cuisine),
+        )
+    ]
     ingredients = ", ".join(_name(names, i.name) for i in recipe.ingredients)
     if ingredients:
         lines.append(t("cook.ingredients", lang, items=ingredients))
@@ -680,7 +730,7 @@ def render_list(items: list, *, today: date, lang: str = "en", names=None) -> st
     for cat in ordered:
         group = sorted(by_cat[cat], key=lambda i: i.expires_on)
         cat_label = t(f"category.{cat}", lang) if cat in CATEGORY_ORDER else cat.capitalize()
-        block = [f"{cat_label} ({len(group)})"]
+        block = [f"{cat_label.upper()} · {len(group)}"]
         block.extend(f"  {render_item_line(i, today=today, lang=lang, names=names)}" for i in group)
         blocks.append("\n".join(block))
     return "\n\n".join(blocks)

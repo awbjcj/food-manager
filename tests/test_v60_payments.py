@@ -164,6 +164,6 @@ async def test_stars_provider_uses_the_documented_invoice_shape():
     await provider.create_checkout(sku=SKUS["family_monthly"], household_id=1)
     kwargs = bot.create_invoice_link.await_args.kwargs
     assert kwargs["currency"] == "XTR"
-    assert kwargs["provider_token"] == ""
+    assert "provider_token" not in kwargs
     assert kwargs["subscription_period"] == 2_592_000
     assert len(kwargs["prices"]) == 1

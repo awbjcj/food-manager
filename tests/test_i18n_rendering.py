@@ -35,17 +35,17 @@ from app.renderer import (
 from tests.test_renderer_commands import _pantry_item
 
 
-def test_item_line_en_unchanged():
+def test_item_line_en_is_compact_and_scannable():
     item = _pantry_item("Chicken", date(2026, 5, 29), 7)
     item.qty, item.unit = 2.0, "lb"
-    assert render_item_line(item, today=date(2026, 5, 28)) == "🟡 #7 2 lb Chicken - May 29 (1d)"
+    assert render_item_line(item, today=date(2026, 5, 28)) == "🟡 #7 2 lb Chicken · tomorrow"
 
 
-def test_item_line_en_expired_and_today_unchanged():
+def test_item_line_en_expired_and_today_have_clear_urgency():
     expired = render_item_line(_pantry_item("Old", date(2026, 5, 26), 3), today=date(2026, 5, 28))
-    assert expired == "🔴 #3 Old - expired 2d"
+    assert expired == "🔴 #3 Old · 2d overdue"
     due = render_item_line(_pantry_item("Due", date(2026, 5, 28), 4), today=date(2026, 5, 28))
-    assert due == "🔴 #4 Due - today"
+    assert due == "🟡 #4 Due · today"
 
 
 def test_item_line_zh_translates_name_and_tail():
@@ -59,12 +59,12 @@ def test_fmt_date_still_importable_en():
     assert _fmt_date(date(2026, 6, 2), today=date(2026, 5, 28)) == "Jun 2"
 
 
-def test_digest_and_list_en_unchanged():
+def test_digest_and_list_en_use_section_hierarchy():
     today = date(2026, 5, 28)
     item = _pantry_item("Milk", date(2026, 5, 29), 1)
     item.category = "dairy"
-    assert "Dairy (1)" in render_list([item], today=today)
-    assert "Pantry digest -" in render_digest([item], today=today).text
+    assert "DAIRY · 1" in render_list([item], today=today)
+    assert "🥬 Pantry ·" in render_digest([item], today=today).text
 
 
 def test_digest_zh_headers_and_names():
@@ -92,7 +92,7 @@ def test_list_unknown_category_falls_back_without_crash():
     item = _pantry_item("Mystery", date(2026, 5, 29), 1)
     item.category = "condiment"
     out = render_list([item], today=today, lang="zh")
-    assert "Condiment (1)" in out
+    assert "CONDIMENT · 1" in out
 
 
 # ---------------------------------------------------------------------------
@@ -270,9 +270,9 @@ def test_digest_keyboard_en_open_button_label():
     assert rows[0][0].text == "🟡 #42 milk"
 
 
-def test_digest_keyboard_en_show_all_unchanged():
+def test_digest_keyboard_en_show_all_is_explicit():
     rows = build_digest_keyboard([_kb_item()], has_more=True, today=date(2026, 6, 9))
-    assert rows[-1][0].text == "show all"
+    assert rows[-1][0].text == "☰ View full pantry"
 
 
 def test_digest_keyboard_callback_data_opens_card():
@@ -299,7 +299,7 @@ def test_digest_keyboard_zh_show_all():
         today=date(2026, 6, 9),
         lang="zh",
     )
-    assert rows[-1][0].text == "显示全部"
+    assert rows[-1][0].text == "☰ 查看全部储藏"
 
 
 # --- build_undo_keyboard / build_undo_add_keyboard ---

@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     operator_telegram_ids: str = Field(default="", alias="OPERATOR_TELEGRAM_IDS")
     operator_bot_token: str | None = Field(default=None, alias="OPERATOR_BOT_TOKEN")
     open_registration: bool = Field(default=False, alias="OPEN_REGISTRATION")
+    web_app_url: str | None = Field(default=None, alias="WEB_APP_URL")
+    port: int = Field(default=8000, alias="PORT")
     cook_cost_ceiling_micros: int = Field(
         default=100_000, alias="COOK_COST_CEILING_MICROS"
     )
@@ -58,6 +60,14 @@ class Settings(BaseSettings):
     database_path: str = Field(default="./food.db", alias="DATABASE_PATH")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     env: str = Field(default="dev", alias="ENV")
+
+    @model_validator(mode="after")
+    def validate_web_app(self) -> "Settings":
+        if not 1 <= self.port <= 65535:
+            raise ValueError("PORT must be between 1 and 65535")
+        if self.web_app_url and not self.web_app_url.startswith("https://"):
+            raise ValueError("WEB_APP_URL must use HTTPS")
+        return self
 
     def _api_key_for(self, provider: str) -> str | None:
         return {

@@ -191,6 +191,43 @@ async def handle_plan(
         session.commit()
 
 
+async def handle_plan_current(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+    translation_llm=None,
+) -> None:
+    """Render the active plan without replacing it or spending quota."""
+
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
+            return
+        session, user = ctx.session, ctx.user
+        plan = session.exec(
+            select(MealPlan)
+            .where(
+                MealPlan.household_id == user.household_id,
+                MealPlan.status == "active",
+            )
+            .order_by(MealPlan.created_at.desc())  # type: ignore[union-attr]
+        ).first()
+        if plan is None:
+            await msg.answer(t("plan.none_active", user.lang))
+            return
+        text, keyboard = await _render_plan_message(
+            session,
+            plan=plan,
+            lang=user.lang,
+            translation_llm=translation_llm,
+        )
+        await msg.answer(text, reply_markup=keyboard)
+
+
 def _plan_entry_rows(session, plan_id: int):
     entries = list(
         session.exec(

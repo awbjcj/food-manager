@@ -24,6 +24,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from aiogram import Bot
+from aiogram.types import MenuButtonWebApp, WebAppInfo
+from aiohttp import web
 from anthropic import AsyncAnthropic
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -101,6 +103,7 @@ from app.translation_llm import (
     OpenAITranslationLLMClient,
     TranslationLLMProviderSelector,
 )
+from app.webapp import build_web_app
 from app.week_composer import WeekComposerSelector, build_week_composer
 
 
@@ -452,6 +455,39 @@ async def _amain(settings: Settings) -> None:
 
     translation_llm = bundle.translation
 
+    bot_username = None
+    try:
+        bot_identity = await bot.get_me()
+        bot_username = bot_identity.username
+        if settings.web_app_url:
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(
+                    text="Open app",
+                    web_app=WebAppInfo(url=settings.web_app_url),
+                )
+            )
+    except Exception as exc:  # noqa: BLE001 - polling can still recover later
+        log.warning(
+            "mini_app_menu_setup_failed",
+            extra={"error_class": type(exc).__name__},
+        )
+
+    web_runner = web.AppRunner(
+        build_web_app(
+            session_factory=session_factory,
+            bot_token=settings.telegram_bot_token,
+            payments=payments,
+            billing_enabled=settings.billing_enabled,
+            available_providers=bundle.text.available_providers,
+            bot_username=bot_username,
+            static_dir=Path("web/dist"),
+        )
+    )
+    await web_runner.setup()
+    web_site = web.TCPSite(web_runner, "0.0.0.0", settings.port)
+    await web_site.start()
+    log.info("mini_app_web_started", extra={"port": settings.port})
+
     async def _alert_digest_failure(user_id: int, exc: Exception) -> None:
         await alerter.alert(
             "digest_failed", f"user {user_id}: {type(exc).__name__}: {exc}"
@@ -554,6 +590,7 @@ async def _amain(settings: Settings) -> None:
         await asyncio.gather(*loops)
     finally:
         scheduler.shutdown(wait=False)
+        await web_runner.cleanup()
         await recipe_http.aclose()
         await bot.session.close()
         if operator_bot is not None:

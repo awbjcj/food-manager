@@ -175,6 +175,28 @@ async def test_plan_happy_path_renders_and_persists(session_factory, monkeypatch
         assert plan.status == "active"
         assert plan.message_id == 9
 
+    current = _msg("/plan")
+    await bot_mod.handle_plan_current(
+        current,
+        session_factory=session_factory,
+    )
+    current_text = current.answer.await_args.args[0]
+    assert "Yogurt Bowl" in current_text and "Chicken Stir Fry" in current_text
+
+
+@pytest.mark.asyncio
+async def test_plan_current_does_not_create_a_plan(session_factory, monkeypatch):
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
+    msg = _msg("/plan")
+
+    await bot_mod.handle_plan_current(msg, session_factory=session_factory)
+
+    assert "No active meal plan" in msg.answer.await_args.args[0]
+    with session_factory() as db:
+        from sqlmodel import select
+
+        assert db.exec(select(MealPlan)).first() is None
+
 
 @pytest.mark.asyncio
 async def test_plan_bad_days_arg_shows_usage(session_factory, monkeypatch):

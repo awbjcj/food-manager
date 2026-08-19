@@ -622,6 +622,23 @@ async def test_handle_start_with_token_redeems(session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_handle_start_routes_existing_member_quick_access(session, monkeypatch):
+    monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
+    quick_access = AsyncMock(return_value=True)
+    msg = _msg("/start qa_pantry", user_id=1)
+
+    await handle_start(
+        msg,
+        session_factory=lambda: session,
+        on_user_created=MagicMock(),
+        quick_access=quick_access,
+    )
+
+    quick_access.assert_awaited_once_with("qa_pantry", msg)
+    msg.answer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_handle_household_lists_members(session, monkeypatch):
     monkeypatch.setattr("app.handler_support.ALLOWED_TELEGRAM_USER_ID", 1)
     session.add(

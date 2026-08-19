@@ -1,3 +1,11 @@
+FROM node:24-slim AS web-build
+
+WORKDIR /web
+COPY web/package*.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
 FROM python:3.14-slim
 
 ARG UV_VERSION=0.11.16
@@ -15,6 +23,7 @@ COPY app/ ./app/
 COPY bin/ ./bin/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
+COPY --from=web-build /web/dist ./web/dist
 
 RUN uv sync --frozen --no-dev
 

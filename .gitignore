@@ -30,3 +30,8 @@ tests/fixtures/private_receipts/
 *.swp
 
 .claude/
+
+# Web toolchain output
+web/node_modules/
+web/dist/
+web/*.tsbuildinfo

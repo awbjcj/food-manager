@@ -558,6 +558,7 @@ source = { editable = "." }
 dependencies = [
     { name = "agno" },
     { name = "aiogram" },
+    { name = "aiohttp" },
     { name = "alembic" },
     { name = "anthropic" },
     { name = "apscheduler" },
@@ -584,6 +585,7 @@ dev = [
 requires-dist = [
     { name = "agno", specifier = ">=2.8.5" },
     { name = "aiogram", specifier = ">=3.30.0,<4.0" },
+    { name = "aiohttp", specifier = ">=3.14.0,<4.0" },
     { name = "alembic", specifier = ">=1.18.5,<2.0" },
     { name = "anthropic", specifier = ">=0.120.0,<1.0" },
     { name = "apscheduler", specifier = ">=3.11.3,<4.0" },

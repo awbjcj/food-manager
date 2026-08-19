@@ -87,7 +87,7 @@ from app.handlers.pantry import (
     handle_correct_reply,
     handle_delete,  # noqa: F401 - compatibility re-export
     handle_list,  # noqa: F401 - compatibility re-export
-    handle_pantry,  # noqa: F401 - compatibility re-export
+    handle_pantry,
     handle_snooze,  # noqa: F401 - compatibility re-export
     handle_stats,  # noqa: F401 - compatibility re-export
     handle_toss,  # noqa: F401 - compatibility re-export
@@ -97,13 +97,14 @@ from app.handlers.plan import (
 )
 from app.handlers.plan import (
     handle_plan,  # noqa: F401 - compatibility re-export
+    handle_plan_current,
 )
 from app.handlers.shopping import (
     COMMANDS as SHOPPING_COMMANDS,
 )
 from app.handlers.shopping import (
-    handle_favorites,  # noqa: F401 - compatibility re-export
-    handle_shopping,  # noqa: F401 - compatibility re-export
+    handle_favorites,
+    handle_shopping,
 )
 from app.i18n import t
 from app.models import User
@@ -152,6 +153,29 @@ _MESSAGE_COMMANDS: tuple[
     *META_COMMANDS,
     *BILLING_COMMANDS,
 )
+
+_QUICK_ACCESS_COMMANDS = {
+    "qa_pantry": (
+        "pantry",
+        handle_pantry,
+        ("session_factory", "now_provider", "on_user_created", "translation_llm"),
+    ),
+    "qa_plan": (
+        "plan",
+        handle_plan_current,
+        ("session_factory", "on_user_created", "translation_llm"),
+    ),
+    "qa_shopping": (
+        "shopping",
+        handle_shopping,
+        ("session_factory", "now_provider", "on_user_created", "translation_llm"),
+    ),
+    "qa_favorites": (
+        "favorites",
+        handle_favorites,
+        ("session_factory", "on_user_created", "translation_llm"),
+    ),
+}
 
 
 def build_dispatcher(
@@ -205,6 +229,17 @@ def build_dispatcher(
             await handler(event, **kwargs)
 
         return _registered
+
+    async def quick_access(payload: str, event) -> bool:
+        route = _QUICK_ACCESS_COMMANDS.get(payload)
+        if route is None:
+            return False
+        command, handler, dep_names = route
+        command_event = event.model_copy(update={"text": f"/{command}"})
+        await _bind(handler, *dep_names)(command_event)
+        return True
+
+    deps["quick_access"] = quick_access
 
     for _name, _handler, _dep_names in _MESSAGE_COMMANDS:
         dispatcher.message.register(_bind(_handler, *_dep_names), Command(_name))

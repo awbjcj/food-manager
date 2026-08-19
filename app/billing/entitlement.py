@@ -92,6 +92,7 @@ def apply_subscription(
     tier = sku.grants_tier or "free"
     sub.tier = tier
     sub.status = "active"
+    sub.cancel_at_period_end = False
     if not was_paid:
         sub.telegram_charge_id = charge_id
     sub.payer_telegram_id = payer_telegram_id

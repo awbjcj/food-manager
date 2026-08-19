@@ -272,6 +272,7 @@ class Subscription(SQLModel, table=True):
     status: str = "active"
     telegram_charge_id: str | None = None
     payer_telegram_id: int | None = None
+    cancel_at_period_end: bool = False
     period_start: datetime
     period_end: datetime
     seat_cap: int = 2

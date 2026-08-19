@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from aiogram import Bot
@@ -129,14 +129,23 @@ async def handle_start(
     session_factory: _SessionFactory,
     on_user_created: Callable[[User], None],
     bot=None,
+    quick_access: Callable[[str, object], Awaitable[bool]] | None = None,
 ) -> None:
     with session_factory() as session:
         token = _start_token(msg.text)
+        existing_user = session.get(User, msg.from_user.id)
+        if (
+            token is not None
+            and existing_user is not None
+            and quick_access is not None
+            and await quick_access(token, msg)
+        ):
+            return
         # A newcomer (no User row yet) tapping an invite deep-link redeems it;
         # existing members ignore any token and get the normal start message
         # (unlike /join, which tells an existing member they're already in a
         # household — a deep-link re-tap should just be a friendly no-op).
-        if token is not None and session.get(User, msg.from_user.id) is None:
+        if token is not None and existing_user is None:
             await _try_redeem_invite(
                 msg, session, token=token, on_user_created=on_user_created, bot=bot
             )
@@ -404,7 +413,11 @@ async def handle_digest_at(
 
 
 COMMANDS = (
-    ("start", handle_start, ("session_factory", "on_user_created", "bot")),
+    (
+        "start",
+        handle_start,
+        ("session_factory", "on_user_created", "bot", "quick_access"),
+    ),
     ("invite", handle_invite, ("session_factory", "bot", "on_user_created")),
     ("join", handle_join, ("session_factory", "on_user_created", "bot")),
     ("household", handle_household, ("session_factory", "on_user_created")),

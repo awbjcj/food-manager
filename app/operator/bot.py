@@ -15,6 +15,7 @@ from app.billing.plans import Sku, sku_for
 from app.models import Household, PaymentEvent, User
 from app.operator.auth import require_operator
 from app.operator.queries import describe_household
+from app.provider_mode_service import ProviderModeApplyError, ProviderModeError
 
 log = logging.getLogger(__name__)
 _MAX_GRANT = 1_000_000
@@ -244,6 +245,73 @@ async def handle_reconcile(msg, *, session_factory, payments=None):
     await msg.answer("\n".join(lines))
 
 
+def _render_provider_modes(statuses) -> str:
+    """One line per provider: mode, where it came from, what else is possible."""
+    lines = ["llm credential modes:"]
+    for status in statuses:
+        if not status.usable:
+            lines.append(f"{status.provider}: (no credentials configured)")
+            continue
+        alternatives = [m for m in status.available_modes if m != status.mode]
+        switchable = (
+            f" | can switch to: {', '.join(alternatives)}" if alternatives else ""
+        )
+        lines.append(
+            f"{status.provider}: {status.mode} (via {status.source}){switchable}"
+        )
+    lines.append("use /provider <name> <api|subscription> to change one")
+    return "\n".join(lines)
+
+
+async def handle_providers(msg, *, provider_modes):
+    if not await require_operator(msg):
+        return
+    await msg.answer(_render_provider_modes(provider_modes.describe()))
+
+
+async def handle_provider(msg, *, provider_modes, now_provider):
+    if not await require_operator(msg):
+        return
+    parts = _parts(msg.text)
+    if len(parts) != 3:
+        await msg.answer("usage: /provider <name> <api|subscription>")
+        return
+    provider, mode = parts[1].lower(), parts[2].lower()
+    try:
+        status = provider_modes.set(
+            provider=provider,
+            mode=mode,
+            actor=getattr(getattr(msg, "from_user", None), "id", None),
+            now=now_provider("UTC"),
+        )
+    except ProviderModeError as exc:
+        await msg.answer(f"cannot switch: {exc}")
+        return
+    except ProviderModeApplyError as exc:
+        log.error(
+            "provider_mode_switch_failed",
+            extra={"provider": provider, "restored": exc.restored},
+        )
+        if exc.restored:
+            await msg.answer("switch failed; the previous mode remains active")
+        else:
+            await msg.answer(
+                "switch failed and the previous runtime could not be restored; "
+                "restart the service to reconcile it with the saved mode"
+            )
+        return
+    except Exception as exc:  # noqa: BLE001 - operator boundary returns a redacted failure
+        log.error(
+            "provider_mode_switch_failed",
+            extra={"provider": provider, "error_type": type(exc).__name__},
+        )
+        await msg.answer("switch failed; no mode change was saved")
+        return
+    await msg.answer(
+        f"{status.provider} now uses {status.mode} credentials (effective immediately)"
+    )
+
+
 OPERATOR_COMMANDS = (
     (
         "whois",
@@ -287,6 +355,18 @@ OPERATOR_COMMANDS = (
         ("session_factory", "payments"),
         "compare the local ledger against the payment rail and report any drift",
     ),
+    (
+        "providers",
+        handle_providers,
+        ("provider_modes",),
+        "- show each LLM provider's credential mode (api vs sub2api subscription)",
+    ),
+    (
+        "provider",
+        handle_provider,
+        ("provider_modes", "now_provider"),
+        "<name> <api|subscription> - switch one provider's credential mode, live",
+    ),
 )
 
 
@@ -308,13 +388,14 @@ async def handle_unknown(msg):
 
 
 def build_operator_dispatcher(
-    *, session_factory, now_provider, payments=None
+    *, session_factory, now_provider, payments=None, provider_modes=None
 ) -> Dispatcher:
     dispatcher = Dispatcher()
     deps = {
         "session_factory": session_factory,
         "now_provider": now_provider,
         "payments": payments,
+        "provider_modes": provider_modes,
     }
     dispatcher.message.register(handle_help, Command("help"))
     for name, handler, dep_names, _usage in OPERATOR_COMMANDS:

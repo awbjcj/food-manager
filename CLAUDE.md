@@ -228,6 +228,15 @@ migration needed); `app/providers.py` is the single source of truth for the
   `chat.completions`; Gemini uses structured output, except the search/recipe
   paths which use Google Search grounding and parse JSON from text (grounding and
   structured-output mode are mutually exclusive in the SDK).
+- **Credential modes.** Each provider independently resolves to either its
+  native metered API (`api`) or the shared Sub2API gateway (`subscription`).
+  `SUB2API_BASE_URL` is the bare gateway root and each
+  `SUB2API_<PROVIDER>_TOKEN` selects that provider's subscription; configured
+  subscription credentials win by default, while providers without a token
+  keep their native API route. The operator bot's `/providers` and
+  `/provider <name> <api|subscription>` commands persist an override in
+  `ProviderModeOverride` and rebuild/adopt every live selector without a
+  process restart.
 
 ### Stability & feedback (v5.0)
 

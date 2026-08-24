@@ -17,6 +17,7 @@ import asyncio
 import logging
 import subprocess
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -85,6 +86,8 @@ from app.llm import (
 from app.nl_intent import IntentAgentSelector, build_intent_agent
 from app.operator import auth as operator_auth
 from app.operator.bot import build_operator_dispatcher
+from app.provider_mode_service import ProviderModeAdmin, effective_modes
+from app.providers import ALL_PROVIDERS, CredentialMode, ProviderCredentials
 from app.refine_service import AnthropicSearchClient
 from app.resilience import run_with_restart
 from app.scheduler import (
@@ -132,6 +135,38 @@ class LLMBundle:
     translation: TranslationLLMProviderSelector | None
 
 
+type ModeMap = Mapping[str, CredentialMode]
+
+
+def _text_models(settings: Settings) -> dict[str, str]:
+    """The model each provider uses for text-shaped work (Agno seams included)."""
+    return {
+        "anthropic": settings.anthropic_text_model,
+        "openai": settings.openai_text_model,
+        "gemini": settings.gemini_text_model,
+        "deepseek": settings.deepseek_model,
+    }
+
+
+def _resolve_credentials(
+    settings: Settings, modes: ModeMap | None
+) -> dict[str, ProviderCredentials]:
+    """``{provider: credentials}`` for every provider configured in its mode.
+
+    A provider missing from the result simply has no credentials for the mode
+    it is in, and drops out of every selector below exactly as an unconfigured
+    provider always has. ``modes=None`` means "use the configured defaults",
+    which is what tests and the pre-database bootstrap path want.
+    """
+    resolved: dict[str, ProviderCredentials] = {}
+    for provider in ALL_PROVIDERS:
+        mode = (modes or {}).get(provider) or settings.default_credential_mode(provider)
+        credentials = settings.credentials_for(provider, mode)
+        if credentials is not None:
+            resolved[provider] = credentials
+    return resolved
+
+
 def _capable_default(clients: dict, preferred: str) -> str:
     """Seed default for a fallback selector: a provider actually in ``clients``.
 
@@ -143,71 +178,44 @@ def _capable_default(clients: dict, preferred: str) -> str:
     return preferred if preferred in clients else min(clients)
 
 
-def _build_intent_agents(settings: Settings) -> IntentAgentSelector | None:
-    agents: dict = {}
-    if settings.anthropic_api_key:
-        agents["anthropic"] = build_intent_agent(
-            "anthropic",
-            model_id=settings.anthropic_text_model,
-            api_key=settings.anthropic_api_key,
+def _build_intent_agents(
+    settings: Settings, modes: ModeMap | None = None
+) -> IntentAgentSelector | None:
+    text_models = _text_models(settings)
+    agents = {
+        provider: build_intent_agent(
+            provider, model_id=text_models[provider], credentials=credentials
         )
-    if settings.openai_api_key:
-        agents["openai"] = build_intent_agent(
-            "openai",
-            model_id=settings.openai_text_model,
-            api_key=settings.openai_api_key,
-        )
-    if settings.gemini_api_key:
-        agents["gemini"] = build_intent_agent(
-            "gemini",
-            model_id=settings.gemini_text_model,
-            api_key=settings.gemini_api_key,
-        )
-    if settings.deepseek_api_key:
-        agents["deepseek"] = build_intent_agent(
-            "deepseek",
-            model_id=settings.deepseek_model,
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
-        )
+        for provider, credentials in _resolve_credentials(settings, modes).items()
+    }
     if not agents:
         return None
     return IntentAgentSelector(agents, settings.llm_provider)
 
 
-def _build_week_composers(settings: Settings) -> WeekComposerSelector | None:
-    composers: dict = {}
-    if settings.anthropic_api_key:
-        composers["anthropic"] = build_week_composer(
-            "anthropic",
-            model_id=settings.anthropic_text_model,
-            api_key=settings.anthropic_api_key,
+def _build_week_composers(
+    settings: Settings, modes: ModeMap | None = None
+) -> WeekComposerSelector | None:
+    text_models = _text_models(settings)
+    composers = {
+        provider: build_week_composer(
+            provider, model_id=text_models[provider], credentials=credentials
         )
-    if settings.openai_api_key:
-        composers["openai"] = build_week_composer(
-            "openai",
-            model_id=settings.openai_text_model,
-            api_key=settings.openai_api_key,
-        )
-    if settings.gemini_api_key:
-        composers["gemini"] = build_week_composer(
-            "gemini",
-            model_id=settings.gemini_text_model,
-            api_key=settings.gemini_api_key,
-        )
-    if settings.deepseek_api_key:
-        composers["deepseek"] = build_week_composer(
-            "deepseek",
-            model_id=settings.deepseek_model,
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
-        )
+        for provider, credentials in _resolve_credentials(settings, modes).items()
+    }
     if not composers:
         return None
     return WeekComposerSelector(composers, settings.llm_provider)
 
 
-def _build_llm_clients(settings: Settings) -> LLMBundle:
+def _build_llm_clients(settings: Settings, modes: ModeMap | None = None) -> LLMBundle:
+    """Build every capability client for the providers configured in ``modes``.
+
+    Pure in ``(settings, modes)`` — no I/O, no globals — which is what lets an
+    operator credential-mode flip simply call it again and adopt the result
+    onto the live selectors (see ``_apply_provider_modes``).
+    """
+    credentials = _resolve_credentials(settings, modes)
     image_clients = {}
     text_clients = {}
     profile_clients = {}
@@ -217,8 +225,12 @@ def _build_llm_clients(settings: Settings) -> LLMBundle:
     translation_clients: dict = {}
     search_clients: dict = {}
 
-    if settings.anthropic_api_key:
-        anthropic_sdk = AsyncAnthropic(api_key=settings.anthropic_api_key)
+    anthropic_credentials = credentials.get("anthropic")
+    if anthropic_credentials:
+        anthropic_sdk = AsyncAnthropic(
+            api_key=anthropic_credentials.api_key,
+            base_url=anthropic_credentials.base_url,
+        )
         image_clients["anthropic"] = AnthropicLLMClient(
             sdk=anthropic_sdk,
             model=settings.anthropic_model,
@@ -248,10 +260,14 @@ def _build_llm_clients(settings: Settings) -> LLMBundle:
             model=settings.anthropic_search_model,
         )
 
-    if settings.openai_api_key:
+    openai_credentials = credentials.get("openai")
+    if openai_credentials:
         from openai import AsyncOpenAI
 
-        openai_sdk = AsyncOpenAI(api_key=settings.openai_api_key)
+        openai_sdk = AsyncOpenAI(
+            api_key=openai_credentials.api_key,
+            base_url=openai_credentials.base_url,
+        )
         image_clients["openai"] = OpenAILLMClient(
             sdk=openai_sdk,
             model=settings.openai_model,
@@ -279,10 +295,21 @@ def _build_llm_clients(settings: Settings) -> LLMBundle:
         # OpenAI's models can web-search, but no ShelfLifeSearchClient is wired
         # for it yet; an OpenAI user's lookups fall back to a search provider.
 
-    if settings.gemini_api_key:
+    gemini_credentials = credentials.get("gemini")
+    if gemini_credentials:
         from google import genai
+        from google.genai import types as genai_types
 
-        gemini_sdk = genai.Client(api_key=settings.gemini_api_key)
+        gemini_sdk = genai.Client(
+            api_key=gemini_credentials.api_key,
+            # genai nests the endpoint under http_options; leaving it unset is
+            # what selects Google's own API, so only build it in gateway mode.
+            http_options=(
+                genai_types.HttpOptions(base_url=gemini_credentials.base_url)
+                if gemini_credentials.base_url
+                else None
+            ),
+        )
         image_clients["gemini"] = GeminiLLMClient(gemini_sdk, settings.gemini_model)
         text_clients["gemini"] = GeminiTextLLMClient(
             gemini_sdk, settings.gemini_text_model
@@ -304,12 +331,13 @@ def _build_llm_clients(settings: Settings) -> LLMBundle:
             gemini_sdk, settings.gemini_model
         )
 
-    if settings.deepseek_api_key:
+    deepseek_credentials = credentials.get("deepseek")
+    if deepseek_credentials:
         from openai import AsyncOpenAI
 
         deepseek_sdk = AsyncOpenAI(
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
+            api_key=deepseek_credentials.api_key,
+            base_url=deepseek_credentials.base_url,
         )
         # Still image-incapable: no image extraction / search-backed recipe
         # client here; those fall back to a capable provider via the selectors.
@@ -364,6 +392,38 @@ def _build_llm_clients(settings: Settings) -> LLMBundle:
     )
 
 
+#: Bundle fields that hold a live ProviderSelector. Two are optional (a deploy
+#: may configure no search or translation client at all), so adoption skips a
+#: pair where either side is absent.
+_BUNDLE_SELECTORS = (
+    "image",
+    "text",
+    "search",
+    "selection",
+    "recipe",
+    "nutrition",
+    "profile",
+    "translation",
+)
+
+
+def _adopt_bundle(live: LLMBundle, fresh: LLMBundle) -> None:
+    """Swap a freshly-built bundle's clients into the live selectors in place.
+
+    Every handler holds a reference to the *live* selector via
+    ``PerUserClients``, so mutating these objects is what makes an operator's
+    credential-mode flip take effect without a restart. The provider set itself
+    cannot change under a valid flip — ``set_mode`` refuses a mode the provider
+    has no credentials for — so a selector present before is present after.
+    """
+    for name in _BUNDLE_SELECTORS:
+        live_selector = getattr(live, name)
+        fresh_selector = getattr(fresh, name)
+        if live_selector is None or fresh_selector is None:
+            continue
+        live_selector.adopt_from(fresh_selector)
+
+
 async def _amain(settings: Settings) -> None:
     log = logging.getLogger("food-manager")
     log.info("startup_begin")
@@ -403,7 +463,9 @@ async def _amain(settings: Settings) -> None:
         SpoonacularSource(http=recipe_http, api_key=settings.spoonacular_api_key),
         TheMealDbSource(http=recipe_http),
     ]
-    bundle = _build_llm_clients(settings)
+    with session_factory() as session:
+        provider_modes = effective_modes(session, settings)
+    bundle = _build_llm_clients(settings, provider_modes)
     clients = PerUserClients.create(
         image=bundle.image,
         text=bundle.text,
@@ -414,8 +476,27 @@ async def _amain(settings: Settings) -> None:
         search=bundle.search,
         translation=bundle.translation,
     )
-    intent_agent = _build_intent_agents(settings)
-    composer = _build_week_composers(settings)
+    intent_agent = _build_intent_agents(settings, provider_modes)
+    composer = _build_week_composers(settings, provider_modes)
+
+    def apply_provider_modes(new_modes: ModeMap) -> None:
+        """Rebuild every client from ``new_modes`` and adopt them live."""
+        # Construct the complete replacement graph before touching any live
+        # selector. If an SDK constructor rejects its new endpoint, the old
+        # graph and the database override both remain unchanged.
+        fresh_bundle = _build_llm_clients(settings, new_modes)
+        fresh_intent_agent = _build_intent_agents(settings, new_modes)
+        fresh_composer = _build_week_composers(settings, new_modes)
+
+        _adopt_bundle(bundle, fresh_bundle)
+        for live_selector, fresh_selector in (
+            (intent_agent, fresh_intent_agent),
+            (composer, fresh_composer),
+        ):
+            if live_selector is not None and fresh_selector is not None:
+                live_selector.adopt_from(fresh_selector)
+        log.info("provider_modes_applied", extra={"modes": dict(new_modes)})
+
     # Per-provider model names so the log reflects the configured provider
     # (deepseek is text-only, hence "n/a" for image).
     _image_models = {
@@ -424,18 +505,13 @@ async def _amain(settings: Settings) -> None:
         "gemini": settings.gemini_model,
         "deepseek": "n/a",
     }
-    _text_models = {
-        "anthropic": settings.anthropic_text_model,
-        "openai": settings.openai_text_model,
-        "gemini": settings.gemini_text_model,
-        "deepseek": settings.deepseek_model,
-    }
     log.info(
         "llm_provider_configured",
         extra={
             "provider": settings.llm_provider,
             "image_model": _image_models.get(settings.llm_provider, "n/a"),
-            "text_model": _text_models.get(settings.llm_provider, "n/a"),
+            "text_model": _text_models(settings).get(settings.llm_provider, "n/a"),
+            "credential_modes": provider_modes,
         },
     )
     handler_support.DEFAULT_LLM_PROVIDER = settings.llm_provider
@@ -568,6 +644,11 @@ async def _amain(settings: Settings) -> None:
             session_factory=session_factory,
             now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
             payments=payments,
+            provider_modes=ProviderModeAdmin(
+                settings=settings,
+                session_factory=session_factory,
+                apply=apply_provider_modes,
+            ),
         )
 
     async def _alert_operator_crash(exc: Exception) -> None:

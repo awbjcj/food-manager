@@ -19,8 +19,9 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
+from app.agno_models import build_agno_model
 from app.normalization import normalize
-from app.providers import ProviderSelector
+from app.providers import ProviderCredentials, ProviderSelector
 
 log = logging.getLogger(__name__)
 
@@ -105,31 +106,11 @@ class AgnoIntentAgent:
 
 
 def build_intent_agent(
-    provider: str, *, model_id: str, api_key: str, base_url: str | None = None
+    provider: str, *, model_id: str, credentials: ProviderCredentials
 ) -> AgnoIntentAgent:
     from agno.agent import Agent
 
-    if provider == "anthropic":
-        from agno.models.anthropic import Claude
-
-        model = Claude(id=model_id, api_key=api_key)
-    elif provider == "openai":
-        from agno.models.openai import OpenAIChat
-
-        model = OpenAIChat(id=model_id, api_key=api_key)
-    elif provider == "gemini":
-        from agno.models.google import Gemini
-
-        model = Gemini(id=model_id, api_key=api_key)
-    elif provider == "deepseek":
-        from agno.models.deepseek import DeepSeek
-
-        if base_url:
-            model = DeepSeek(id=model_id, api_key=api_key, base_url=base_url)
-        else:
-            model = DeepSeek(id=model_id, api_key=api_key)
-    else:
-        raise ValueError(f"unknown intent provider {provider!r}")
+    model = build_agno_model(provider, model_id=model_id, credentials=credentials)
     return AgnoIntentAgent(
         Agent(model=model, description=_INSTRUCTIONS, output_schema=NLIntent)
     )

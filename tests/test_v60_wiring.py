@@ -29,6 +29,8 @@ def test_operator_commands_are_complete():
         "unban",
         "revenue",
         "reconcile",
+        "providers",
+        "provider",
     }
 
 

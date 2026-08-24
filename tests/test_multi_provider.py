@@ -79,6 +79,13 @@ def _settings(**overrides):
         "OPENAI_API_KEY": None,
         "GEMINI_API_KEY": None,
         "DEEPSEEK_API_KEY": None,
+        # Explicit so a developer's real .env cannot make a provider look
+        # credentialled through the sub2api gateway.
+        "SUB2API_BASE_URL": None,
+        "SUB2API_ANTHROPIC_TOKEN": None,
+        "SUB2API_OPENAI_TOKEN": None,
+        "SUB2API_GEMINI_TOKEN": None,
+        "SUB2API_DEEPSEEK_TOKEN": None,
     }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]

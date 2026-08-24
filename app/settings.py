@@ -1,9 +1,18 @@
 from typing import Any, ClassVar, Self, TypeVar, cast
+from urllib.parse import urlsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from app.providers import PROVIDER_CAPABILITIES, Provider, supports
+from app.providers import (
+    ALL_CREDENTIAL_MODES,
+    ALL_PROVIDERS,
+    PROVIDER_CAPABILITIES,
+    CredentialMode,
+    Provider,
+    ProviderCredentials,
+    supports,
+)
 
 SettingsT = TypeVar("SettingsT", bound="Settings")
 # Re-exported for callers that imported the provider type from settings; the
@@ -13,7 +22,10 @@ LLMProvider = Provider
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        hide_input_in_errors=True,
     )
 
     telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN")
@@ -43,6 +55,20 @@ class Settings(BaseSettings):
     deepseek_base_url: str = Field(
         default="https://api.deepseek.com", alias="DEEPSEEK_BASE_URL"
     )
+    # sub2api: one gateway root shared by every provider, with a per-provider
+    # token that tells the gateway which upstream subscription to spend. A
+    # provider defaults to the gateway whenever its token is set (see
+    # ``default_credential_mode``); operators override that per provider at
+    # runtime through ``app.provider_mode_service``.
+    sub2api_base_url: str | None = Field(default=None, alias="SUB2API_BASE_URL")
+    sub2api_anthropic_token: str | None = Field(
+        default=None, alias="SUB2API_ANTHROPIC_TOKEN"
+    )
+    sub2api_openai_token: str | None = Field(default=None, alias="SUB2API_OPENAI_TOKEN")
+    sub2api_gemini_token: str | None = Field(default=None, alias="SUB2API_GEMINI_TOKEN")
+    sub2api_deepseek_token: str | None = Field(
+        default=None, alias="SUB2API_DEEPSEEK_TOKEN"
+    )
     spoonacular_api_key: str | None = Field(default=None, alias="SPOONACULAR_API_KEY")
     billing_enabled: bool = Field(default=False, alias="BILLING_ENABLED")
     ingest_provider: str = Field(default="", alias="INGEST_PROVIDER")
@@ -69,6 +95,24 @@ class Settings(BaseSettings):
             raise ValueError("WEB_APP_URL must use HTTPS")
         return self
 
+    @model_validator(mode="after")
+    def validate_sub2api(self) -> "Settings":
+        if self.sub2api_base_url:
+            parsed = urlsplit(self.sub2api_base_url)
+            if parsed.scheme != "https" or not parsed.hostname:
+                raise ValueError("SUB2API_BASE_URL must be an HTTPS URL")
+            if parsed.username or parsed.password:
+                raise ValueError("SUB2API_BASE_URL must not contain credentials")
+        orphans = [p for p in ALL_PROVIDERS if self._sub2api_token_for(p)]
+        if orphans and not self.sub2api_base_url:
+            # A token with nowhere to send it would silently do nothing, and the
+            # provider would quietly stay on its metered API. Fail at boot.
+            raise ValueError(
+                "SUB2API_BASE_URL is required when any SUB2API_*_TOKEN is set "
+                f"(tokens set for: {', '.join(orphans)})"
+            )
+        return self
+
     def _api_key_for(self, provider: str) -> str | None:
         return {
             "anthropic": self.anthropic_api_key,
@@ -77,12 +121,70 @@ class Settings(BaseSettings):
             "deepseek": self.deepseek_api_key,
         }.get(provider)
 
+    def _sub2api_token_for(self, provider: str) -> str | None:
+        return {
+            "anthropic": self.sub2api_anthropic_token,
+            "openai": self.sub2api_openai_token,
+            "gemini": self.sub2api_gemini_token,
+            "deepseek": self.sub2api_deepseek_token,
+        }.get(provider)
+
+    def credentials_for(
+        self, provider: str, mode: CredentialMode
+    ) -> ProviderCredentials | None:
+        """Resolve ``provider``'s key + endpoint for ``mode``, else ``None``.
+
+        ``None`` means "not configured for that mode" and is a normal answer,
+        not an error: it is how a provider you hold no subscription for is
+        excluded from subscription mode without any allow-list.
+        """
+        if mode == "subscription":
+            token = self._sub2api_token_for(provider)
+            if not (self.sub2api_base_url and token):
+                return None
+            return ProviderCredentials(
+                provider=cast(Provider, provider),
+                mode="subscription",
+                api_key=token,
+                base_url=self.sub2api_base_url,
+            )
+        key = self._api_key_for(provider)
+        if not key:
+            return None
+        return ProviderCredentials(
+            provider=cast(Provider, provider),
+            mode="api",
+            api_key=key,
+            # DeepSeek is the one provider whose own API already needed a base
+            # URL; the rest use their SDK's built-in endpoint.
+            base_url=self.deepseek_base_url if provider == "deepseek" else None,
+        )
+
+    def default_credential_mode(self, provider: str) -> CredentialMode:
+        """The gateway wins whenever a sub2api token is configured.
+
+        Deriving the default from config rather than a hard-coded list is what
+        lets a provider you later buy a subscription for flip over by adding one
+        env var, with no code change.
+        """
+        if self.credentials_for(provider, "subscription"):
+            return "subscription"
+        return "api"
+
+    def has_credentials(self, provider: str) -> bool:
+        """True if ``provider`` is usable in *either* credential mode."""
+        return any(
+            self.credentials_for(provider, mode) is not None
+            for mode in ALL_CREDENTIAL_MODES
+        )
+
     @model_validator(mode="after")
     def validate_provider_key(self) -> "Settings":
-        if not self._api_key_for(self.llm_provider):
+        if not self.has_credentials(self.llm_provider):
             raise ValueError(
                 f"{self.llm_provider.upper()}_API_KEY is required when "
-                f"LLM_PROVIDER={self.llm_provider}"
+                f"LLM_PROVIDER={self.llm_provider} (or set SUB2API_BASE_URL "
+                f"plus SUB2API_{self.llm_provider.upper()}_TOKEN)"
             )
         # An image-incapable default provider (e.g. deepseek) cannot read
         # receipt photos; that falls back to a capable provider, so at least
@@ -91,7 +193,7 @@ class Settings(BaseSettings):
             capable = [
                 provider
                 for provider, caps in PROVIDER_CAPABILITIES.items()
-                if "image" in caps and self._api_key_for(provider)
+                if "image" in caps and self.has_credentials(provider)
             ]
             if not capable:
                 raise ValueError(
@@ -110,13 +212,13 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"INGEST_PROVIDER={self.ingest_provider} cannot process images"
                 )
-            if not self._api_key_for(self.ingest_provider):
+            if not self.has_credentials(self.ingest_provider):
                 raise ValueError(
-                    f"INGEST_PROVIDER={self.ingest_provider} has no API key"
+                    f"INGEST_PROVIDER={self.ingest_provider} has no credentials"
                 )
             return self
         for provider in self._INGEST_PREFERENCE:
-            if self._api_key_for(provider):
+            if self.has_credentials(provider):
                 object.__setattr__(self, "ingest_provider", provider)
                 break
         return self

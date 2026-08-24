@@ -309,3 +309,17 @@ class PaymentEvent(SQLModel, table=True):
     payer_telegram_id: int
     payload_json: str
     created_at: datetime
+
+
+class ProviderModeOverride(SQLModel, table=True):
+    """An operator's explicit credential-mode choice for one LLM provider.
+
+    Absence is meaningful: a provider with no row here uses the mode derived
+    from configuration (``Settings.default_credential_mode``), so this table
+    holds only deliberate overrides and never has to be backfilled.
+    """
+
+    provider: str = Field(primary_key=True)  # anthropic | openai | gemini | deepseek
+    mode: str  # "api" | "subscription"
+    updated_at: datetime
+    updated_by: int | None = None  # operator telegram_id, when known

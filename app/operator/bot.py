@@ -263,13 +263,15 @@ def _render_provider_modes(statuses) -> str:
     return "\n".join(lines)
 
 
-async def handle_providers(msg, *, provider_modes):
+async def handle_providers(msg, *, provider_modes, session_factory):
     if not await require_operator(msg):
         return
-    await msg.answer(_render_provider_modes(provider_modes.describe()))
+    with session_factory() as session:
+        statuses = provider_modes.describe(session)
+    await msg.answer(_render_provider_modes(statuses))
 
 
-async def handle_provider(msg, *, provider_modes, now_provider):
+async def handle_provider(msg, *, provider_modes, session_factory, now_provider):
     if not await require_operator(msg):
         return
     parts = _parts(msg.text)
@@ -278,12 +280,14 @@ async def handle_provider(msg, *, provider_modes, now_provider):
         return
     provider, mode = parts[1].lower(), parts[2].lower()
     try:
-        status = provider_modes.set(
-            provider=provider,
-            mode=mode,
-            actor=getattr(getattr(msg, "from_user", None), "id", None),
-            now=now_provider("UTC"),
-        )
+        with session_factory() as session:
+            status = provider_modes.set(
+                session,
+                provider=provider,
+                mode=mode,
+                actor=getattr(getattr(msg, "from_user", None), "id", None),
+                now=now_provider("UTC"),
+            )
     except ProviderModeError as exc:
         await msg.answer(f"cannot switch: {exc}")
         return
@@ -358,13 +362,13 @@ OPERATOR_COMMANDS = (
     (
         "providers",
         handle_providers,
-        ("provider_modes",),
+        ("provider_modes", "session_factory"),
         "- show each LLM provider's credential mode (api vs sub2api subscription)",
     ),
     (
         "provider",
         handle_provider,
-        ("provider_modes", "now_provider"),
+        ("provider_modes", "session_factory", "now_provider"),
         "<name> <api|subscription> - switch one provider's credential mode, live",
     ),
 )

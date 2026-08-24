@@ -7,7 +7,9 @@ matrix (including the live rebuild-and-adopt path), and the operator commands.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import UTC, datetime
+from typing import Any, cast
 
 import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -23,7 +25,7 @@ from app.provider_mode_service import (
     effective_modes,
     set_mode,
 )
-from app.providers import LLMProviderNotConfigured, ProviderSelector
+from app.providers import CredentialMode, LLMProviderNotConfigured, ProviderSelector
 from app.settings import Settings
 
 GATEWAY = "https://gw.example"
@@ -43,6 +45,7 @@ def _settings(**overrides) -> Settings:
         "SUB2API_OPENAI_TOKEN": None,
         "SUB2API_GEMINI_TOKEN": None,
         "SUB2API_DEEPSEEK_TOKEN": None,
+        "ENV": "dev",
     }
     base.update(overrides)
     return Settings(**base)  # type: ignore[arg-type]
@@ -118,8 +121,25 @@ def test_token_without_a_gateway_url_is_rejected_at_boot():
 
 @pytest.mark.parametrize("url", ["gw.example", "http://gw.example"])
 def test_gateway_url_must_be_https(url):
-    with pytest.raises(ValueError, match="must be an HTTPS"):
+    with pytest.raises(ValueError, match="must use HTTPS"):
         _settings(ANTHROPIC_API_KEY="a", SUB2API_BASE_URL=url)
+
+
+def test_development_loopback_gateway_may_use_http():
+    settings = _settings(
+        ANTHROPIC_API_KEY="a",
+        SUB2API_BASE_URL="http://127.0.0.1:8080",
+    )
+    assert settings.sub2api_base_url == "http://127.0.0.1:8080"
+
+
+def test_production_loopback_gateway_requires_https():
+    with pytest.raises(ValueError, match="must use HTTPS"):
+        _settings(
+            ANTHROPIC_API_KEY="a",
+            SUB2API_BASE_URL="http://127.0.0.1:8080",
+            ENV="prod",
+        )
 
 
 def test_settings_validation_errors_hide_secret_inputs():
@@ -173,14 +193,15 @@ def test_override_wins_over_config(session):
     assert effective_modes(session, settings)["anthropic"] == "api"
 
 
-def test_set_mode_is_idempotent_upsert(session):
+def test_selecting_config_default_clears_the_override(session):
     settings = _both_modes_settings()
     set_mode(session, settings, provider="anthropic", mode="api", actor=7, now=NOW)
-    set_mode(
+    status = set_mode(
         session, settings, provider="anthropic", mode="subscription", actor=8, now=NOW
     )
     rows = session.exec(select(ProviderModeOverride)).all()
-    assert len(rows) == 1 and rows[0].mode == "subscription"
+    assert rows == []
+    assert (status.mode, status.source) == ("subscription", "config")
 
 
 def test_set_mode_rejects_a_mode_without_credentials(session):
@@ -252,7 +273,7 @@ def test_adopt_rejects_a_default_missing_from_the_new_map():
 # --------------------------------------------------------------------------- #
 # bin/run.py: which endpoint each SDK actually gets pointed at
 # --------------------------------------------------------------------------- #
-def effective_modes_stub(settings) -> dict[str, str]:
+def effective_modes_stub(settings) -> dict[str, CredentialMode]:
     """Config-derived modes without touching a database."""
     from app.providers import ALL_PROVIDERS
 
@@ -271,7 +292,7 @@ def test_build_llm_clients_routes_subscription_providers_to_the_gateway():
     )
     bundle = _build_llm_clients(settings, effective_modes_stub(settings))
 
-    anthropic_sdk = bundle.text.for_provider("anthropic")._sdk
+    anthropic_sdk = cast(Any, bundle.text.for_provider("anthropic"))._sdk
     assert str(anthropic_sdk.base_url).startswith(GATEWAY)
     assert anthropic_sdk.api_key == "sub-a"
     # Gemini has no subscription token, so it stays on Google's own API.
@@ -288,7 +309,7 @@ def test_build_llm_clients_honours_an_api_mode_override():
         SUB2API_ANTHROPIC_TOKEN="sub-a",
     )
     bundle = _build_llm_clients(settings, {"anthropic": "api"})
-    sdk = bundle.text.for_provider("anthropic")._sdk
+    sdk = cast(Any, bundle.text.for_provider("anthropic"))._sdk
     assert not str(sdk.base_url).startswith(GATEWAY)
     assert sdk.api_key == "a-key"
 
@@ -318,13 +339,12 @@ def test_adopting_a_rebuilt_bundle_repoints_the_live_selectors():
     )
     live = _build_llm_clients(settings, {"anthropic": "subscription"})
     live_text_selector = live.text  # the reference PerUserClients would hold
-    assert str(live_text_selector.for_provider("anthropic")._sdk.base_url).startswith(
-        GATEWAY
-    )
+    live_sdk = cast(Any, live_text_selector.for_provider("anthropic"))._sdk
+    assert str(live_sdk.base_url).startswith(GATEWAY)
 
     _adopt_bundle(live, _build_llm_clients(settings, {"anthropic": "api"}))
 
-    sdk = live_text_selector.for_provider("anthropic")._sdk
+    sdk = cast(Any, live_text_selector.for_provider("anthropic"))._sdk
     assert not str(sdk.base_url).startswith(GATEWAY)
     assert sdk.api_key == "a-key"
 
@@ -347,27 +367,25 @@ def operator(monkeypatch):
     monkeypatch.setattr(operator_auth, "OPERATOR_IDS", frozenset({99}))
 
 
-def _admin(session, applied: list) -> ProviderModeAdmin:
-    class _NonClosing:
-        """Hand the same in-memory session to every call without closing it."""
-
-        def __enter__(self):
-            return session
-
-        def __exit__(self, *exc):
-            return False
-
+def _admin(applied: list) -> ProviderModeAdmin:
     return ProviderModeAdmin(
         settings=_both_modes_settings(),
-        session_factory=lambda: _NonClosing(),
         apply=applied.append,
     )
+
+
+def _session_factory(session):
+    return lambda: nullcontext(session)
 
 
 @pytest.mark.asyncio
 async def test_providers_command_lists_modes_and_alternatives(session, operator):
     msg = _Msg("/providers")
-    await handle_providers(msg, provider_modes=_admin(session, []))
+    await handle_providers(
+        msg,
+        provider_modes=_admin([]),
+        session_factory=_session_factory(session),
+    )
     reply = msg.replies[0]
     assert "anthropic: subscription (via config)" in reply
     assert "can switch to: api" in reply
@@ -379,7 +397,10 @@ async def test_provider_command_switches_and_pushes_live(session, operator):
     applied: list = []
     msg = _Msg("/provider anthropic api")
     await handle_provider(
-        msg, provider_modes=_admin(session, applied), now_provider=lambda tz: NOW
+        msg,
+        provider_modes=_admin(applied),
+        session_factory=_session_factory(session),
+        now_provider=lambda tz: NOW,
     )
     assert "anthropic now uses api credentials" in msg.replies[0]
     # The rebuild hook fired with the newly effective mode map.
@@ -391,7 +412,10 @@ async def test_provider_command_reports_missing_credentials(session, operator):
     applied: list = []
     msg = _Msg("/provider gemini subscription")
     await handle_provider(
-        msg, provider_modes=_admin(session, applied), now_provider=lambda tz: NOW
+        msg,
+        provider_modes=_admin(applied),
+        session_factory=_session_factory(session),
+        now_provider=lambda tz: NOW,
     )
     assert "cannot switch" in msg.replies[0]
     assert "SUB2API_GEMINI_TOKEN" in msg.replies[0]
@@ -408,11 +432,16 @@ async def test_provider_command_rolls_back_when_live_rebuild_fails(session, oper
         if calls == 1:
             raise RuntimeError("bad endpoint containing secret-token")
 
-    admin = _admin(session, [])
+    admin = _admin([])
     admin.apply = fail_new_rebuild
     msg = _Msg("/provider anthropic api")
 
-    await handle_provider(msg, provider_modes=admin, now_provider=lambda tz: NOW)
+    await handle_provider(
+        msg,
+        provider_modes=admin,
+        session_factory=_session_factory(session),
+        now_provider=lambda tz: NOW,
+    )
 
     assert "previous mode remains active" in msg.replies[0]
     assert "secret-token" not in msg.replies[0]
@@ -423,11 +452,16 @@ async def test_provider_command_rolls_back_when_live_rebuild_fails(session, oper
 async def test_provider_command_requires_restart_when_runtime_rollback_fails(
     session, operator
 ):
-    admin = _admin(session, [])
+    admin = _admin([])
     admin.apply = lambda _modes: (_ for _ in ()).throw(RuntimeError("secret-token"))
     msg = _Msg("/provider anthropic api")
 
-    await handle_provider(msg, provider_modes=admin, now_provider=lambda tz: NOW)
+    await handle_provider(
+        msg,
+        provider_modes=admin,
+        session_factory=_session_factory(session),
+        now_provider=lambda tz: NOW,
+    )
 
     assert "restart the service" in msg.replies[0]
     assert "secret-token" not in msg.replies[0]
@@ -438,7 +472,10 @@ async def test_provider_command_requires_restart_when_runtime_rollback_fails(
 async def test_provider_command_usage_on_bad_arity(session, operator):
     msg = _Msg("/provider anthropic")
     await handle_provider(
-        msg, provider_modes=_admin(session, []), now_provider=lambda tz: NOW
+        msg,
+        provider_modes=_admin([]),
+        session_factory=_session_factory(session),
+        now_provider=lambda tz: NOW,
     )
     assert msg.replies[0].startswith("usage:")
 
@@ -447,5 +484,9 @@ async def test_provider_command_usage_on_bad_arity(session, operator):
 async def test_provider_commands_are_operator_gated(session, monkeypatch):
     monkeypatch.setattr(operator_auth, "OPERATOR_IDS", frozenset({1}))
     msg = _Msg("/providers", sender=99)
-    await handle_providers(msg, provider_modes=_admin(session, []))
+    await handle_providers(
+        msg,
+        provider_modes=_admin([]),
+        session_factory=_session_factory(session),
+    )
     assert msg.replies == []

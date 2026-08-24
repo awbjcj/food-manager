@@ -184,7 +184,7 @@ def _build_intent_agents(
     text_models = _text_models(settings)
     agents = {
         provider: build_intent_agent(
-            provider, model_id=text_models[provider], credentials=credentials
+            model_id=text_models[provider], credentials=credentials
         )
         for provider, credentials in _resolve_credentials(settings, modes).items()
     }
@@ -199,7 +199,7 @@ def _build_week_composers(
     text_models = _text_models(settings)
     composers = {
         provider: build_week_composer(
-            provider, model_id=text_models[provider], credentials=credentials
+            model_id=text_models[provider], credentials=credentials
         )
         for provider, credentials in _resolve_credentials(settings, modes).items()
     }
@@ -489,12 +489,10 @@ async def _amain(settings: Settings) -> None:
         fresh_composer = _build_week_composers(settings, new_modes)
 
         _adopt_bundle(bundle, fresh_bundle)
-        for live_selector, fresh_selector in (
-            (intent_agent, fresh_intent_agent),
-            (composer, fresh_composer),
-        ):
-            if live_selector is not None and fresh_selector is not None:
-                live_selector.adopt_from(fresh_selector)
+        if intent_agent is not None and fresh_intent_agent is not None:
+            intent_agent.adopt_from(fresh_intent_agent)
+        if composer is not None and fresh_composer is not None:
+            composer.adopt_from(fresh_composer)
         log.info("provider_modes_applied", extra={"modes": dict(new_modes)})
 
     # Per-provider model names so the log reflects the configured provider
@@ -646,7 +644,6 @@ async def _amain(settings: Settings) -> None:
             payments=payments,
             provider_modes=ProviderModeAdmin(
                 settings=settings,
-                session_factory=session_factory,
                 apply=apply_provider_modes,
             ),
         )

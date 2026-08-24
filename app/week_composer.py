@@ -108,11 +108,11 @@ class AgnoWeekComposer:
 
 
 def build_week_composer(
-    provider: str, *, model_id: str, credentials: ProviderCredentials
+    *, model_id: str, credentials: ProviderCredentials
 ) -> AgnoWeekComposer:
     from agno.agent import Agent
 
-    model = build_agno_model(provider, model_id=model_id, credentials=credentials)
+    model = build_agno_model(model_id=model_id, credentials=credentials)
     return AgnoWeekComposer(
         Agent(model=model, description=_INSTRUCTIONS, output_schema=WeekPlanSpec)
     )

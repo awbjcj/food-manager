@@ -106,11 +106,11 @@ class AgnoIntentAgent:
 
 
 def build_intent_agent(
-    provider: str, *, model_id: str, credentials: ProviderCredentials
+    *, model_id: str, credentials: ProviderCredentials
 ) -> AgnoIntentAgent:
     from agno.agent import Agent
 
-    model = build_agno_model(provider, model_id=model_id, credentials=credentials)
+    model = build_agno_model(model_id=model_id, credentials=credentials)
     return AgnoIntentAgent(
         Agent(model=model, description=_INSTRUCTIONS, output_schema=NLIntent)
     )

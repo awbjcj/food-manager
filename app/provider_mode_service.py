@@ -182,6 +182,16 @@ def _stage_mode(
         )
 
     row = session.get(ProviderModeOverride, provider)
+    if mode == settings.default_credential_mode(provider):
+        if row is not None:
+            session.delete(row)
+        session.flush()
+        return ProviderModeStatus(
+            provider=provider,  # type: ignore[arg-type]
+            mode=mode,  # type: ignore[arg-type]
+            source="config",
+            available_modes=_available_modes(settings, provider),
+        )
     if row is None:
         row = ProviderModeOverride(
             provider=provider, mode=mode, updated_at=now, updated_by=actor
@@ -227,50 +237,53 @@ class ProviderModeAdmin:
     """
 
     settings: Settings
-    session_factory: Callable[[], Session]
     apply: ModeApplier | None = None
 
-    def describe(self) -> list[ProviderModeStatus]:
-        with self.session_factory() as session:
-            return describe_modes(session, self.settings)
+    def describe(self, session: Session) -> list[ProviderModeStatus]:
+        return describe_modes(session, self.settings)
 
     def set(
-        self, *, provider: str, mode: str, actor: int | None, now: datetime
+        self,
+        session: Session,
+        *,
+        provider: str,
+        mode: str,
+        actor: int | None,
+        now: datetime,
     ) -> ProviderModeStatus:
         """Apply and persist one choice, rolling back either side on failure."""
-        with self.session_factory() as session:
-            previous_modes = effective_modes(session, self.settings)
-            restore_runtime = False
-            try:
-                status = _stage_mode(
-                    session,
-                    self.settings,
-                    provider=provider,
-                    mode=mode,
-                    actor=actor,
-                    now=now,
-                )
-                modes = effective_modes(session, self.settings)
-                if self.apply is not None:
-                    restore_runtime = True
-                    self.apply(modes)
-                session.commit()
-            except ProviderModeError:
-                session.rollback()
-                raise
-            except Exception:  # noqa: BLE001 - rollback covers DB and arbitrary SDK constructors
-                session.rollback()
-                restored = True
-                if self.apply is not None and restore_runtime:
-                    try:
-                        self.apply(previous_modes)
-                    except Exception:  # noqa: BLE001 - recovery must contain any SDK failure
-                        restored = False
-                        log.critical(
-                            "provider_mode_runtime_rollback_failed",
-                            extra={"provider": provider, "mode": mode},
-                        )
-                raise ProviderModeApplyError(restored=restored) from None
+        previous_modes = effective_modes(session, self.settings)
+        restore_runtime = False
+        try:
+            status = _stage_mode(
+                session,
+                self.settings,
+                provider=provider,
+                mode=mode,
+                actor=actor,
+                now=now,
+            )
+            modes = effective_modes(session, self.settings)
+            if self.apply is not None:
+                restore_runtime = True
+                self.apply(modes)
+            session.commit()
+        except ProviderModeError:
+            session.rollback()
+            raise
+        except Exception:  # noqa: BLE001 - rollback covers DB and arbitrary SDK constructors
+            session.rollback()
+            restored = True
+            if self.apply is not None and restore_runtime:
+                try:
+                    self.apply(previous_modes)
+                except Exception:  # noqa: BLE001 - recovery must contain any SDK failure
+                    restored = False
+                    log.critical(
+                        "provider_mode_runtime_rollback_failed",
+                        extra={"provider": provider, "mode": mode},
+                    )
+            raise ProviderModeApplyError(restored=restored) from None
         log.info(
             "provider_mode_set",
             extra={"provider": provider, "mode": mode, "actor": actor},

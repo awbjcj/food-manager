@@ -22,10 +22,9 @@ from typing import Any
 from app.providers import ProviderCredentials
 
 
-def build_agno_model(
-    provider: str, *, model_id: str, credentials: ProviderCredentials
-) -> Any:
-    """Construct the Agno model for ``provider`` honouring its credential mode."""
+def build_agno_model(*, model_id: str, credentials: ProviderCredentials) -> Any:
+    """Construct the Agno model identified by the resolved credentials."""
+    provider = credentials.provider
     api_key = credentials.api_key
     base_url = credentials.base_url
 
@@ -54,5 +53,7 @@ def build_agno_model(
     if provider == "deepseek":
         from agno.models.deepseek import DeepSeek
 
-        return DeepSeek(id=model_id, api_key=api_key, base_url=base_url)
+        if base_url:
+            return DeepSeek(id=model_id, api_key=api_key, base_url=base_url)
+        return DeepSeek(id=model_id, api_key=api_key)
     raise ValueError(f"unknown agno provider {provider!r}")

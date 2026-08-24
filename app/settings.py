@@ -99,8 +99,18 @@ class Settings(BaseSettings):
     def validate_sub2api(self) -> "Settings":
         if self.sub2api_base_url:
             parsed = urlsplit(self.sub2api_base_url)
-            if parsed.scheme != "https" or not parsed.hostname:
-                raise ValueError("SUB2API_BASE_URL must be an HTTPS URL")
+            is_dev_loopback = self.env == "dev" and parsed.hostname in {
+                "localhost",
+                "127.0.0.1",
+                "::1",
+            }
+            if not parsed.hostname or (
+                parsed.scheme != "https"
+                and not (parsed.scheme == "http" and is_dev_loopback)
+            ):
+                raise ValueError(
+                    "SUB2API_BASE_URL must use HTTPS (development loopback may use HTTP)"
+                )
             if parsed.username or parsed.password:
                 raise ValueError("SUB2API_BASE_URL must not contain credentials")
         orphans = [p for p in ALL_PROVIDERS if self._sub2api_token_for(p)]

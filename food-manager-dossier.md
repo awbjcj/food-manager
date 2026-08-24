@@ -2,7 +2,7 @@
 repo_url: https://github.com/awbjcj/food-manager
 repo_name: food-manager
 role: sole author
-generated_at: 2026-08-05
+generated_at: 2026-08-24
 ---
 
 # Project: food-manager
@@ -22,24 +22,27 @@ photographs a receipt, a vision-capable LLM extracts line items (`app/llm.py`,
 FoodKeeper table → web-search → default-fallback chain
 (`app/frozen_shelf_life.py`), and a scheduled per-user digest surfaces items
 due within seven days (`app/scheduler.py`). On top of the pantry sits an AI
-recipe engine (`/cook`, now backed by a real Spoonacular/TheMealDB source
-chain — `app/cook/recipe_source.py`), a multi-day meal planner (`/plan`,
+recipe engine (`/cook`, backed by a real Spoonacular/TheMealDB source chain —
+`app/cook/recipe_source.py`), a multi-day meal planner (`/plan`,
 `app/plan_service.py`), natural-language input (`app/nl_intent.py`), and a
-metered multi-household subscription business with Telegram Stars payments
-and an operator bot (`app/billing/`, `app/operator/`) — all built on **four
-interchangeable LLM providers** (Anthropic, OpenAI, Google Gemini, DeepSeek)
-selected per user through one generic capability-aware selector base class,
-now specialized into **9 capability seams** (`app/providers.py`). The
-repository is the work of a **sole author** across three git identities
-(`awbjcj`/`wujiajin0303@gmail.com`, `David Wu`/`awbjcj@users.noreply.github.com`,
-`awbjcj`/`awbjcj@gmail.com`) — 353 of 359 commits, the rest split between
-`dependabot[bot]` (5) and `copilot-swe-agent[bot]` (1) (`git shortlog -sne`).
-It is an **actively shipped** project developed over roughly ten weeks and
-counting: spec-and-plan documents for twenty-plus versioned iterations
-(v1 → v6.0) live under `docs/superpowers/`, and the codebase is backed by 632
+metered multi-household subscription business with Telegram Stars payments,
+a Telegram Mini App web dashboard, and an operator bot (`app/billing/`,
+`app/operator/`) — all built on **four interchangeable LLM providers**
+(Anthropic, OpenAI, Google Gemini, DeepSeek) selected per user through one
+generic capability-aware selector base class, specialized into **9 capability
+seams** (`app/providers.py`), with each provider additionally switchable at
+runtime between its own metered API key and a shared `sub2api` subscription
+gateway (`app/provider_mode_service.py`). The repository is the work of a
+**sole author** across three git identities (`awbjcj`/`wujiajin0303@gmail.com`,
+`David Wu`/`awbjcj@users.noreply.github.com`, `awbjcj`/`awbjcj@gmail.com`) —
+386 of 392 commits, the rest split between `dependabot[bot]` (5) and
+`copilot-swe-agent[bot]` (1) (`git log --format='%an <%ae>' | sort | uniq -c`).
+It is an **actively shipped** project developed over roughly thirteen weeks
+and counting: spec-and-plan documents for twenty-plus versioned iterations
+(v1 → v6.0) live under `docs/superpowers/`, and the codebase is backed by 735
 offline test functions.
 
-Role: sole author (353 of 359 commits, `git shortlog -sne`)
+Role: sole author (386 of 392 commits, `git log --format='%an <%ae>' | sort | uniq -c`)
 Repository: https://github.com/awbjcj/food-manager
 Timeline: 2026-05-26 – present
 
@@ -49,14 +52,15 @@ Timeline: 2026-05-26 – present
 - **Anthropic Claude API** (`anthropic` SDK) — receipt/text parse + web-search clients in `app/llm.py`; dependency `anthropic>=0.120.0,<1.0`.
 - **OpenAI API** (`openai` SDK) — parallel provider clients in `app/llm.py`, `app/cook/llm.py`; dependency `openai>=2.48.0,<3.0`.
 - **Google Gemini** (`google-genai` SDK) — all Gemini clients with structured-output mode (`response_schema` / `response_mime_type`) and Google Search grounding in `app/gemini_llm.py`; dependency `google-genai>=2.14.0,<3.0`.
-- **DeepSeek** (OpenAI-compatible `chat.completions`) — text-only provider clients in `app/deepseek_llm.py`.
-- **Agno** (agent framework) — intent classification (`app/nl_intent.py`), meal-plan week composition (`app/week_composer.py`), and taste affinity (`app/cook/affinity.py`); dependency `agno>=2.8.5`.
+- **DeepSeek** (OpenAI-Responses-API-compatible) — text and native `web_search`-tool provider clients in `app/deepseek_llm.py`.
+- **Agno** (agent framework) — intent classification (`app/nl_intent.py`), meal-plan week composition (`app/week_composer.py`), and taste affinity (`app/cook/affinity.py`); dependency `agno>=2.8.5`; per-provider model construction centralized in `app/agno_models.py`.
+- **aiohttp** — the Telegram Mini App HTTP server (`app/webapp.py`, `MiniAppApi`), serving account/subscription management to a web dashboard; dependency `aiohttp` (also underlies `aiogram`'s transport).
 - **Spoonacular API** — real-source recipe candidates in `app/cook/recipe_source.py`, wired into the live `/cook` pipeline via `app/cook/service.py`.
 - **TheMealDB API** — secondary real recipe source in `app/cook/recipe_source.py`.
 - **aiogram 3** — async Telegram bot handlers and dispatcher in `app/bot.py`; dependency `aiogram>=3.30.0,<4.0`.
-- **SQLModel / SQLAlchemy** — 16 ORM table models in `app/models.py` (`Household`, `User`, `PantryItem`, `Subscription`, `LedgerEntry`, `MealPlan`, …).
+- **SQLModel / SQLAlchemy** — 18 ORM table models in `app/models.py` (`Household`, `User`, `PantryItem`, `Subscription`, `LedgerEntry`, `MealPlan`, `ProviderModeOverride`, …).
 - **SQLite** — application datastore; `DATABASE_PATH` engine wiring in `app/db.py`, `.backup-TIMESTAMP` rotation in `app/backup.py`.
-- **Alembic** — 17 schema migrations under `migrations/versions/`; dependency `alembic>=1.18.5,<2.0`.
+- **Alembic** — 20 schema migrations under `migrations/versions/`; dependency `alembic>=1.18.5,<2.0`.
 - **Pydantic v2 / pydantic-settings** — typed LLM result schemas and env-var settings in `app/settings.py`; dependencies `pydantic>=2.7,<3.0`, `pydantic-settings>=2.14.2,<3.0`.
 - **APScheduler** — per-user cron digest jobs in `app/scheduler.py`; dependency `apscheduler>=3.11.3,<4.0`.
 - **httpx** — async transport underlying provider calls; dependency `httpx>=0.28.1`.
@@ -115,25 +119,48 @@ Timeline: 2026-05-26 – present
   (duration_ms, attempts) and wrapped polling in an exponential-backoff
   restart supervisor (`run_with_restart`) with rate-limited owner alerts on
   failure (`app/resilience.py`, `app/alerts.py`, `app/llm_transport.py`).
+- **Made every LLM provider's credential source hot-swappable without a
+  restart**, routing each of the four providers independently between its own
+  metered API key and a shared `sub2api` subscription gateway: config picks a
+  safe default per-provider (subscription only when a gateway token exists,
+  `Settings.default_credential_mode`), an operator can override one provider
+  live via `/provider <name> <api|subscription>`, and the override is ignored
+  the moment its backing credential disappears rather than resolving to a
+  client that can never be built (`app/provider_mode_service.py`,
+  `migrations/versions/0020_provider_mode_override.py`).
+- **Collapsed four Agno SDKs' incompatible base-url wiring into one function**:
+  `Claude`/`Gemini` take a gateway root nested inside `client_params`,
+  `OpenAIChat`/`DeepSeek` take it as a plain kwarg — `build_agno_model`
+  (`app/agno_models.py`) is the single place both Agno seams (intent
+  classification, week composition) go through so a sub2api-routed provider
+  needs no per-seam special-casing.
+- **Validated Telegram Mini App requests without a database round trip** by
+  HMAC-SHA256-verifying `Telegram.WebApp.initData` against the bot token
+  (`WebAppData`-keyed secret, constant-time comparison via
+  `hmac.compare_digest`) and rejecting any payload whose `auth_date` is more
+  than 10 minutes old, in a fail-closed helper the Mini App HTTP layer calls
+  before touching any account data (`app/webapp_auth.py::validate_init_data`,
+  consumed by `app/webapp.py::MiniAppApi`).
 
 ## Quantified outcomes
 
-- **632 test functions across 71 files, running fully offline** — `grep -rh "def test_" tests | wc -l` → 632; `find tests -name "*.py" | wc -l` → 71; the LLM is faked via a `FakeLLMClient` protocol implementation (`tests/fakes.py`).
-- **~16.3k LOC of application code across 82 modules** (~32.7k LOC total including tests) — `find app -name "*.py" | wc -l` → 82; `find app -name "*.py" | xargs wc -l` → 16,349; total Python `wc -l` (excluding `.venv`) → 32,704.
-- **4 LLM providers unified behind one selector, now spanning 9 capability seams** — `Provider` = `("anthropic","openai","gemini","deepseek")` and `grep -rn "class .*(ProviderSelector" app` → 9 (`app/providers.py`).
-- **16 database tables under 17 Alembic migrations** — `grep -c "table=True" app/models.py` → 16; `find migrations/versions -name "*.py" | wc -l` → 17.
-- **353 of 359 commits authored solo over ~10 weeks** — `git rev-list --count HEAD` → 359; `git shortlog -sne` shows one person across three git identities (353 commits) plus `dependabot[bot]` (5) and `copilot-swe-agent[bot]` (1); `git log` range 2026-05-26 → present.
+- **735 test functions across 80 files, running fully offline** — `grep -rh "def test_" tests | wc -l` → 735; `find tests -name "*.py" | wc -l` → 80; the LLM is faked via a `FakeLLMClient` protocol implementation (`tests/fakes.py`).
+- **~18.9k LOC of application code across 90 modules** (~37.6k LOC total including tests) — `find app -name "*.py" | wc -l` → 90; `find app -name "*.py" | xargs wc -l` → 18,911; total Python `wc -l` (excluding `.venv`) → 37,589.
+- **4 LLM providers unified behind one selector, spanning 9 capability seams**, each additionally switchable between 2 credential modes at runtime — `Provider` = `("anthropic","openai","gemini","deepseek")`, `grep -rn "class .*(ProviderSelector" app` → 9 (`app/providers.py`), `CredentialMode` = `("api","subscription")` (`app/providers.py`).
+- **18 database tables under 20 Alembic migrations** — `grep -c "table=True" app/models.py` → 18; `find migrations/versions -name "*.py" | wc -l` → 20.
+- **386 of 392 commits authored solo over ~13 weeks** — `git rev-list --count HEAD` → 392; `git log --format='%an <%ae>' | sort | uniq -c` shows one person across three git identities (386 commits) plus `dependabot[bot]` (5) and `copilot-swe-agent[bot]` (1); `git log` range 2026-05-26 → 2026-08-19 (working tree has unreleased commits in progress).
 - **20+ shipped iterations documented** as paired spec + plan files (v1 → v6.0, phases 1–4) under `docs/superpowers/specs/` and `docs/superpowers/plans/`.
 - **Runtime performance / latency / coverage-percentage:** None evidenced — no benchmark, profiling, or coverage artifact is checked into the repository; omitted rather than estimated.
 
 ## Skills demonstrated
 
 Languages: Python, SQL
-Frameworks: aiogram, Agno, APScheduler, Pydantic (aliases: pydantic-settings)
+Frameworks: aiogram, aiohttp, Agno, APScheduler, Pydantic (aliases: pydantic-settings)
 Databases: SQLite, SQLModel, SQLAlchemy, Alembic
-AI & LLM Engineering: Multi-provider LLM orchestration, Vision/multimodal parsing, Structured output, Retrieval-augmented generation (aliases: RAG), Agent frameworks, Prompt engineering, Provider capability routing, Cost metering
+AI & LLM Engineering: Multi-provider LLM orchestration, Vision/multimodal parsing, Structured output, Retrieval-augmented generation (aliases: RAG), Agent frameworks, Prompt engineering, Provider capability routing, Cost metering, LLM gateway integration (aliases: sub2api, subscription-to-API routing)
 Payments & Billing: Telegram Stars, Quota metering, Subscription entitlements
-Architecture: Dependency injection (aliases: protocol-based seams), Capability-matrix provider abstraction, Stateless UI design, Multi-tenancy (aliases: household model), Internationalization (aliases: i18n), Retry and backoff design
+Security: HMAC signature verification, Timing-safe comparison (aliases: constant-time comparison), Fail-closed authentication, Replay-window validation
+Architecture: Dependency injection (aliases: protocol-based seams), Capability-matrix provider abstraction, Credential-mode abstraction (aliases: runtime credential routing), Stateless UI design, Multi-tenancy (aliases: household model), Internationalization (aliases: i18n), Retry and backoff design
 Testing: Pytest, Architecture testing (aliases: AST-based tests), Test doubles (aliases: fakes, protocol fakes), Deterministic time testing (aliases: freezegun)
 Reliability & Operations: Docker, GitHub Actions, Structured logging, Exponential backoff, Dependency auditing (aliases: pip-audit)
 Tooling: uv, Ruff, Pyright, Git

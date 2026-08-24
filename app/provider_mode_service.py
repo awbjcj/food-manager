@@ -25,6 +25,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from sqlmodel import Session, select
 
@@ -52,6 +53,9 @@ class ProviderModeApplyError(RuntimeError):
         self.restored = restored
 
 
+ModeSource = Literal["config", "override"]
+
+
 @dataclass(frozen=True)
 class ProviderModeStatus:
     """One provider's resolved mode plus the context an operator needs to act."""
@@ -59,7 +63,7 @@ class ProviderModeStatus:
     provider: Provider
     mode: CredentialMode
     #: "override" when an operator set it, "config" when derived from env.
-    source: str
+    source: ModeSource
     #: Modes this provider actually has credentials for, in canonical order.
     available_modes: tuple[CredentialMode, ...]
     updated_at: datetime | None = None

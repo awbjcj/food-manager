@@ -39,4 +39,5 @@ export interface AccountData {
   availableProviders: string[]
   botUsername: string | null
   billingEnabled: boolean
+  hostedFeaturesEnabled: boolean
 }

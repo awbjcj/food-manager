@@ -283,9 +283,7 @@ def _build_llm_clients(settings: Settings, modes: ModeMap | None = None) -> LLMB
         selection_clients["openai"] = OpenAISelectionLLM(
             openai_sdk, settings.openai_model
         )
-        recipe_clients["openai"] = OpenAIRecipeLLM(
-            openai_sdk, settings.openai_model
-        )
+        recipe_clients["openai"] = OpenAIRecipeLLM(openai_sdk, settings.openai_model)
         nutrition_clients["openai"] = OpenAINutritionLLM(
             openai_sdk, settings.openai_model
         )
@@ -327,9 +325,7 @@ def _build_llm_clients(settings: Settings, modes: ModeMap | None = None) -> LLMB
         translation_clients["gemini"] = GeminiTranslationLLMClient(
             gemini_sdk, settings.gemini_text_model
         )
-        search_clients["gemini"] = GeminiSearchClient(
-            gemini_sdk, settings.gemini_model
-        )
+        search_clients["gemini"] = GeminiSearchClient(gemini_sdk, settings.gemini_model)
 
     deepseek_credentials = credentials.get("deepseek")
     if deepseek_credentials:
@@ -456,7 +452,7 @@ async def _amain(settings: Settings) -> None:
     log.info("migration_ok")
 
     bot = Bot(token=settings.telegram_bot_token)
-    payments = StarsPaymentProvider(bot) if settings.billing_enabled else None
+    payments = StarsPaymentProvider(bot) if settings.effective_billing_enabled else None
     alerter = OwnerAlerter(bot, settings.allowed_telegram_user_id)
     recipe_http = httpx.AsyncClient()
     recipe_sources = [
@@ -514,13 +510,15 @@ async def _amain(settings: Settings) -> None:
     )
     handler_support.DEFAULT_LLM_PROVIDER = settings.llm_provider
     handler_support.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
-    handler_support.OPEN_REGISTRATION = settings.open_registration
+    handler_support.OPEN_REGISTRATION = settings.effective_open_registration
+    handler_support.MULTI_TENANT_ENABLED = settings.hosted_features_enabled
     # Keep the historical module attributes coherent for integrations that
     # inspect app.bot, while handler_support remains the runtime source of truth.
     bot_mod.DEFAULT_LLM_PROVIDER = settings.llm_provider
     bot_mod.ALLOWED_TELEGRAM_USER_ID = settings.allowed_telegram_user_id
-    bot_mod.OPEN_REGISTRATION = settings.open_registration
-    meter_mod.BILLING_ENABLED = settings.billing_enabled
+    bot_mod.OPEN_REGISTRATION = settings.effective_open_registration
+    meter_mod.BILLING_ENABLED = settings.effective_billing_enabled
+    meter_mod.METERING_ENABLED = settings.hosted_features_enabled
     client_set_mod.INGEST_PROVIDER = settings.ingest_provider
     cook_service_mod.COOK_COST_CEILING_MICROS = settings.cook_cost_ceiling_micros
     plan_service_mod.PLAN_COST_CEILING_MICROS = settings.plan_cost_ceiling_micros
@@ -551,10 +549,12 @@ async def _amain(settings: Settings) -> None:
             session_factory=session_factory,
             bot_token=settings.telegram_bot_token,
             payments=payments,
-            billing_enabled=settings.billing_enabled,
+            billing_enabled=settings.effective_billing_enabled,
             available_providers=bundle.text.available_providers,
             bot_username=bot_username,
             static_dir=Path("web/dist"),
+            hosted_features_enabled=settings.hosted_features_enabled,
+            allowed_telegram_user_id=settings.allowed_telegram_user_id,
         )
     )
     await web_runner.setup()
@@ -577,7 +577,17 @@ async def _amain(settings: Settings) -> None:
             on_final_failure=_alert_digest_failure,
         )
 
-    register_all_user_digests(scheduler, session_factory=session_factory, send=send)
+    local_user_id = (
+        None
+        if settings.hosted_features_enabled
+        else settings.allowed_telegram_user_id
+    )
+    register_all_user_digests(
+        scheduler,
+        session_factory=session_factory,
+        send=send,
+        telegram_user_id=local_user_id,
+    )
     register_sweep_expired_pendings(scheduler, session_factory=session_factory)
     register_sweep_expired_cooks(scheduler, session_factory=session_factory)
 
@@ -589,10 +599,13 @@ async def _amain(settings: Settings) -> None:
 
     def on_user_created(user) -> None:
         reschedule(user)
-        if settings.open_registration:
+        if settings.effective_open_registration:
             log.info(
                 "household_registered",
-                extra={"telegram_id": user.telegram_id, "household_id": user.household_id},
+                extra={
+                    "telegram_id": user.telegram_id,
+                    "household_id": user.household_id,
+                },
             )
             asyncio.create_task(
                 alerter.alert(
@@ -615,6 +628,7 @@ async def _amain(settings: Settings) -> None:
         intent_agent=intent_agent,
         composer=composer,
         payments=payments,
+        hosted_features_enabled=settings.hosted_features_enabled,
     )
 
     scheduler.start()
@@ -624,6 +638,7 @@ async def _amain(settings: Settings) -> None:
         session_factory=session_factory,
         send=send,
         now_provider=lambda tz: datetime.now(ZoneInfo(tz)),
+        telegram_user_id=local_user_id,
     )
     if caught_up:
         log.info("digest_catch_up_done", extra={"count": caught_up})

@@ -3,7 +3,24 @@
 [![CI/CD](https://github.com/awbjcj/food-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/awbjcj/food-manager/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-A Telegram bot that tracks your household's grocery pantry and sends a daily expiry digest. Send it a photo of a receipt and it extracts the items, estimates shelf lives using your choice of Anthropic, OpenAI, Gemini, or DeepSeek, and reminds you before things go bad. Multiple people can share one household's pantry, shopping list, and food preferences, and the bot speaks English, Chinese, French, or Spanish.
+A Telegram bot and Mini App that track your household's grocery pantry, turn
+receipts into structured items, plan meals, and remind everyone before food
+expires. It supports Anthropic, OpenAI, Gemini, and DeepSeek, shared households,
+Telegram Stars subscriptions, and English, Chinese, French, and Spanish.
+
+## Try the hosted bot
+
+Use the live service at [@foodie_manager_bot](https://t.me/foodie_manager_bot).
+It is the easiest way to try receipt scanning, shared household pantries, meal
+planning, expiry reminders, and the Telegram Mini App without running a server.
+Start on the free plan, then invite your household or upgrade with Telegram
+Stars when you need more receipts, AI actions, or member seats.
+
+The hosted Mini App is served from
+[food-manager-production.up.railway.app](https://food-manager-production.up.railway.app),
+but account access is authenticated by Telegram—open it through the bot's
+**Open app** button. See [the hosted service guide](docs/hosted-service.md) for
+share-ready promotional copy and onboarding instructions.
 
 ## How it works
 
@@ -14,36 +31,51 @@ A Telegram bot that tracks your household's grocery pantry and sends a daily exp
 5. **Shelf life learning**: When you apply a `/correct` proposal, that correction can teach future imports of the same item.
 6. **Manual add**: Use `/add` for items you didn't receive a receipt for. The bot proposes parsed items before inserting them.
 7. **Recipes from your pantry**: `/cook` suggests a recipe built from what's about to expire, respecting your food profile (`/prefs`); save favorites and build a shopping list for what's missing.
-8. **Shared households**: `/invite` a household member to share your pantry, shopping list, and preferences; anyone in the household sees the same data, rendered in their own language.
+8. **Meal planning and feedback**: `/plan 3` through `/plan 7` creates a multi-day dinner plan, aggregates missing ingredients, and lets you record what was cooked so pantry quantities and waste analytics stay current.
+9. **Natural conversation**: Tell the bot “bought milk and eggs,” “ate the yogurt,” or “how long does salmon keep?” instead of memorizing every command.
+10. **Shared households**: `/invite` a household member to share your pantry, shopping list, preferences, quota, and plan; each member still controls their own language, timezone, and LLM provider.
+11. **Mini App and billing**: The Telegram Mini App provides account settings, quota visibility, Family-plan checkout, top-ups, and subscription management using Telegram Stars.
+12. **Flexible provider funding**: Operators can keep providers on metered API keys or route individual providers through an existing Sub2API-backed subscription without restarting the bot.
 
 ## Prerequisites
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/)
+- Node.js and npm (only needed for a native Mini App build; Docker includes it)
+- Or Docker Desktop / Docker Engine with Compose
 - A Telegram bot token — create one via `@BotFather`
 - An API key for at least one LLM provider capable of reading receipt photos: Anthropic, OpenAI, or Gemini (DeepSeek can't read photos and can't be the sole provider)
 - Your Telegram user ID — get it from `@userinfobot`
 
-## Local dev
+## Quick start
 
-```bash
-# 1. Install dependencies
-uv sync
+```text
+# 1. Copy .env.example to .env and fill in the Telegram fields plus one
+#    image-capable provider key.
 
-# 2. Configure environment
-cp .env.example .env
-# Fill in TELEGRAM_BOT_TOKEN, ALLOWED_TELEGRAM_USER_ID, and an API key for
-# LLM_PROVIDER (default anthropic). See "Environment variables" below for the
-# full per-provider key/model list.
+# 2. Build and start the complete stack.
+docker compose up --build -d
 
-# 3. Run database migrations
-DATABASE_PATH=./food.db uv run alembic upgrade head
-
-# 4. Start the bot
-uv run python bin/run.py
-
-# 5. Send /start from your Telegram account to create your household and user record
+# 3. Check readiness and follow startup logs.
+docker compose ps
+docker compose logs -f food-manager
 ```
+
+Open <http://localhost:8000/healthz> and expect `{"ok": true}`, then send
+`/start` to the bot from the Telegram account in
+`ALLOWED_TELEGRAM_USER_ID`. The named Docker volume preserves the SQLite
+database across restarts.
+
+Local mode is intentionally single-user and billing-free. Compose forces
+`HOSTED_FEATURES_ENABLED=false`, `OPEN_REGISTRATION=false`, and
+`BILLING_ENABLED=false`, so it does not expose household invites, public
+registration, quotas, plans, checkout, or subscription UI. Pantry tracking,
+receipt ingest, reminders, recipes, meal planning, and personal settings remain
+available.
+
+For native Windows, macOS, and Linux instructions, direct `docker build` /
+`docker run` commands, Mini App HTTPS setup, and troubleshooting, see
+[`docs/local-setup.md`](docs/local-setup.md).
 
 ### Behavior notes
 
@@ -57,7 +89,8 @@ uv run python bin/run.py
 - Any mutation to a pantry item (mark eaten / tossed / removed / snoozed /
   corrected / moved to fridge or freezer) invalidates pending corrections for
   that item in the same transaction.
-- `/stats` reports text-LLM cost broken down by action type.
+- `/stats` reports receipt accuracy, corrections, waste, estimated savings,
+  cooked-meal follow-through, and LLM cost over the last 30 days.
 - `/lang [en|zh|fr|es]` sets your language; every household member can pick
   their own — the underlying data stays in English and is translated per
   message.
@@ -120,6 +153,7 @@ reverted.
 | `/llm [anthropic\|openai\|gemini\|deepseek]` | Show or switch the LLM provider                                                   |
 | `/prefs [sentence]`                          | Show or update your household's food profile                                      |
 | `/cook`                                      | Get a recipe built from your pantry                                               |
+| `/plan [3-7]`                                | Create a 3–7 day dinner plan (default 5 days)                                     |
 | `/shopping`                                  | View your to-buy list; tap an item once bought                                    |
 | `/favorites`                                 | View saved recipes; tap to re-cook against your current pantry                    |
 | `/invite [family]`                           | Invite one person (or `family` for a reusable link) to your household             |
@@ -139,8 +173,11 @@ reverted.
 | `TELEGRAM_BOT_TOKEN`       | Yes                  | —                           | Bot token from `@BotFather`                                                                                                                                                                  |
 | `ALLOWED_TELEGRAM_USER_ID` | Yes                  | —                           | Bootstrap and default operator identity                                                                                                                                                      |
 | `OPEN_REGISTRATION`        | No                   | `false`                     | Allow new Telegram users to provision free households; existing members and invites still work when false                                                                                    |
+| `HOSTED_FEATURES_ENABLED`  | No                   | `false`                     | Enables deployment-only multi-tenant households, registration, quota/plan surfaces, and Stars billing; keep false for localhost                                                             |
 | `BILLING_ENABLED`          | No                   | `false`                     | Enforce quota and expose Stars checkout; usage is still recorded when false                                                                                                                  |
-| `INGEST_PROVIDER`          | No                   | cheapest configured         | Image-capable provider pinned for receipt ingest, independent of `/llm`                                                                                                                      |
+| `WEB_APP_URL`              | No                   | —                           | Public HTTPS root URL for the Telegram Mini App; when set, startup installs the bot's **Open app** menu button                                                                              |
+| `PORT`                     | No                   | `8000`                      | HTTP port for the Mini App, API, and `/healthz`                                                                                                                                              |
+| `INGEST_PROVIDER`          | No                   | first configured            | Image-capable provider pinned for receipt ingest, independent of `/llm`; automatic preference is Gemini, then OpenAI, then Anthropic                                                        |
 | `OPERATOR_TELEGRAM_IDS`    | No                   | `ALLOWED_TELEGRAM_USER_ID`  | Comma-separated operator Telegram IDs                                                                                                                                                        |
 | `OPERATOR_BOT_TOKEN`       | No                   | —                           | Token for the optional, separate operator bot                                                                                                                                                |
 | `LLM_PROVIDER`             | No                   | `anthropic`                 | Default provider: `anthropic`, `openai`, `gemini`, or `deepseek`. Each user can override with `/llm`. `deepseek` is text-only, so at least one image-capable provider's key must also be set |
@@ -157,20 +194,30 @@ reverted.
 | `DEEPSEEK_API_KEY`         | When using deepseek  | —                           | DeepSeek API key. DeepSeek still can't read receipt photos, but now has native web search                                                                                                    |
 | `DEEPSEEK_MODEL`           | No                   | `deepseek-v4-flash`         | DeepSeek model to use for text and search tasks                                                                                                                                              |
 | `DEEPSEEK_BASE_URL`        | No                   | `https://api.deepseek.com`  | DeepSeek API base URL (OpenAI-compatible)                                                                                                                                                    |
-| `SPOONACULAR_API_KEY`      | No                   | —                           | Optional Spoonacular key for the in-progress real-source `/cook` recipe chain (not yet wired into the live pipeline)                                                                         |
+| `SUB2API_BASE_URL`         | No                   | —                           | Shared Sub2API gateway root; HTTPS required except for loopback HTTP in `ENV=dev`                                                                                                            |
+| `SUB2API_ANTHROPIC_TOKEN`  | No                   | —                           | Anthropic subscription-routing token; makes subscription mode the default for Anthropic                                                                                                     |
+| `SUB2API_OPENAI_TOKEN`     | No                   | —                           | OpenAI subscription-routing token                                                                                                                                                            |
+| `SUB2API_GEMINI_TOKEN`     | No                   | —                           | Gemini subscription-routing token                                                                                                                                                            |
+| `SUB2API_DEEPSEEK_TOKEN`   | No                   | —                           | DeepSeek subscription-routing token                                                                                                                                                          |
+| `SPOONACULAR_API_KEY`      | No                   | —                           | Optional Spoonacular key; `/cook` and `/plan` otherwise use TheMealDB plus the configured LLM recipe source                                                                                   |
 | `COOK_COST_CEILING_MICROS` | No                   | `100000`                    | Per-`/cook` LLM spend ceiling in micro-USD ($0.10); raise if recipes come back empty                                                                                                         |
 | `PLAN_COST_CEILING_MICROS` | No                   | `150000`                    | Per-`/plan` LLM spend ceiling in micro-USD ($0.15); raise if week plans come back empty                                                                                                      |
 | `DATABASE_PATH`            | No                   | `./food.db`                 | Path to the SQLite database file                                                                                                                                                             |
 | `LOG_LEVEL`                | No                   | `INFO`                      | Logging level                                                                                                                                                                                |
 | `ENV`                      | No                   | `dev`                       | Set to `prod` for JSON-structured logs                                                                                                                                                       |
 
-Stars subscriptions renew every 30 days and are managed in Telegram Settings.
-Top-ups expire at the end of the household's current quota period.
+Stars subscriptions renew every 30 days. Household owners can cancel renewal
+from the Mini App; top-ups expire at the end of the current quota period.
+For the complete purchase, verification, top-up, and cancellation flow, see
+[`docs/telegram-subscriptions.md`](docs/telegram-subscriptions.md).
 
 ## Project docs
 
 - [`docs/adr/`](docs/adr) — architecture decision records
 - [`docs/operations.md`](docs/operations.md) — running and supervising the bot in production
+- [`docs/local-setup.md`](docs/local-setup.md) — native and Docker setup for Windows, macOS, and Linux
+- [`docs/hosted-service.md`](docs/hosted-service.md) — live bot onboarding and promotional copy
+- [`docs/telegram-subscriptions.md`](docs/telegram-subscriptions.md) — user guide for Stars subscriptions and top-ups
 - [`docs/superpowers/`](docs/superpowers) — the spec + plan for every shipped version, in order
 - [`CONTEXT.md`](CONTEXT.md) — domain glossary (ubiquitous language) used across the codebase
 - [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) — architecture and conventions reference for AI coding agents working in this repo

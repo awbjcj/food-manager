@@ -89,13 +89,13 @@ function HomeView({ data, locale, selectTab, openChat }: { data: AccountData; lo
   return <main className="page home-page">
     <Header data={data} locale={locale} />
     <section className="hero-copy"><h1>{greeting}</h1><p>{t(locale, 'home.running')}</p></section>
-    <button className="plan-band" onClick={() => selectTab('plans')}><span className="plan-dot"><Icon name="leaf" /></span><strong>{data.plan.tier === 'family' ? t(locale, 'plan.familyPlan') : t(locale, 'plan.freePlan')}</strong><span>{t(locale, 'home.viewPlans')}</span><Icon name="arrow" /></button>
-    <section className="usage-list">
+    {data.hostedFeaturesEnabled && <button className="plan-band" onClick={() => selectTab('plans')}><span className="plan-dot"><Icon name="leaf" /></span><strong>{data.plan.tier === 'family' ? t(locale, 'plan.familyPlan') : t(locale, 'plan.freePlan')}</strong><span>{t(locale, 'home.viewPlans')}</span><Icon name="arrow" /></button>}
+    {data.hostedFeaturesEnabled && <section className="usage-list">
       <UsageRow icon="receipt" label={t(locale, 'usage.receipts')} used={data.quota.receiptsUsed} limit={data.quota.receiptsLimit} locale={locale} />
       <UsageRow icon="brain" label={t(locale, 'usage.actions')} used={data.quota.actionsUsed} limit={data.quota.actionsLimit} locale={locale} />
       <p className="reset-copy"><Icon name="refresh" size={18} /> {t(locale, 'usage.resets', { date: reset })}</p>
-    </section>
-    <section><SectionLabel>{t(locale, 'home.myHousehold')}</SectionLabel><OpenRow icon="household" title={data.household.name} detail={countLabel(locale, data.household.members, 'count.member.one', 'count.member.many')} action={t(locale, 'home.manage')} onClick={() => selectTab('account')} /></section>
+    </section>}
+    {data.hostedFeaturesEnabled && <section><SectionLabel>{t(locale, 'home.myHousehold')}</SectionLabel><OpenRow icon="household" title={data.household.name} detail={countLabel(locale, data.household.members, 'count.member.one', 'count.member.many')} action={t(locale, 'home.manage')} onClick={() => selectTab('account')} /></section>}
     <section><SectionLabel>{t(locale, 'home.quickAccess')}</SectionLabel><div className="open-list">
       <OpenRow icon="pantry" title={t(locale, 'shortcut.pantry')} action="/pantry" onClick={() => openChat('pantry')} />
       <OpenRow icon="recipes" title={t(locale, 'shortcut.cook')} action="/cook" onClick={() => openChat('cook')} />
@@ -159,17 +159,17 @@ function AccountView({ data, locale, onSaved, selectTab, openChat }: { data: Acc
     <section className="page-heading"><h1>{t(locale, 'account.title')}</h1><p>{t(locale, 'account.subtitle')}</p></section>
     <div className="profile-row"><div className="avatar large">{initials}</div><div><strong>{data.user.name}</strong><span>{data.user.role === 'owner' ? t(locale, 'account.owner') : t(locale, 'account.member')}</span></div></div>
     <form onSubmit={submit}>
-      <fieldset><legend>{t(locale, 'account.household')}</legend><label>{t(locale, 'account.householdName')}<input value={form.householdName} disabled={data.user.role !== 'owner'} maxLength={80} onChange={event => setForm({ ...form, householdName: event.target.value })} /></label><p className="field-note">{t(locale, 'account.seatsUsed', { used: formatNumber(locale, data.household.members), limit: formatNumber(locale, data.household.seatCap) })}</p></fieldset>
+      <fieldset><legend>{t(locale, 'account.household')}</legend><label>{t(locale, 'account.householdName')}<input value={form.householdName} disabled={data.user.role !== 'owner'} maxLength={80} onChange={event => setForm({ ...form, householdName: event.target.value })} /></label>{data.hostedFeaturesEnabled && <p className="field-note">{t(locale, 'account.seatsUsed', { used: formatNumber(locale, data.household.members), limit: formatNumber(locale, data.household.seatCap) })}</p>}</fieldset>
       <fieldset><legend>{t(locale, 'account.dailyDigest')}</legend><label>{t(locale, 'account.deliveryTime')}<select value={form.digestHour} onChange={event => setForm({ ...form, digestHour: Number(event.target.value) })}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{formatDigestHour(locale, hour)}</option>)}</select></label><label>{t(locale, 'account.timeZone')}<select value={form.timeZone} onChange={event => setForm({ ...form, timeZone: event.target.value })}>{zones.map(zone => <option key={zone}>{zone}</option>)}</select></label></fieldset>
       <fieldset><legend>{t(locale, 'account.preferences')}</legend><label>{t(locale, 'account.language')}<select value={form.language} onChange={event => setForm({ ...form, language: event.target.value })}>{Object.entries(languageNames).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label><label>{t(locale, 'account.provider')}<select value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value })}>{data.availableProviders.map(provider => <option key={provider} value={provider}>{provider[0].toUpperCase() + provider.slice(1)}</option>)}</select></label></fieldset>
       <div className="form-actions"><button className="button primary" type="submit">{t(locale, 'account.save')}</button><button className="button secondary" type="button" onClick={() => openChat()}>{t(locale, 'account.openChat')}</button>{status && <p role="status" className="save-status">{t(locale, status)}</p>}</div>
     </form>
-    <button className="subscription-row" onClick={() => selectTab('plans')}><strong>{t(locale, 'account.subscription')}</strong><span>{data.plan.tier === 'family' ? t(locale, 'plan.familyPlan') : t(locale, 'plan.freePlan')}</span><b>{t(locale, 'home.viewPlans')}</b><Icon name="arrow" size={20} /></button>
+    {data.hostedFeaturesEnabled && <button className="subscription-row" onClick={() => selectTab('plans')}><strong>{t(locale, 'account.subscription')}</strong><span>{data.plan.tier === 'family' ? t(locale, 'plan.familyPlan') : t(locale, 'plan.freePlan')}</span><b>{t(locale, 'home.viewPlans')}</b><Icon name="arrow" size={20} /></button>}
   </main>
 }
 
-function BottomNav({ tab, locale, select }: { tab: Tab; locale: Locale; select: (tab: Tab) => void }) {
-  return <nav className="bottom-nav" aria-label={t(locale, 'nav.primary')}><button className={tab === 'home' ? 'active' : ''} onClick={() => select('home')}><Icon name="home" /><span>{t(locale, 'nav.home')}</span></button><button className={tab === 'plans' ? 'active' : ''} onClick={() => select('plans')}><Icon name="plan" /><span>{t(locale, 'nav.plans')}</span></button><button className={tab === 'account' ? 'active' : ''} onClick={() => select('account')}><Icon name="account" /><span>{t(locale, 'nav.account')}</span></button></nav>
+function BottomNav({ tab, locale, select, hostedFeaturesEnabled }: { tab: Tab; locale: Locale; select: (tab: Tab) => void; hostedFeaturesEnabled: boolean }) {
+  return <nav className="bottom-nav" aria-label={t(locale, 'nav.primary')}><button className={tab === 'home' ? 'active' : ''} onClick={() => select('home')}><Icon name="home" /><span>{t(locale, 'nav.home')}</span></button>{hostedFeaturesEnabled && <button className={tab === 'plans' ? 'active' : ''} onClick={() => select('plans')}><Icon name="plan" /><span>{t(locale, 'nav.plans')}</span></button>}<button className={tab === 'account' ? 'active' : ''} onClick={() => select('account')}><Icon name="account" /><span>{t(locale, 'nav.account')}</span></button></nav>
 }
 
 function ManageSheet({ data, locale, close, cancel }: { data: AccountData; locale: Locale; close: () => void; cancel: () => void }) {
@@ -247,9 +247,9 @@ export function App() {
   return <div className={busy ? 'app busy' : 'app'}>
     {error && <button className="error-toast" onClick={() => setError(null)} aria-label={t(locale, 'common.close')}>{t(locale, error)}<Icon name="close" size={18} /></button>}
     {tab === 'home' && <HomeView data={data} locale={locale} selectTab={setTab} openChat={openChat} />}
-    {tab === 'plans' && <PlansView data={data} locale={locale} checkout={checkout} manage={() => setManage(true)} />}
+    {tab === 'plans' && data.hostedFeaturesEnabled && <PlansView data={data} locale={locale} checkout={checkout} manage={() => setManage(true)} />}
     {tab === 'account' && <AccountView data={data} locale={locale} onSaved={setData} selectTab={setTab} openChat={openChat} />}
-    <BottomNav tab={tab} locale={locale} select={setTab} />
+    <BottomNav tab={tab} locale={locale} select={setTab} hostedFeaturesEnabled={data.hostedFeaturesEnabled} />
     {manage && <ManageSheet data={data} locale={locale} close={() => setManage(false)} cancel={cancel} />}
   </div>
 }

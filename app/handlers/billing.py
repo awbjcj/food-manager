@@ -36,7 +36,11 @@ async def handle_quota(
     session_factory,
     now_provider: NowProvider,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    hosted_features_enabled: bool = True,
 ):
+    if not hosted_features_enabled:
+        await msg.answer(t("hosted_only", "en"))
+        return
     async with _request(
         msg, session_factory=session_factory, on_user_created=on_user_created
     ) as ctx:
@@ -55,7 +59,11 @@ async def handle_buy(
     now_provider: NowProvider,
     payments=None,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    hosted_features_enabled: bool = True,
 ):
+    if not hosted_features_enabled:
+        await msg.answer(t("hosted_only", "en"))
+        return
     del now_provider
     async with _request(
         msg, session_factory=session_factory, on_user_created=on_user_created
@@ -72,7 +80,9 @@ async def handle_buy(
                     sku=sku, household_id=ctx.user.household_id
                 )
                 title = t(f"billing.sku.{sku.code}", ctx.user.lang)
-                rows.append([CallbackButton(text=f"{title} - {sku.stars} Stars", url=url)])
+                rows.append(
+                    [CallbackButton(text=f"{title} - {sku.stars} Stars", url=url)]
+                )
             await msg.answer(
                 t("billing.buy_choose", ctx.user.lang),
                 reply_markup=to_aiogram_keyboard(rows),
@@ -196,7 +206,11 @@ async def handle_billing(
     session_factory,
     now_provider: NowProvider,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    hosted_features_enabled: bool = True,
 ) -> None:
+    if not hosted_features_enabled:
+        await msg.answer(t("hosted_only", "en"))
+        return
     async with _request(
         msg, session_factory=session_factory, on_user_created=on_user_created
     ) as ctx:
@@ -216,11 +230,35 @@ async def handle_billing(
 
 
 COMMANDS = (
-    ("quota", handle_quota, ("session_factory", "now_provider", "on_user_created")),
+    (
+        "quota",
+        handle_quota,
+        (
+            "session_factory",
+            "now_provider",
+            "on_user_created",
+            "hosted_features_enabled",
+        ),
+    ),
     (
         "buy",
         handle_buy,
-        ("session_factory", "now_provider", "payments", "on_user_created"),
+        (
+            "session_factory",
+            "now_provider",
+            "payments",
+            "on_user_created",
+            "hosted_features_enabled",
+        ),
     ),
-    ("billing", handle_billing, ("session_factory", "now_provider", "on_user_created")),
+    (
+        "billing",
+        handle_billing,
+        (
+            "session_factory",
+            "now_provider",
+            "on_user_created",
+            "hosted_features_enabled",
+        ),
+    ),
 )

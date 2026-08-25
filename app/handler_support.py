@@ -18,6 +18,10 @@ DEFAULT_DIGEST_HOUR = 8
 DEFAULT_LLM_PROVIDER = "anthropic"
 ALLOWED_TELEGRAM_USER_ID: int = 0
 OPEN_REGISTRATION: bool = False
+# ``bin.run`` sets this from Settings. True preserves the established behavior
+# for directly constructed handlers/tests; the shipped local configuration
+# explicitly sets it false before polling begins.
+MULTI_TENANT_ENABLED: bool = True
 
 SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
@@ -46,13 +50,18 @@ def resolve_authorization(
     allowed_user_id: int,
     telegram_user_id: int,
     open_registration: bool = False,
+    multi_tenant_enabled: bool = True,
 ) -> AuthStatus:
     existing = session.get(User, telegram_user_id)
     if existing is not None:
+        if not multi_tenant_enabled and telegram_user_id != allowed_user_id:
+            return AuthStatus(False, None, is_bootstrap=False)
         if existing.banned:
             return AuthStatus(False, None, is_bootstrap=False)
         return AuthStatus(True, existing, is_bootstrap=False)
-    if open_registration or telegram_user_id == allowed_user_id:
+    if (
+        multi_tenant_enabled and open_registration
+    ) or telegram_user_id == allowed_user_id:
         return AuthStatus(True, None, is_bootstrap=True)
     return AuthStatus(False, None, is_bootstrap=False)
 
@@ -65,6 +74,7 @@ def authorize_and_get_user(
     chat_id: int,
     chat_type: str,
     open_registration: bool | None = None,
+    multi_tenant_enabled: bool = True,
 ) -> AuthDecision:
     status = resolve_authorization(
         session,
@@ -73,6 +83,7 @@ def authorize_and_get_user(
         open_registration=OPEN_REGISTRATION
         if open_registration is None
         else open_registration,
+        multi_tenant_enabled=multi_tenant_enabled,
     )
     if not status.allowed:
         return AuthDecision(False, None, False, "not authorized")
@@ -143,6 +154,7 @@ def authorized_callback_user(session: Session, telegram_id: int) -> User | None:
         allowed_user_id=ALLOWED_TELEGRAM_USER_ID,
         telegram_user_id=telegram_id,
         open_registration=OPEN_REGISTRATION,
+        multi_tenant_enabled=MULTI_TENANT_ENABLED,
     )
     return status.user if status.allowed else None
 
@@ -159,6 +171,7 @@ async def guard(
         telegram_user_id=msg.from_user.id,
         chat_id=msg.chat.id,
         chat_type=msg.chat.type,
+        multi_tenant_enabled=MULTI_TENANT_ENABLED,
     )
     if not decision.allowed:
         log.info(

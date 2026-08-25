@@ -25,6 +25,12 @@ successful deployment. This is a code rollback: Alembic is not downgraded
 automatically. `bin/run.py` creates a SQLite backup before migrations; restore
 that backup deliberately when a schema rollback is required.
 
+The production service must set `HOSTED_FEATURES_ENABLED=true`. This is the
+deployment boundary for public registration, shared households, quota/plan
+surfaces, and Stars subscriptions. `OPEN_REGISTRATION` and `BILLING_ENABLED`
+only take effect when that boundary is enabled. Local and Compose environments
+must leave it false.
+
 ## systemd (Linux)
 
 `/etc/systemd/system/food-manager.service`:
@@ -48,13 +54,17 @@ Then: `sudo systemctl enable --now food-manager`.
 
 ## Docker Compose
 
-    services:
-      food-manager:
-        build: .
-        env_file: .env
-        restart: unless-stopped
-        volumes:
-          - ./data:/data          # DATABASE_PATH=/data/food.db
+The checked-in `compose.yaml` is the canonical local container configuration.
+It builds the Mini App and bot image, publishes port 8000, persists
+`/data/food.db` in the `food-data` named volume, and uses the image healthcheck.
+
+    docker compose up --build -d
+    docker compose ps
+    docker compose logs -f food-manager
+
+Stop it with `docker compose down`. Do not add `--volumes` unless deleting the
+local database is intentional. See `docs/local-setup.md` for initial `.env`
+configuration and direct image commands.
 
 ## Windows (dev box)
 

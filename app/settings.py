@@ -40,10 +40,14 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-5.6-terra", alias="OPENAI_MODEL")
     openai_text_model: str = Field(default="gpt-5.6-luna", alias="OPENAI_TEXT_MODEL")
-    anthropic_search_model: str = Field(default="claude-sonnet-5", alias="ANTHROPIC_SEARCH_MODEL")
+    anthropic_search_model: str = Field(
+        default="claude-sonnet-5", alias="ANTHROPIC_SEARCH_MODEL"
+    )
     gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-3.1-pro-preview", alias="GEMINI_MODEL")
-    gemini_text_model: str = Field(default="gemini-3.5-flash", alias="GEMINI_TEXT_MODEL")
+    gemini_text_model: str = Field(
+        default="gemini-3.5-flash", alias="GEMINI_TEXT_MODEL"
+    )
     # DeepSeek is OpenAI-Responses-API-compatible; it has no image capability,
     # but does have a native web_search tool. One model field suffices since
     # a single model serves both the text and search capabilities.
@@ -70,6 +74,9 @@ class Settings(BaseSettings):
         default=None, alias="SUB2API_DEEPSEEK_TOKEN"
     )
     spoonacular_api_key: str | None = Field(default=None, alias="SPOONACULAR_API_KEY")
+    hosted_features_enabled: bool = Field(
+        default=False, alias="HOSTED_FEATURES_ENABLED"
+    )
     billing_enabled: bool = Field(default=False, alias="BILLING_ENABLED")
     ingest_provider: str = Field(default="", alias="INGEST_PROVIDER")
     operator_telegram_ids: str = Field(default="", alias="OPERATOR_TELEGRAM_IDS")
@@ -246,6 +253,16 @@ class Settings(BaseSettings):
             raise ValueError(
                 "OPERATOR_TELEGRAM_IDS must contain comma-separated integers"
             ) from exc
+
+    @property
+    def effective_billing_enabled(self) -> bool:
+        """Billing is a hosted-service concern, never a localhost concern."""
+        return self.hosted_features_enabled and self.billing_enabled
+
+    @property
+    def effective_open_registration(self) -> bool:
+        """Public registration is disabled for the single-user local edition."""
+        return self.hosted_features_enabled and self.open_registration
 
     @classmethod
     def load(cls) -> Self:

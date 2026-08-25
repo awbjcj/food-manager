@@ -1,0 +1,22 @@
+services:
+  food-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: food-manager:local
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/food.db
+      PORT: "8000"
+      HOSTED_FEATURES_ENABLED: "false"
+      BILLING_ENABLED: "false"
+      OPEN_REGISTRATION: "false"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    volumes:
+      - food-data:/data
+
+volumes:
+  food-data:

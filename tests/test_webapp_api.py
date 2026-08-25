@@ -99,6 +99,46 @@ async def test_account_api_uses_signed_identity_and_canonical_billing_data(web_s
         assert body["household"]["name"] == "The Chen kitchen"
         assert body["plan"]["tier"] == "free"
         assert body["plans"][1]["code"] == "family_monthly"
+        assert body["hostedFeaturesEnabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_local_account_omits_plan_surfaces_and_does_not_create_billing_rows(
+    web_state, tmp_path
+):
+    sessions, payments, _hosted_app = web_state
+    with sessions() as session:
+        sub = session.get(Subscription, 1)
+        assert sub is not None
+        session.delete(sub)
+        session.commit()
+    app = build_web_app(
+        session_factory=sessions,
+        bot_token=TOKEN,
+        payments=payments,
+        billing_enabled=True,
+        available_providers=("gemini", "openai"),
+        bot_username="foodie_manager_bot",
+        static_dir=Path(tmp_path / "missing-local-static"),
+        hosted_features_enabled=False,
+        allowed_telegram_user_id=42,
+    )
+    async with TestClient(TestServer(app)) as client:
+        account = await client.get("/api/account", headers={"Authorization": _auth(42)})
+        checkout = await client.post(
+            "/api/checkout",
+            headers={"Authorization": _auth(42)},
+            json={"sku": "family_monthly"},
+        )
+        body = await account.json()
+    assert account.status == 200
+    assert body["hostedFeaturesEnabled"] is False
+    assert body["billingEnabled"] is False
+    assert body["plans"] == []
+    assert body["plan"]["tier"] == "local"
+    assert checkout.status == 503
+    with sessions() as session:
+        assert session.get(Subscription, 1) is None
 
 
 @pytest.mark.asyncio

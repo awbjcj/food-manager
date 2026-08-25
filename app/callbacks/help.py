@@ -34,7 +34,12 @@ async def handle_help_callback(cb, *, session_factory) -> None:
         lang = user.lang
     topic = (cb.data or "").split(":", 1)[1] if ":" in (cb.data or "") else "menu"
     await dispatch_answer(cb)
-    if topic in HELP_TOPICS:
+    visible_topics = (
+        HELP_TOPICS
+        if handler_support.MULTI_TENANT_ENABLED
+        else tuple(item for item in HELP_TOPICS if item != "household")
+    )
+    if topic in visible_topics:
         keyboard = to_aiogram_keyboard(
             [[CallbackButton(text=t("btn.help.back", lang), callback_data="help:menu")]]
         )

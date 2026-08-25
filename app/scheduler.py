@@ -153,6 +153,7 @@ async def catch_up_missed_digests(
     session_factory: SessionFactory,
     send: Callable[..., Awaitable[None]],
     now_provider: Callable[[str], datetime],
+    telegram_user_id: int | None = None,
 ) -> int:
     """Send digests missed while the process was down.
 
@@ -162,7 +163,10 @@ async def catch_up_missed_digests(
     morning digest instead of losing it.
     """
     with session_factory() as session:
-        users = list(session.exec(select(User)).all())
+        statement = select(User)
+        if telegram_user_id is not None:
+            statement = statement.where(User.telegram_id == telegram_user_id)
+        users = list(session.exec(statement).all())
     sent = 0
     for user in users:
         now = now_provider(user.tz)
@@ -218,9 +222,13 @@ def register_all_user_digests(
     *,
     session_factory: SessionFactory,
     send: Callable[..., Awaitable[None]],
+    telegram_user_id: int | None = None,
 ) -> None:
     with session_factory() as session:
-        users = list(session.exec(select(User)).all())
+        statement = select(User)
+        if telegram_user_id is not None:
+            statement = statement.where(User.telegram_id == telegram_user_id)
+        users = list(session.exec(statement).all())
     for user in users:
         schedule_user_digest(scheduler, user, send=send)
 

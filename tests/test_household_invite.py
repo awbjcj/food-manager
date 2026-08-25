@@ -448,6 +448,23 @@ def test_resolve_authorization_rejects_stranger(session):
     assert status.user is None
 
 
+def test_local_mode_rejects_an_existing_non_bootstrap_member(session):
+    session.add(
+        User(
+            telegram_id=2, chat_id=22, household_id=1, role="member", created_at=_now()
+        )
+    )
+    session.commit()
+    status = resolve_authorization(
+        session,
+        allowed_user_id=1,
+        telegram_user_id=2,
+        multi_tenant_enabled=False,
+    )
+    assert status.allowed is False
+    assert status.user is None
+
+
 def test_authorize_admits_second_household_member(session):
     session.add(
         User(
@@ -493,6 +510,21 @@ async def test_handle_invite_replies_with_link_and_code(session, monkeypatch):
     token = session.exec(select(HouseholdInvite)).one().token
     assert token in reply
     assert f"https://t.me/PantryBot?start={token}" in reply
+
+
+@pytest.mark.asyncio
+async def test_local_mode_invite_promotes_hosted_bot_without_creating_token(session):
+    bot = MagicMock()
+    msg = _msg("/invite", user_id=1)
+    await handle_invite(
+        msg,
+        session_factory=lambda: session,
+        bot=bot,
+        hosted_features_enabled=False,
+    )
+    assert "foodie_manager_bot" in _reply(msg)
+    assert session.exec(select(HouseholdInvite)).all() == []
+    bot.get_me.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -640,10 +672,7 @@ async def test_handle_start_routes_existing_member_quick_access(session, monkeyp
 
 
 def test_mini_app_shortcuts_cover_the_core_zero_input_commands():
-    commands = {
-        payload: route[0]
-        for payload, route in _QUICK_ACCESS_COMMANDS.items()
-    }
+    commands = {payload: route[0] for payload, route in _QUICK_ACCESS_COMMANDS.items()}
 
     assert {
         "qa_pantry": "pantry",

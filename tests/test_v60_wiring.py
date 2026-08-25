@@ -10,6 +10,7 @@ def test_registration_and_billing_default_closed():
     assert handler_support.OPEN_REGISTRATION is False
     assert bot_mod.OPEN_REGISTRATION is False
     assert meter.BILLING_ENABLED is False
+    assert meter.METERING_ENABLED is True
 
 
 def test_customer_commands_include_all_billing_surfaces():

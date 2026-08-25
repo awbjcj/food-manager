@@ -130,6 +130,7 @@ async def handle_start(
     on_user_created: Callable[[User], None],
     bot=None,
     quick_access: Callable[[str, object], Awaitable[bool]] | None = None,
+    hosted_features_enabled: bool = True,
 ) -> None:
     with session_factory() as session:
         token = _start_token(msg.text)
@@ -145,7 +146,7 @@ async def handle_start(
         # existing members ignore any token and get the normal start message
         # (unlike /join, which tells an existing member they're already in a
         # household — a deep-link re-tap should just be a friendly no-op).
-        if token is not None and existing_user is None:
+        if token is not None and existing_user is None and hosted_features_enabled:
             await _try_redeem_invite(
                 msg, session, token=token, on_user_created=on_user_created, bot=bot
             )
@@ -156,6 +157,7 @@ async def handle_start(
             telegram_user_id=msg.from_user.id,
             chat_id=msg.chat.id,
             chat_type=msg.chat.type,
+            multi_tenant_enabled=hosted_features_enabled,
         )
         if not decision.allowed:
             log.info(
@@ -171,7 +173,7 @@ async def handle_start(
             t("start.ready", user.lang, tz=user.tz, digest_hour=user.digest_hour)
         )
         await msg.answer(t("start.tour", user.lang))
-        if decision.created:
+        if decision.created and hosted_features_enabled:
             await msg.answer(t("start.welcome_free", user.lang))
 
 
@@ -181,7 +183,11 @@ async def handle_invite(
     session_factory: _SessionFactory,
     bot: Bot,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    hosted_features_enabled: bool = True,
 ) -> None:
+    if not hosted_features_enabled:
+        await msg.answer(t("hosted_only", DEFAULT_LANG))
+        return
     async with _request(
         msg,
         session_factory=session_factory,
@@ -218,7 +224,11 @@ async def handle_join(
     session_factory: _SessionFactory,
     on_user_created: Callable[[User], None] = _noop_user_created,
     bot=None,
+    hosted_features_enabled: bool = True,
 ) -> None:
+    if not hosted_features_enabled:
+        await msg.answer(t("hosted_only", DEFAULT_LANG))
+        return
     with session_factory() as session:
         try:
             token = parse_invite_token(list((msg.text or "").split()[1:]))
@@ -237,7 +247,11 @@ async def handle_household(
     *,
     session_factory: _SessionFactory,
     on_user_created: Callable[[User], None] = _noop_user_created,
+    hosted_features_enabled: bool = True,
 ) -> None:
+    if not hosted_features_enabled:
+        await msg.answer(t("hosted_only", DEFAULT_LANG))
+        return
     async with _request(
         msg,
         session_factory=session_factory,
@@ -265,7 +279,11 @@ async def handle_leave(
     session_factory: _SessionFactory,
     unschedule: Callable[[int], None],
     on_user_created: Callable[[User], None] = _noop_user_created,
+    hosted_features_enabled: bool = True,
 ) -> None:
+    if not hosted_features_enabled:
+        await msg.answer(t("hosted_only", DEFAULT_LANG))
+        return
     async with _request(
         msg,
         session_factory=session_factory,
@@ -293,7 +311,11 @@ async def handle_remove(
     session_factory: _SessionFactory,
     unschedule: Callable[[int], None],
     on_user_created: Callable[[User], None] = _noop_user_created,
+    hosted_features_enabled: bool = True,
 ) -> None:
+    if not hosted_features_enabled:
+        await msg.answer(t("hosted_only", DEFAULT_LANG))
+        return
     async with _request(
         msg,
         session_factory=session_factory,
@@ -416,13 +438,39 @@ COMMANDS = (
     (
         "start",
         handle_start,
-        ("session_factory", "on_user_created", "bot", "quick_access"),
+        (
+            "session_factory",
+            "on_user_created",
+            "bot",
+            "quick_access",
+            "hosted_features_enabled",
+        ),
     ),
-    ("invite", handle_invite, ("session_factory", "bot", "on_user_created")),
-    ("join", handle_join, ("session_factory", "on_user_created", "bot")),
-    ("household", handle_household, ("session_factory", "on_user_created")),
-    ("leave", handle_leave, ("session_factory", "unschedule", "on_user_created")),
-    ("remove", handle_remove, ("session_factory", "unschedule", "on_user_created")),
+    (
+        "invite",
+        handle_invite,
+        ("session_factory", "bot", "on_user_created", "hosted_features_enabled"),
+    ),
+    (
+        "join",
+        handle_join,
+        ("session_factory", "on_user_created", "bot", "hosted_features_enabled"),
+    ),
+    (
+        "household",
+        handle_household,
+        ("session_factory", "on_user_created", "hosted_features_enabled"),
+    ),
+    (
+        "leave",
+        handle_leave,
+        ("session_factory", "unschedule", "on_user_created", "hosted_features_enabled"),
+    ),
+    (
+        "remove",
+        handle_remove,
+        ("session_factory", "unschedule", "on_user_created", "hosted_features_enabled"),
+    ),
     ("tz", handle_tz, ("session_factory", "reschedule")),
     ("lang", handle_lang, ("session_factory", "on_user_created")),
     ("digest_at", handle_digest_at, ("session_factory", "reschedule")),

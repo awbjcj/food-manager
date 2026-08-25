@@ -468,7 +468,21 @@ def test_scheduler_payload_and_registration(session):
     assert len(jobs) == 1
     assert jobs[0].id == "digest:1"
     assert jobs[0].trigger.fields[jobs[0].trigger.FIELD_NAMES.index("hour")].expressions[0].first == 9
-    register_all_user_digests(scheduler, session_factory=lambda: session, send=AsyncMock())
+    session.add(
+        User(
+            telegram_id=2,
+            chat_id=2,
+            household_id=user.household_id,
+            created_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
+    register_all_user_digests(
+        scheduler,
+        session_factory=lambda: session,
+        send=AsyncMock(),
+        telegram_user_id=1,
+    )
     assert {job.id for job in scheduler.get_jobs()} == {"digest:1"}
 
 

@@ -116,6 +116,30 @@ def test_settings_gemini_default_ok():
     assert s.llm_provider == "gemini"
 
 
+def test_local_mode_ignores_deployment_only_registration_and_billing_flags():
+    settings = _settings(
+        LLM_PROVIDER="gemini",
+        GEMINI_API_KEY="g-key",
+        HOSTED_FEATURES_ENABLED=False,
+        OPEN_REGISTRATION=True,
+        BILLING_ENABLED=True,
+    )
+    assert settings.effective_open_registration is False
+    assert settings.effective_billing_enabled is False
+
+
+def test_hosted_mode_enables_configured_registration_and_billing():
+    settings = _settings(
+        LLM_PROVIDER="gemini",
+        GEMINI_API_KEY="g-key",
+        HOSTED_FEATURES_ENABLED=True,
+        OPEN_REGISTRATION=True,
+        BILLING_ENABLED=True,
+    )
+    assert settings.effective_open_registration is True
+    assert settings.effective_billing_enabled is True
+
+
 # --------------------------------------------------------------------------- #
 # run.py: the wiring matrix across all four providers
 # --------------------------------------------------------------------------- #

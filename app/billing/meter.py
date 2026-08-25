@@ -15,6 +15,7 @@ from app.billing.entitlement import (
 from app.billing.plans import OpClass, limits_for, units_for
 
 BILLING_ENABLED = False
+METERING_ENABLED = True
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,13 @@ def admit(
     provider: str,
     now: datetime,
 ) -> Admission:
+    if not METERING_ENABLED:
+        return Admission(
+            True,
+            "metering_disabled",
+            False,
+            QuotaSnapshot(0, 0, 0, 0, {}, now, "local"),
+        )
     sub, usage, limits = _resolve(session, household_id, now)
     current = _snapshot(sub, usage, limits)
     session.flush()
@@ -115,6 +123,8 @@ def commit(
 ) -> None:
     if cost_micros is not None and cost_micros < 0:
         raise ValueError("cost_micros must be non-negative")
+    if not METERING_ENABLED:
+        return
     _sub, usage, _limits = _resolve(session, household_id, now)
     if op == "receipt":
         usage.receipts_used += 1

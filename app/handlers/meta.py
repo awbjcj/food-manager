@@ -493,13 +493,18 @@ async def handle_prefs(
 
 
 def _help_topics_keyboard(lang: str):
+    topics = (
+        HELP_TOPICS
+        if handler_support.MULTI_TENANT_ENABLED
+        else tuple(topic for topic in HELP_TOPICS if topic != "household")
+    )
     return to_aiogram_keyboard(
         [
             [
                 CallbackButton(
                     text=t(f"btn.help.{topic}", lang), callback_data=f"help:{topic}"
                 )
-                for topic in HELP_TOPICS
+                for topic in topics
             ]
         ]
     )

@@ -30,6 +30,7 @@ export const demoAccount: AccountData = {
   availableProviders: ['anthropic', 'deepseek', 'gemini', 'openai'],
   botUsername: 'food_manager_bot',
   billingEnabled: true,
+  hostedFeaturesEnabled: true,
 }
 
 function headers(): HeadersInit {

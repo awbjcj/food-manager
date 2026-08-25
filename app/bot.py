@@ -208,6 +208,7 @@ def build_dispatcher(
     intent_agent=None,
     composer=None,
     payments=None,
+    hosted_features_enabled: bool = True,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
 
@@ -235,6 +236,7 @@ def build_dispatcher(
         "composer": composer,
         "recipe_sources": recipe_sources,
         "payments": payments,
+        "hosted_features_enabled": hosted_features_enabled,
     }
 
     def _bind(handler, *dep_names):

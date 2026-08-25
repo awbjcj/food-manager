@@ -11,6 +11,12 @@ DEFAULT_LANG = "en"
 # Catalog. English is mandatory for every key; other languages are optional and
 # fall back to English. Keys are added incrementally by later tasks.
 MESSAGES: dict[str, dict[str, str]] = {
+    "hosted_only": {
+        "en": "This feature is available on the hosted Food Manager bot: https://t.me/foodie_manager_bot",
+        "zh": "此功能可在托管版 Food Manager 机器人中使用：https://t.me/foodie_manager_bot",
+        "fr": "Cette fonctionnalité est disponible sur le bot Food Manager hébergé : https://t.me/foodie_manager_bot",
+        "es": "Esta función está disponible en el bot alojado Food Manager: https://t.me/foodie_manager_bot",
+    },
     "quota.title": {
         "en": "📊 {plan} quota - renews in {days}d",
         "zh": "📊 {plan}配额 - {days}天后更新",

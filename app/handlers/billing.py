@@ -224,7 +224,12 @@ async def handle_billing(
             text = t("billing.plan_free", ctx.user.lang)
         else:
             days = max(0, (sub.period_end - utc_naive(now)).days)
-            text = t("billing.plan_family", ctx.user.lang, days=days)
+            key = (
+                "billing.plan_family_cancelled"
+                if sub.cancel_at_period_end
+                else "billing.plan_family"
+            )
+            text = t(key, ctx.user.lang, days=days)
         ctx.session.commit()
         await msg.answer(text)
 

@@ -8,7 +8,11 @@ from app.billing.entitlement import get_or_create_usage
 from app.billing.ledger import find_event, revenue_stars
 from app.billing.payment import StarsPaymentProvider, invoice_payload
 from app.billing.plans import SKUS
-from app.handlers.billing import handle_pre_checkout, handle_successful_payment
+from app.handlers.billing import (
+    handle_billing,
+    handle_pre_checkout,
+    handle_successful_payment,
+)
 from app.models import Household, PaymentEvent, Subscription, User
 
 NOW = datetime(2026, 7, 28, 12, tzinfo=UTC)
@@ -164,6 +168,36 @@ async def test_stars_provider_uses_the_documented_invoice_shape():
     await provider.create_checkout(sku=SKUS["family_monthly"], household_id=1)
     kwargs = bot.create_invoice_link.await_args.kwargs
     assert kwargs["currency"] == "XTR"
-    assert "provider_token" not in kwargs
+    assert kwargs["provider_token"] == ""
     assert kwargs["subscription_period"] == 2_592_000
     assert len(kwargs["prices"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_billing_reports_cancelled_renewal(factory):
+    with factory() as db:
+        db.add(
+            Subscription(
+                household_id=1,
+                tier="family",
+                status="active",
+                period_start=NOW.replace(tzinfo=None),
+                period_end=(NOW + timedelta(days=10)).replace(tzinfo=None),
+                telegram_charge_id="charge-1",
+                cancel_at_period_end=True,
+                created_at=NOW.replace(tzinfo=None),
+                updated_at=NOW.replace(tzinfo=None),
+            )
+        )
+        db.commit()
+    msg = MagicMock()
+    msg.from_user.id = 42
+    msg.chat.id = 42
+    msg.chat.type = "private"
+    msg.answer = AsyncMock()
+
+    await handle_billing(msg, session_factory=factory, now_provider=lambda _tz: NOW)
+
+    text = msg.answer.await_args.args[0]
+    assert "Renewal cancelled" in text
+    assert "Renews" not in text

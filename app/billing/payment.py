@@ -52,6 +52,7 @@ class StarsPaymentProvider:
             description=sku.description,
             payload=invoice_payload(sku.code, household_id),
             currency="XTR",
+            provider_token="",
             prices=[LabeledPrice(label=sku.title, amount=sku.stars)],
             subscription_period=sku.subscription_period,
         )

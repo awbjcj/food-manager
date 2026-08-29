@@ -152,6 +152,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "Forfait : Famille. Renouvellement dans {days} j. Gérez-le dans Réglages Telegram > Stars.",
         "es": "Plan: Familiar. Se renueva en {days} d. Adminístralo en Ajustes de Telegram > Stars.",
     },
+    "billing.plan_family_cancelled": {
+        "en": "Plan: Family. Renewal cancelled; access ends in {days}d.",
+        "zh": "套餐：家庭。续订已取消；访问权限将在 {days} 天后结束。",
+        "fr": "Forfait : Famille. Renouvellement annulé ; l'accès se termine dans {days} j.",
+        "es": "Plan: Familiar. Renovación cancelada; el acceso termina en {days} d.",
+    },
     "start.welcome_free": {
         "en": "You're on the free plan: 5 receipts and 30 AI actions a month, up to 2 people. Check usage with /quota, upgrade with /buy.",
         "zh": "你正在使用免费套餐：每月 5 张收据、30 次 AI 操作，最多 2 人。使用 /quota 查看用量，使用 /buy 升级。",

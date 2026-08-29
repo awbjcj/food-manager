@@ -218,8 +218,8 @@ migration needed); `app/providers.py` is the single source of truth for the
   validation refuses a text-only default unless an image-capable key is set.
 - **Web search is now per-user.** It used to be hardwired to Anthropic; it is a
   `SearchProviderSelector` resolved via `_select_search(search, user.llm_provider)`
-  at the ingest/`/add`/freeze call sites. Only anthropic + gemini have a
-  `ShelfLifeSearchClient`; others fall back.
+  at the ingest/`/add`/freeze call sites. Anthropic, Gemini, and DeepSeek have a
+  `ShelfLifeSearchClient`; providers without one fall back.
 - **Provider client cohesion.** Anthropic/OpenAI clients stay split by capability
   (`llm.py`, `cook/llm.py`, `translation_llm.py`), but each new provider's
   clients live in one module (`gemini_llm.py`, `deepseek_llm.py`) because their

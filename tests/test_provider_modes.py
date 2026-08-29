@@ -20,10 +20,8 @@ from app.operator.bot import handle_provider, handle_providers
 from app.provider_mode_service import (
     ProviderModeAdmin,
     ProviderModeError,
-    clear_override,
     describe_modes,
     effective_modes,
-    set_mode,
 )
 from app.providers import CredentialMode, LLMProviderNotConfigured, ProviderSelector
 from app.settings import Settings
@@ -178,6 +176,12 @@ def _both_modes_settings() -> Settings:
     )
 
 
+def _set_mode(session: Session, settings: Settings, *, provider: str, mode: str):
+    return ProviderModeAdmin(settings=settings).set(
+        session, provider=provider, mode=mode, actor=7, now=NOW
+    )
+
+
 def test_effective_modes_default_to_config(session):
     modes = effective_modes(session, _both_modes_settings())
     assert modes["anthropic"] == "subscription"
@@ -186,19 +190,15 @@ def test_effective_modes_default_to_config(session):
 
 def test_override_wins_over_config(session):
     settings = _both_modes_settings()
-    status = set_mode(
-        session, settings, provider="anthropic", mode="api", actor=7, now=NOW
-    )
+    status = _set_mode(session, settings, provider="anthropic", mode="api")
     assert (status.mode, status.source, status.updated_by) == ("api", "override", 7)
     assert effective_modes(session, settings)["anthropic"] == "api"
 
 
 def test_selecting_config_default_clears_the_override(session):
     settings = _both_modes_settings()
-    set_mode(session, settings, provider="anthropic", mode="api", actor=7, now=NOW)
-    status = set_mode(
-        session, settings, provider="anthropic", mode="subscription", actor=8, now=NOW
-    )
+    _set_mode(session, settings, provider="anthropic", mode="api")
+    status = _set_mode(session, settings, provider="anthropic", mode="subscription")
     rows = session.exec(select(ProviderModeOverride)).all()
     assert rows == []
     assert (status.mode, status.source) == ("subscription", "config")
@@ -207,31 +207,31 @@ def test_selecting_config_default_clears_the_override(session):
 def test_set_mode_rejects_a_mode_without_credentials(session):
     settings = _both_modes_settings()
     with pytest.raises(ProviderModeError, match="SUB2API_GEMINI_TOKEN"):
-        set_mode(
-            session, settings, provider="gemini", mode="subscription", actor=1, now=NOW
-        )
+        _set_mode(session, settings, provider="gemini", mode="subscription")
 
 
 def test_set_mode_rejects_unknown_provider_and_mode(session):
     settings = _both_modes_settings()
     with pytest.raises(ProviderModeError, match="unknown provider"):
-        set_mode(session, settings, provider="mistral", mode="api", actor=1, now=NOW)
+        _set_mode(session, settings, provider="mistral", mode="api")
     with pytest.raises(ProviderModeError, match="unknown mode"):
-        set_mode(session, settings, provider="anthropic", mode="free", actor=1, now=NOW)
+        _set_mode(session, settings, provider="anthropic", mode="free")
 
 
 def test_stale_override_falls_back_to_config(session):
     """An override outliving its credentials must not strand the provider."""
     settings = _both_modes_settings()
-    set_mode(
-        session, settings, provider="anthropic", mode="subscription", actor=1, now=NOW
+    _set_mode(session, settings, provider="anthropic", mode="api")
+    # The API key is later removed, leaving only subscription credentials.
+    without_api = _settings(
+        LLM_PROVIDER="anthropic",
+        SUB2API_BASE_URL=GATEWAY,
+        SUB2API_ANTHROPIC_TOKEN="sub-a",
     )
-    # The token is later removed from the environment.
-    without_token = _settings(LLM_PROVIDER="anthropic", ANTHROPIC_API_KEY="a-key")
     status = next(
-        s for s in describe_modes(session, without_token) if s.provider == "anthropic"
+        s for s in describe_modes(session, without_api) if s.provider == "anthropic"
     )
-    assert (status.mode, status.source) == ("api", "config")
+    assert (status.mode, status.source) == ("subscription", "config")
 
 
 def test_describe_reports_unusable_providers(session):
@@ -241,14 +241,6 @@ def test_describe_reports_unusable_providers(session):
     )
     assert not openai_status.usable
     assert openai_status.available_modes == ()
-
-
-def test_clear_override_returns_to_config(session):
-    settings = _both_modes_settings()
-    set_mode(session, settings, provider="anthropic", mode="api", actor=1, now=NOW)
-    assert clear_override(session, provider="anthropic") is True
-    assert effective_modes(session, settings)["anthropic"] == "subscription"
-    assert clear_override(session, provider="anthropic") is False
 
 
 # --------------------------------------------------------------------------- #

@@ -7,6 +7,7 @@ trusted number of days (`resolve_search_days`). It lives apart from
 the several consumers that only need the contract (correction, frozen/fridge
 resolution, ingest, pantry) depend on the seam, not on the refinement driver.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -35,13 +36,12 @@ class ShelfLifeSearchClient(Protocol):
 class SearchProviderSelector(ProviderSelector):
     """Per-provider web-search routing with fallback.
 
-    Web search is a provider capability (Anthropic/OpenAI/Gemini have it,
-    DeepSeek does not), so the search client is selected per user like the other
+    Web search is a provider capability, so the search client is selected per user like the other
     seams. ``lookup_shelf_life`` delegates to the default provider, letting a
     selector be passed wherever a bare ``ShelfLifeSearchClient`` is expected;
     callers route per-user by calling ``for_provider(user.llm_provider)`` first.
-    Built with ``fallback=True`` so a text-only provider's lookups land on a
-    capable one.
+    Built with ``fallback=True`` so a provider without a search client lands on
+    a capable one.
     """
 
     async def lookup_shelf_life(

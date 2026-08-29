@@ -137,12 +137,14 @@ def render_llm_status(user: User, clients: PerUserClients) -> str:
         f"LLM provider: {user.llm_provider}",
         f"Available: {', '.join(available) if available else 'none'}",
     ]
-    text_only = [provider for provider in available if not supports(provider, "image")]
-    if text_only:
-        verb = "is" if len(text_only) == 1 else "are"
+    image_incapable = [
+        provider for provider in available if not supports(provider, "image")
+    ]
+    if image_incapable:
+        verb = "is" if len(image_incapable) == 1 else "are"
         lines.append(
-            f"Note: {', '.join(text_only)} {verb} text-only; photos & web "
-            "search use a capable provider."
+            f"Note: {', '.join(image_incapable)} {verb} image-incapable; "
+            "photos use a capable provider."
         )
     lines.append(f"Usage: /llm [{'|'.join(ALL_PROVIDERS)}]")
     return "\n".join(lines)

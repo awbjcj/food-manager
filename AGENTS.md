@@ -44,7 +44,7 @@ Single-user Telegram bot: user sends grocery receipt photos → Codex parses the
 | `app/providers.py`           | Canonical `Provider` type, `PROVIDER_CAPABILITIES`/`supports()`, `LLMProviderNotConfigured`, and the generic `ProviderSelector` base (with fallback) reused by every seam                                                                                                                                                                                                                                                                      |
 | `app/llm.py`                 | `LLMClient` Protocol + Anthropic/OpenAI clients; capability selectors (subclass `ProviderSelector`); `ParsedItem`/`LLMResult` models                                                                                                                                                                                                                                                                                                           |
 | `app/gemini_llm.py`          | All Google Gemini clients (native `google-genai`): image, text, profile, cook, translation, search                                                                                                                                                                                                                                                                                                                                             |
-| `app/deepseek_llm.py`        | DeepSeek text-only clients (OpenAI-compatible `chat.completions`): text, profile, selection, nutrition, translation                                                                                                                                                                                                                                                                                                                            |
+| `app/deepseek_llm.py`        | DeepSeek clients (OpenAI-Responses-API-compatible): text, profile, selection, nutrition, translation, and search (native `web_search` tool); still no image client                                                                                                                                                                                                                                                                            |
 | `app/translation_llm.py`     | `TranslationLLMClient` Protocol + Anthropic/OpenAI clients + selector (translates dynamic names)                                                                                                                                                                                                                                                                                                                                               |
 | `app/translation_service.py` | `translate_texts()`: lazy LLM translate + `NameTranslation` cache, English fallback                                                                                                                                                                                                                                                                                                                                                            |
 | `app/i18n.py`                | Static `MESSAGES` catalog, `t(key, lang, **kw)`, locale date/weekday helpers                                                                                                                                                                                                                                                                                                                                                                   |
@@ -145,14 +145,17 @@ expire quickly), then edit the message in place, falling back to sending a
 fresh message if the edit fails for any reason other than "not modified" (which
 is treated as success, since it means the view didn't need to change).
 
-### Recipe engine: `/cook`, `/shopping`, `/favorites` (v3.5, v4.9 in progress)
+### Recipe engine: `/cook`, `/shopping`, `/favorites` (v3.5, v4.9)
 
 The live `/cook` pipeline (`app/cook/service.py::run_cook`, called from
-`run_cook_and_render` in `bot.py`) is LLM-only, in three metered steps against
-the household's active pantry and `FoodProfile` (`app/profile_service.py`):
-`selection_llm` picks which pantry items to use, `recipe_llm` turns those into
-candidate recipes (regenerating once if every candidate violates a profile
-exclusion), then `nutrition_llm` scores each one. Each step's cost accrues onto
+`run_cook_and_render` in `app/handlers/cook.py`) runs against the household's
+active pantry and `FoodProfile` (`app/profile_service.py`): `selection_llm`
+picks which pantry items to use, then a `source: RecipeSource` produces scored
+candidates. The handler injects that source as a `ChainedRecipeSource` of the
+configured real sources followed by an `LlmRecipeSource` tail, so Spoonacular
+answers when it can and the LLM covers the rest; the tail itself calls
+`recipe_llm` (regenerating once if every candidate violates a profile
+exclusion) then `nutrition_llm`. Each step's cost accrues onto
 the `CookSession` row (`app/cook/session_service.py`) and the pipeline bails
 early once `COOK_COST_CEILING_MICROS` is exceeded (raise it if recipes come
 back empty). Final ranking is `blended_score` (`app/cook/logic.py`): nutrition
@@ -163,15 +166,15 @@ next-ranked candidate from the same run) plus ★ Save
 (`app/cook/favorites_service.py` → `SavedRecipe`, re-cookable against the
 current pantry via `/favorites`) and ➕ Shopping list (`app/shopping_service.py`
 → `/shopping`, tap an item once bought). 👍/👎 feedback (`app/cook/feedback.py`)
-records a `(cuisine, ingredients, verdict)` signal per session for future
-affinity-weighted scoring — not yet consumed by `blended_score`.
+records a `(cuisine, ingredients, verdict)` signal per session, consumed by
+`app/cook/affinity.py` for affinity-weighted scoring.
 
-**v4.9 (in progress, not yet wired in):** `app/cook/recipe_source.py` has the
-building blocks for a real-source alternative to the LLM-only pipeline —
-`RecipeCriteria`/`Purpose` (use-it-up, quick, healthy, comfort, surprise),
-a Spoonacular `RecipeSource` (`SPOONACULAR_API_KEY`), and TheMealDB fetch
-helpers — but `run_cook` does not call into it yet; see `tests/test_recipe_source.py`
-for the parts already covered in isolation.
+**v4.9 (shipped):** `app/cook/recipe_source.py` holds the source chain —
+`RecipeCriteria`/`Purpose` (use-it-up, quick, healthy, comfort, surprise), a
+Spoonacular `RecipeSource` (`SPOONACULAR_API_KEY`), TheMealDB fetch helpers, the
+`LlmRecipeSource` tail, and `ChainedRecipeSource`. `bin/run.py` builds the
+configured sources once at bootstrap and threads them to `/cook` and `/plan`;
+with no `SPOONACULAR_API_KEY` the chain is just the LLM tail.
 
 ### Multi-provider LLM routing (v4.7)
 
@@ -181,8 +184,9 @@ migration needed); `app/providers.py` is the single source of truth for the
 `Provider` type and the capability matrix.
 
 - **Capabilities differ per provider.** `anthropic`/`openai`/`gemini` are full
-  providers (image + web search + text); **DeepSeek's API is text-only** (no
-  image input, no API-level web-search tool). `PROVIDER_CAPABILITIES` /
+  providers (image + web search + text); **DeepSeek still can't read receipt
+  photos**, but does have a native `web_search` tool on its Responses API, so
+  it is `text` + `search`, not `text`-only. `PROVIDER_CAPABILITIES` /
   `supports(provider, capability)` encode this.
 - **One generic selector.** Every seam (image, text, profile, cook
   selection/recipe/nutrition, translation, search) is a thin subclass of
@@ -194,15 +198,15 @@ migration needed); `app/providers.py` is the single source of truth for the
   choice is always honoured).
 - **Selectability floor is text.** `_available_llm_providers` (bot.py) lists
   providers that can serve the _text_ tasks, so DeepSeek is selectable even
-  though it can't read photos; `/llm` status flags text-only providers.
+  though it can't read photos; `/llm` status flags image-incapable providers.
 - **Seed defaults must be capable.** `bin/run.py::_capable_default` ensures an
   image/search/recipe selector is seeded with a provider that actually has the
   capability (a DeepSeek global default falls back to gemini/anthropic). Settings
   validation refuses a text-only default unless an image-capable key is set.
 - **Web search is now per-user.** It used to be hardwired to Anthropic; it is a
   `SearchProviderSelector` resolved via `_select_search(search, user.llm_provider)`
-  at the ingest/`/add`/freeze call sites. Only anthropic + gemini have a
-  `ShelfLifeSearchClient`; others fall back.
+  at the ingest/`/add`/freeze call sites. Anthropic, Gemini, and DeepSeek have a
+  `ShelfLifeSearchClient`; providers without one fall back.
 - **Provider client cohesion.** Anthropic/OpenAI clients stay split by capability
   (`llm.py`, `cook/llm.py`, `translation_llm.py`), but each new provider's
   clients live in one module (`gemini_llm.py`, `deepseek_llm.py`) because their

@@ -25,7 +25,7 @@ import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 
 from sqlmodel import Session, select
 
@@ -95,10 +95,11 @@ def describe_modes(session: Session, settings: Settings) -> list[ProviderModeSta
         available = _available_modes(settings, provider)
         row = overrides.get(provider)
         if row is not None and row.mode in available:
+            override_mode = cast(CredentialMode, row.mode)
             statuses.append(
                 ProviderModeStatus(
                     provider=provider,
-                    mode=row.mode,  # type: ignore[arg-type]
+                    mode=override_mode,
                     source="override",
                     available_modes=available,
                     updated_at=row.updated_at,
@@ -131,46 +132,10 @@ def effective_modes(session: Session, settings: Settings) -> dict[str, Credentia
     }
 
 
-def set_mode(
-    session: Session,
-    settings: Settings,
-    *,
-    provider: str,
-    mode: str,
-    actor: int | None,
-    now: datetime,
-) -> ProviderModeStatus:
-    """Persist an operator's mode choice for one provider.
-
-    Rejects a mode the provider has no credentials for, so a flip can never
-    leave the bot unable to build that provider's clients.
-    """
-    status = _stage_mode(
-        session,
-        settings,
-        provider=provider,
-        mode=mode,
-        actor=actor,
-        now=now,
-    )
-    session.commit()
-    log.info(
-        "provider_mode_set",
-        extra={"provider": provider, "mode": mode, "actor": actor},
-    )
-    return status
-
-
-def _stage_mode(
-    session: Session,
-    settings: Settings,
-    *,
-    provider: str,
-    mode: str,
-    actor: int | None,
-    now: datetime,
-) -> ProviderModeStatus:
-    """Validate and stage a mode choice without committing the session."""
+def _validate_choice(
+    settings: Settings, *, provider: str, mode: str
+) -> tuple[Provider, CredentialMode]:
+    """Validate operator input once, then keep domain types internally."""
     if provider not in ALL_PROVIDERS:
         raise ProviderModeError(f"unknown provider {provider!r}")
     if mode not in ALL_CREDENTIAL_MODES:
@@ -184,6 +149,19 @@ def _stage_mode(
         raise ProviderModeError(
             f"{provider} has no {mode} credentials configured (set {missing})"
         )
+    return cast(Provider, provider), cast(CredentialMode, mode)
+
+
+def _stage_mode(
+    session: Session,
+    settings: Settings,
+    *,
+    provider: Provider,
+    mode: CredentialMode,
+    actor: int | None,
+    now: datetime,
+) -> ProviderModeStatus:
+    """Stage a validated mode choice without committing the session."""
 
     row = session.get(ProviderModeOverride, provider)
     if mode == settings.default_credential_mode(provider):
@@ -191,8 +169,8 @@ def _stage_mode(
             session.delete(row)
         session.flush()
         return ProviderModeStatus(
-            provider=provider,  # type: ignore[arg-type]
-            mode=mode,  # type: ignore[arg-type]
+            provider=provider,
+            mode=mode,
             source="config",
             available_modes=_available_modes(settings, provider),
         )
@@ -207,24 +185,13 @@ def _stage_mode(
         row.updated_by = actor
     session.flush()
     return ProviderModeStatus(
-        provider=provider,  # type: ignore[arg-type]
-        mode=mode,  # type: ignore[arg-type]
+        provider=provider,
+        mode=mode,
         source="override",
         available_modes=_available_modes(settings, provider),
         updated_at=now,
         updated_by=actor,
     )
-
-
-def clear_override(session: Session, *, provider: str) -> bool:
-    """Drop an override so the provider returns to its configured default."""
-    row = session.get(ProviderModeOverride, provider)
-    if row is None:
-        return False
-    session.delete(row)
-    session.commit()
-    log.info("provider_mode_cleared", extra={"provider": provider})
-    return True
 
 
 ModeApplier = Callable[[Mapping[str, CredentialMode]], None]
@@ -256,14 +223,17 @@ class ProviderModeAdmin:
         now: datetime,
     ) -> ProviderModeStatus:
         """Apply and persist one choice, rolling back either side on failure."""
+        typed_provider, typed_mode = _validate_choice(
+            self.settings, provider=provider, mode=mode
+        )
         previous_modes = effective_modes(session, self.settings)
         restore_runtime = False
         try:
             status = _stage_mode(
                 session,
                 self.settings,
-                provider=provider,
-                mode=mode,
+                provider=typed_provider,
+                mode=typed_mode,
                 actor=actor,
                 now=now,
             )

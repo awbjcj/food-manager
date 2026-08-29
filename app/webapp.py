@@ -14,12 +14,105 @@ from sqlmodel import Session, func, select
 from app.billing.entitlement import effective_tier, get_or_create_subscription
 from app.billing.meter import snapshot
 from app.billing.plans import SKUS, TIERS, sku_for
+from app.handler_support import resolve_authorization
 from app.i18n import LANGS
 from app.models import Household, Subscription, User
 from app.webapp_auth import MiniAppAuthError, MiniAppIdentity, validate_init_data
 
 log = logging.getLogger(__name__)
 SessionFactory = Callable[[], Session]
+
+
+def _plan_catalog() -> list[dict[str, object]]:
+    plans: list[dict[str, object]] = [
+        {
+            "code": "free",
+            "title": "Free",
+            "stars": 0,
+            "receipts": TIERS["free"].receipts,
+            "actions": TIERS["free"].actions,
+            "seats": TIERS["free"].seats,
+            "kind": "tier",
+        }
+    ]
+    for sku in SKUS.values():
+        tier = TIERS[sku.grants_tier] if sku.grants_tier else None
+        plans.append(
+            {
+                "code": sku.code,
+                "title": sku.title,
+                "stars": sku.stars,
+                "description": sku.description,
+                "kind": sku.kind,
+                "receipts": tier.receipts if tier else sku.grants_receipts,
+                "actions": tier.actions if tier else sku.grants_actions,
+                "seats": tier.seats if tier else None,
+            }
+        )
+    return plans
+
+
+def _hosted_account_payload(
+    session: Session,
+    *,
+    user: User,
+    household: Household,
+    now: datetime,
+) -> dict[str, object]:
+    quota = snapshot(session, household_id=user.household_id, now=now)
+    subscription = get_or_create_subscription(
+        session, household_id=user.household_id, now=now
+    )
+    members = session.exec(
+        select(func.count())
+        .select_from(User)
+        .where(User.household_id == user.household_id)
+    ).one()
+    return {
+        "household": {
+            "name": household.name,
+            "members": members,
+            "seatCap": subscription.seat_cap,
+        },
+        "plan": {
+            "tier": effective_tier(subscription),
+            "status": subscription.status,
+            "periodEnd": subscription.period_end.isoformat(),
+            "renews": bool(
+                subscription.telegram_charge_id
+                and not subscription.cancel_at_period_end
+                and subscription.status == "active"
+            ),
+            "canManage": user.role == "owner",
+        },
+        "quota": {
+            "receiptsUsed": quota.receipts_used,
+            "receiptsLimit": quota.receipts_limit,
+            "actionsUsed": quota.actions_used,
+            "actionsLimit": quota.actions_limit,
+        },
+        "plans": _plan_catalog(),
+    }
+
+
+def _local_account_payload(household: Household, *, now: datetime) -> dict[str, object]:
+    return {
+        "household": {"name": household.name, "members": 1, "seatCap": 1},
+        "plan": {
+            "tier": "local",
+            "status": "disabled",
+            "periodEnd": now.isoformat(),
+            "renews": False,
+            "canManage": False,
+        },
+        "quota": {
+            "receiptsUsed": 0,
+            "receiptsLimit": 0,
+            "actionsUsed": 0,
+            "actionsLimit": 0,
+        },
+        "plans": [],
+    }
 
 
 class MiniAppApi:
@@ -34,6 +127,7 @@ class MiniAppApi:
         bot_username: str | None,
         hosted_features_enabled: bool,
         allowed_telegram_user_id: int | None,
+        reschedule: Callable[[User], None] | None,
     ) -> None:
         self.session_factory = session_factory
         self.bot_token = bot_token
@@ -43,6 +137,7 @@ class MiniAppApi:
         self.bot_username = bot_username
         self.hosted_features_enabled = hosted_features_enabled
         self.allowed_telegram_user_id = allowed_telegram_user_id
+        self.reschedule = reschedule
 
     def identity(self, request: web.Request) -> MiniAppIdentity:
         header = request.headers.get("Authorization", "")
@@ -52,15 +147,16 @@ class MiniAppApi:
         return validate_init_data(raw, bot_token=self.bot_token)
 
     def authorized_user(self, session: Session, identity: MiniAppIdentity) -> User:
-        user = session.get(User, identity.telegram_id)
-        local_user_rejected = (
-            not self.hosted_features_enabled
-            and self.allowed_telegram_user_id is not None
-            and identity.telegram_id != self.allowed_telegram_user_id
+        status = resolve_authorization(
+            session,
+            allowed_user_id=self.allowed_telegram_user_id or 0,
+            telegram_user_id=identity.telegram_id,
+            open_registration=False,
+            multi_tenant_enabled=self.hosted_features_enabled,
         )
-        if user is None or user.banned or local_user_rejected:
+        if not status.allowed or status.user is None:
             raise MiniAppAuthError("user is not authorized")
-        return user
+        return status.user
 
     async def account(self, request: web.Request) -> web.Response:
         identity = self.identity(request)
@@ -71,96 +167,14 @@ class MiniAppApi:
                 raise web.HTTPNotFound(text="household not found")
             now = datetime.now(ZoneInfo(user.tz))
             if self.hosted_features_enabled:
-                quota = snapshot(session, household_id=user.household_id, now=now)
-                sub = get_or_create_subscription(
-                    session, household_id=user.household_id, now=now
+                account_payload = _hosted_account_payload(
+                    session, user=user, household=household, now=now
                 )
-                members = session.exec(
-                    select(func.count())
-                    .select_from(User)
-                    .where(User.household_id == user.household_id)
-                ).one()
-                household_payload = {
-                    "name": household.name,
-                    "members": members,
-                    "seatCap": sub.seat_cap,
-                }
-                plan_payload = {
-                    "tier": effective_tier(sub),
-                    "status": sub.status,
-                    "periodEnd": sub.period_end.isoformat(),
-                    "renews": bool(
-                        sub.telegram_charge_id
-                        and not sub.cancel_at_period_end
-                        and sub.status == "active"
-                    ),
-                    "canManage": user.role == "owner",
-                }
-                quota_payload = {
-                    "receiptsUsed": quota.receipts_used,
-                    "receiptsLimit": quota.receipts_limit,
-                    "actionsUsed": quota.actions_used,
-                    "actionsLimit": quota.actions_limit,
-                }
-                plans_payload = [
-                    {
-                        "code": "free",
-                        "title": "Free",
-                        "stars": 0,
-                        "receipts": TIERS["free"].receipts,
-                        "actions": TIERS["free"].actions,
-                        "seats": TIERS["free"].seats,
-                        "kind": "tier",
-                    },
-                    *[
-                        {
-                            "code": sku.code,
-                            "title": sku.title,
-                            "stars": sku.stars,
-                            "description": sku.description,
-                            "kind": sku.kind,
-                            "receipts": (
-                                TIERS[sku.grants_tier].receipts
-                                if sku.grants_tier
-                                else sku.grants_receipts
-                            ),
-                            "actions": (
-                                TIERS[sku.grants_tier].actions
-                                if sku.grants_tier
-                                else sku.grants_actions
-                            ),
-                            "seats": (
-                                TIERS[sku.grants_tier].seats
-                                if sku.grants_tier
-                                else None
-                            ),
-                        }
-                        for sku in SKUS.values()
-                    ],
-                ]
                 session.commit()
             else:
                 # Local mode is deliberately single-user and billing-free. Do
                 # not even create subscription/quota rows just to render UI.
-                household_payload = {
-                    "name": household.name,
-                    "members": 1,
-                    "seatCap": 1,
-                }
-                plan_payload = {
-                    "tier": "local",
-                    "status": "disabled",
-                    "periodEnd": now.isoformat(),
-                    "renews": False,
-                    "canManage": False,
-                }
-                quota_payload = {
-                    "receiptsUsed": 0,
-                    "receiptsLimit": 0,
-                    "actionsUsed": 0,
-                    "actionsLimit": 0,
-                }
-                plans_payload = []
+                account_payload = _local_account_payload(household, now=now)
             return web.json_response(
                 {
                     "user": {
@@ -172,10 +186,7 @@ class MiniAppApi:
                         "digestHour": user.digest_hour,
                         "provider": user.llm_provider,
                     },
-                    "household": household_payload,
-                    "plan": plan_payload,
-                    "quota": quota_payload,
-                    "plans": plans_payload,
+                    **account_payload,
                     "availableProviders": list(self.available_providers),
                     "botUsername": self.bot_username,
                     "billingEnabled": self.billing_enabled,
@@ -185,9 +196,9 @@ class MiniAppApi:
 
     async def update_account(self, request: web.Request) -> web.Response:
         identity = self.identity(request)
-        body = await request.json()
         with self.session_factory() as session:
             user = self.authorized_user(session, identity)
+            body = await request.json()
             household = session.get(Household, user.household_id)
             if household is None:
                 raise web.HTTPNotFound(text="household not found")
@@ -220,22 +231,24 @@ class MiniAppApi:
             user.llm_provider = provider
             session.add(user)
             session.commit()
+            if self.reschedule is not None:
+                self.reschedule(user)
         return web.json_response({"ok": True})
 
     async def checkout(self, request: web.Request) -> web.Response:
         identity = self.identity(request)
-        if (
-            not self.hosted_features_enabled
-            or not self.billing_enabled
-            or self.payments is None
-        ):
-            raise web.HTTPServiceUnavailable(text="payments are unavailable")
-        body = await request.json()
-        sku = sku_for(str(body.get("sku", "")))
-        if sku is None:
-            raise web.HTTPBadRequest(text="unknown plan")
         with self.session_factory() as session:
             user = self.authorized_user(session, identity)
+            if (
+                not self.hosted_features_enabled
+                or not self.billing_enabled
+                or self.payments is None
+            ):
+                raise web.HTTPServiceUnavailable(text="payments are unavailable")
+            body = await request.json()
+            sku = sku_for(str(body.get("sku", "")))
+            if sku is None:
+                raise web.HTTPBadRequest(text="unknown plan")
             household_id = user.household_id
             if sku.kind == "subscription":
                 sub = session.get(Subscription, household_id)
@@ -246,14 +259,14 @@ class MiniAppApi:
 
     async def cancel_subscription(self, request: web.Request) -> web.Response:
         identity = self.identity(request)
-        if (
-            not self.hosted_features_enabled
-            or not self.billing_enabled
-            or self.payments is None
-        ):
-            raise web.HTTPServiceUnavailable(text="payments are unavailable")
         with self.session_factory() as session:
             user = self.authorized_user(session, identity)
+            if (
+                not self.hosted_features_enabled
+                or not self.billing_enabled
+                or self.payments is None
+            ):
+                raise web.HTTPServiceUnavailable(text="payments are unavailable")
             if user.role != "owner":
                 raise web.HTTPForbidden(text="only the household owner can cancel")
             sub = session.get(Subscription, user.household_id)
@@ -301,6 +314,7 @@ def build_web_app(
     static_dir: Path,
     hosted_features_enabled: bool = True,
     allowed_telegram_user_id: int | None = None,
+    reschedule: Callable[[User], None] | None = None,
 ) -> web.Application:
     api = MiniAppApi(
         session_factory=session_factory,
@@ -311,6 +325,7 @@ def build_web_app(
         bot_username=bot_username,
         hosted_features_enabled=hosted_features_enabled,
         allowed_telegram_user_id=allowed_telegram_user_id,
+        reschedule=reschedule,
     )
     app = web.Application(middlewares=[error_middleware])
 

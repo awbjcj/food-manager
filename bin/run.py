@@ -527,6 +527,39 @@ async def _amain(settings: Settings) -> None:
 
     translation_llm = bundle.translation
 
+    async def _alert_digest_failure(user_id: int, exc: Exception) -> None:
+        await alerter.alert(
+            "digest_failed", f"user {user_id}: {type(exc).__name__}: {exc}"
+        )
+
+    async def send(user_id: int) -> None:
+        await send_digest_with_retry(
+            user_id=user_id,
+            bot=bot,
+            session_factory=session_factory,
+            today_provider=lambda tz: datetime.now(ZoneInfo(tz)).date(),
+            translation_llm=translation_llm,
+            on_final_failure=_alert_digest_failure,
+        )
+
+    local_user_id = (
+        None if settings.hosted_features_enabled else settings.allowed_telegram_user_id
+    )
+    register_all_user_digests(
+        scheduler,
+        session_factory=session_factory,
+        send=send,
+        telegram_user_id=local_user_id,
+    )
+    register_sweep_expired_pendings(scheduler, session_factory=session_factory)
+    register_sweep_expired_cooks(scheduler, session_factory=session_factory)
+
+    def reschedule(user) -> None:
+        schedule_user_digest(scheduler, user, send=send)
+
+    def unschedule(telegram_id: int) -> None:
+        unschedule_user_digest(scheduler, telegram_id)
+
     bot_username = None
     try:
         bot_identity = await bot.get_me()
@@ -555,47 +588,13 @@ async def _amain(settings: Settings) -> None:
             static_dir=Path("web/dist"),
             hosted_features_enabled=settings.hosted_features_enabled,
             allowed_telegram_user_id=settings.allowed_telegram_user_id,
+            reschedule=reschedule,
         )
     )
     await web_runner.setup()
     web_site = web.TCPSite(web_runner, "0.0.0.0", settings.port)
     await web_site.start()
     log.info("mini_app_web_started", extra={"port": settings.port})
-
-    async def _alert_digest_failure(user_id: int, exc: Exception) -> None:
-        await alerter.alert(
-            "digest_failed", f"user {user_id}: {type(exc).__name__}: {exc}"
-        )
-
-    async def send(user_id: int) -> None:
-        await send_digest_with_retry(
-            user_id=user_id,
-            bot=bot,
-            session_factory=session_factory,
-            today_provider=lambda tz: datetime.now(ZoneInfo(tz)).date(),
-            translation_llm=translation_llm,
-            on_final_failure=_alert_digest_failure,
-        )
-
-    local_user_id = (
-        None
-        if settings.hosted_features_enabled
-        else settings.allowed_telegram_user_id
-    )
-    register_all_user_digests(
-        scheduler,
-        session_factory=session_factory,
-        send=send,
-        telegram_user_id=local_user_id,
-    )
-    register_sweep_expired_pendings(scheduler, session_factory=session_factory)
-    register_sweep_expired_cooks(scheduler, session_factory=session_factory)
-
-    def reschedule(user) -> None:
-        schedule_user_digest(scheduler, user, send=send)
-
-    def unschedule(telegram_id: int) -> None:
-        unschedule_user_digest(scheduler, telegram_id)
 
     def on_user_created(user) -> None:
         reschedule(user)

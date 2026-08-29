@@ -142,8 +142,80 @@ async def test_local_account_omits_plan_surfaces_and_does_not_create_billing_row
 
 
 @pytest.mark.asyncio
-async def test_account_update_validates_and_persists_preferences(web_state):
-    sessions, _payments, app = web_state
+async def test_local_account_rejects_an_existing_non_bootstrap_user(
+    web_state, tmp_path
+):
+    sessions, payments, _hosted_app = web_state
+    with sessions() as session:
+        owner = session.get(User, 42)
+        assert owner is not None
+        session.add(
+            User(
+                telegram_id=99,
+                chat_id=99,
+                household_id=owner.household_id,
+                role="member",
+                lang="en",
+                tz="America/New_York",
+                llm_provider="gemini",
+                created_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+        session.commit()
+    app = build_web_app(
+        session_factory=sessions,
+        bot_token=TOKEN,
+        payments=payments,
+        billing_enabled=False,
+        available_providers=("gemini",),
+        bot_username="foodie_manager_bot",
+        static_dir=Path(tmp_path / "missing-local-static"),
+        hosted_features_enabled=False,
+        allowed_telegram_user_id=42,
+    )
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get(
+            "/api/account", headers={"Authorization": _auth(99)}
+        )
+    assert response.status == 401
+
+
+@pytest.mark.asyncio
+async def test_local_account_without_an_allowed_user_id_fails_closed(
+    web_state, tmp_path
+):
+    sessions, payments, _hosted_app = web_state
+    app = build_web_app(
+        session_factory=sessions,
+        bot_token=TOKEN,
+        payments=payments,
+        billing_enabled=False,
+        available_providers=("gemini",),
+        bot_username="foodie_manager_bot",
+        static_dir=Path(tmp_path / "missing-local-static"),
+        hosted_features_enabled=False,
+    )
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get(
+            "/api/account", headers={"Authorization": _auth(42)}
+        )
+    assert response.status == 401
+
+
+@pytest.mark.asyncio
+async def test_account_update_validates_persists_and_reschedules(web_state, tmp_path):
+    sessions, payments, _app = web_state
+    rescheduled: list[int] = []
+    app = build_web_app(
+        session_factory=sessions,
+        bot_token=TOKEN,
+        payments=payments,
+        billing_enabled=True,
+        available_providers=("gemini", "openai"),
+        bot_username="food_manager_bot",
+        static_dir=Path(tmp_path / "missing-static"),
+        reschedule=lambda user: rescheduled.append(user.telegram_id),
+    )
     payload = {
         "householdName": "Chen family pantry",
         "digestHour": 9,
@@ -168,6 +240,7 @@ async def test_account_update_validates_and_persists_preferences(web_state):
             "fr",
             "openai",
         )
+    assert rescheduled == [42]
 
 
 @pytest.mark.asyncio
@@ -215,3 +288,32 @@ async def test_api_rejects_missing_or_tampered_telegram_identity(web_state):
         )
         assert missing.status == 401
         assert tampered.status == 401
+
+
+@pytest.mark.asyncio
+async def test_all_mutations_authorize_before_body_or_feature_validation(web_state):
+    sessions, payments, app = web_state
+    with sessions() as session:
+        user = session.get(User, 42)
+        assert user is not None
+        user.banned = True
+        session.add(user)
+        session.commit()
+
+    requests = (
+        ("patch", "/api/account", {"json": {}}),
+        ("post", "/api/checkout", {"json": {"sku": "unknown"}}),
+        ("post", "/api/subscription/cancel", {}),
+    )
+    async with TestClient(TestServer(app)) as client:
+        for user_id in (42, 999):
+            for method, path, kwargs in requests:
+                response = await getattr(client, method)(
+                    path,
+                    headers={"Authorization": _auth(user_id)},
+                    **kwargs,
+                )
+                assert response.status == 401
+
+    assert payments.checkouts == []
+    assert payments.cancellations == []

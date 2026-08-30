@@ -76,3 +76,34 @@ def check_off(
     session.add(row)
     session.commit()
     return True
+
+
+def check_off_purchased_names(
+    session: Session,
+    *,
+    household_id: int,
+    names,
+    now: datetime,
+    commit: bool = True,
+) -> list[str]:
+    """Check off pending rows whose normalized names were just purchased."""
+    purchased = {normalize(name) for name in names}
+    purchased.discard("")
+    if not purchased:
+        return []
+    rows = session.exec(
+        select(ShoppingList)
+        .where(
+            ShoppingList.household_id == household_id,
+            ShoppingList.bought_at.is_(None),  # type: ignore[union-attr]
+        )
+        .order_by(ShoppingList.added_at)  # type: ignore[arg-type]
+    ).all()
+    matched = [row for row in rows if row.name_normalized in purchased]
+    bought_at = utc_naive(now)
+    for row in matched:
+        row.bought_at = bought_at
+        session.add(row)
+    if matched and commit:
+        session.commit()
+    return [row.name_raw for row in matched]

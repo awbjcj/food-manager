@@ -133,6 +133,17 @@ def render_ingest_reply(
         lines.append(t("ingest.skipped_excluded", lang, names=exc_names, more=more))
         lines.append(t("ingest.want_tracked", lang))
 
+    if summary.shopping_checked_names:
+        lines.append(
+            t(
+                "ingest.shopping_checked",
+                lang,
+                names=", ".join(
+                    _name(names, name) for name in summary.shopping_checked_names
+                ),
+            )
+        )
+
     lines.append(_fmt_cost(summary.cost_micros_usd, lang=lang))
     return "\n".join(lines)
 

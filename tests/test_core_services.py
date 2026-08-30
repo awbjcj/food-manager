@@ -224,6 +224,15 @@ def test_compute_shelf_life_medium_confidence_does_not_write_cache(session):
 
 @pytest.mark.asyncio
 async def test_ingest_photo_happy_path_and_duplicate_guard(session):
+    from app.cook.models import RecipeIngredient
+    from app.shopping_service import add_missing, list_pending
+
+    add_missing(
+        session,
+        household_id=1,
+        ingredients=[RecipeIngredient(name="Whole Milk"), RecipeIngredient(name="Eggs")],
+        now=datetime(2026, 5, 26, tzinfo=UTC),
+    )
     llm = FakeLLMClient(canned=_llm_result([
         _parsed_item(),
         _parsed_item(name="Bananas", days=5),
@@ -239,6 +248,8 @@ async def test_ingest_photo_happy_path_and_duplicate_guard(session):
     )
     assert summary.inserted_food_count == 2
     assert summary.skipped_non_food_count == 1
+    assert summary.shopping_checked_names == ["Whole Milk"]
+    assert [row.name_raw for row in list_pending(session, household_id=1)] == ["Eggs"]
     assert {i.normalized_name for i in session.exec(select(PantryItem)).all()} == {
         "whole milk",
         "bananas",

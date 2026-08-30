@@ -5,7 +5,12 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.cook.logic import missing_ingredients
 from app.cook.models import RecipeIngredient
 from app.models import Household, ShoppingList, User
-from app.shopping_service import add_missing, check_off, list_pending
+from app.shopping_service import (
+    add_missing,
+    check_off,
+    check_off_purchased_names,
+    list_pending,
+)
 
 
 def _engine():
@@ -84,3 +89,24 @@ def test_check_off_rejects_other_users_row():
         sid = list_pending(db, household_id=1)[0].id
         assert sid is not None
         assert check_off(db, household_id=2, shopping_id=sid, now=_now(5)) is False
+
+
+def test_check_off_purchased_names_matches_normalized_pending_rows():
+    engine = _engine()
+    with Session(engine) as db:
+        add_missing(
+            db,
+            household_id=1,
+            ingredients=[RecipeIngredient(name="Whole Milk"), RecipeIngredient(name="Eggs")],
+            now=_now(),
+        )
+
+        matched = check_off_purchased_names(
+            db,
+            household_id=1,
+            names=["whole milk", "Bananas"],
+            now=_now(5),
+        )
+
+        assert matched == ["Whole Milk"]
+        assert [row.name_raw for row in list_pending(db, household_id=1)] == ["Eggs"]

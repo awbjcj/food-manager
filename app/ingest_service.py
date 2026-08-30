@@ -13,6 +13,7 @@ from app.llm import LLMClient, ParsedItem
 from app.models import PantryItem, Receipt
 from app.normalization import normalize
 from app.shelf_life_search import ShelfLifeSearchClient
+from app.shopping_service import check_off_purchased_names
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,7 @@ class IngestSummary:
     purchase_date: date | None = None
     purchase_date_assumed: bool = False
     cost_micros_usd: int | None = None
+    shopping_checked_names: list[str] = field(default_factory=list)
 
 
 async def ingest_photo(
@@ -136,12 +138,13 @@ async def ingest_photo(
         return summary
 
     try:
+        scanned_at = datetime.now(UTC)
         receipt = Receipt(
             household_id=household_id,
             photo_file_id=photo_file_id,
             purchase_date=purchase_date,
             purchase_date_source=purchase_date_source,
-            scanned_at=datetime.now(UTC),
+            scanned_at=scanned_at,
             llm_cost_micros_usd=llm_result.cost_micros_usd,
         )
         session.add(receipt)
@@ -207,6 +210,13 @@ async def ingest_photo(
             if track_uncached:
                 summary.uncached_item_ids.append(pantry_item.id)
             summary.inserted_food_count += 1
+        summary.shopping_checked_names = check_off_purchased_names(
+            session,
+            household_id=household_id,
+            names=summary.inserted_item_names,
+            now=scanned_at,
+            commit=False,
+        )
         session.commit()
     except IntegrityError:
         session.rollback()

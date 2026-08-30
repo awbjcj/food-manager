@@ -536,6 +536,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "✅ J’ai cuisiné ce plat",
         "es": "✅ Cociné este plato",
     },
+    "ingest.shopping_checked": {
+        "en": "Shopping list checked off: {names}",
+        "zh": "已从购物清单勾选：{names}",
+        "fr": "Articles cochés dans la liste de courses : {names}",
+        "es": "Marcado en la lista de compras: {names}",
+    },
     "history.title": {
         "en": "🍽 Cooked history",
         "zh": "🍽 烹饪记录",

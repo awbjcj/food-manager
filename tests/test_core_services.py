@@ -245,15 +245,26 @@ async def test_ingest_photo_happy_path_and_duplicate_guard(session):
         photo_file_id="fid",
         image_bytes=b"jpg",
         today=date(2026, 5, 26),
+        scanned_at=datetime(2026, 5, 26, 12, tzinfo=UTC),
     )
     assert summary.inserted_food_count == 2
     assert summary.skipped_non_food_count == 1
     assert summary.shopping_checked_names == ["Whole Milk"]
     assert [row.name_raw for row in list_pending(session, household_id=1)] == ["Eggs"]
-    assert {i.normalized_name for i in session.exec(select(PantryItem)).all()} == {
+    inserted = session.exec(select(PantryItem)).all()
+    assert {i.normalized_name for i in inserted} == {
         "whole milk",
         "bananas",
     }
+    assert {i.created_at.replace(tzinfo=UTC) for i in inserted} == {
+        datetime(2026, 5, 26, 12, tzinfo=UTC)
+    }
+    assert summary.receipt_id is not None
+    receipt = session.get(Receipt, summary.receipt_id)
+    assert receipt is not None
+    assert receipt.scanned_at.replace(tzinfo=UTC) == datetime(
+        2026, 5, 26, 12, tzinfo=UTC
+    )
     with pytest.raises(DuplicateReceipt):
         await ingest_photo(
             session,
@@ -262,6 +273,7 @@ async def test_ingest_photo_happy_path_and_duplicate_guard(session):
             photo_file_id="fid",
             image_bytes=b"jpg",
             today=date(2026, 5, 26),
+            scanned_at=datetime(2026, 5, 26, 12, tzinfo=UTC),
         )
 
 
@@ -275,6 +287,7 @@ async def test_ingest_photo_confidence_and_purchase_date_fallback(session):
     summary = await ingest_photo(
         session, llm, household_id=1, photo_file_id="fid2", image_bytes=b"jpg",
         today=date(2026, 5, 26),
+        scanned_at=datetime(2026, 5, 26, 12, tzinfo=UTC),
     )
     assert summary.purchase_date_assumed is True
     assert summary.inserted_food_count == 1

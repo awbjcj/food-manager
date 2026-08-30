@@ -17,6 +17,7 @@ def upgrade() -> None:
         sa.Column("bound_by_user_id", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["household_id"], ["household.id"]),
+        sa.ForeignKeyConstraint(["bound_by_user_id"], ["user.telegram_id"]),
     )
     op.create_index(
         "ix_groupbinding_household_id",

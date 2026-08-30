@@ -15,8 +15,26 @@ def _escape(value: str) -> str:
         .replace(";", "\\;")
         .replace(",", "\\,")
         .replace("\r\n", "\\n")
+        .replace("\r", "\\n")
         .replace("\n", "\\n")
     )
+
+
+def _fold_content_line(line: str) -> list[str]:
+    """Fold one RFC 5545 content line without splitting UTF-8 code points."""
+    parts: list[str] = []
+    current = ""
+    byte_limit = 75
+    for char in line:
+        candidate = current + char
+        if current and len(candidate.encode("utf-8")) > byte_limit:
+            parts.append(current)
+            current = char
+            byte_limit = 74  # continuation line's leading space counts
+        else:
+            current = candidate
+    parts.append(current)
+    return [parts[0], *(f" {part}" for part in parts[1:])]
 
 
 def _utc_stamp(value: datetime) -> str:
@@ -60,7 +78,8 @@ def build_plan_calendar(
             lines.append(f"URL:{recipe.source_url}")
         lines.append("END:VEVENT")
     lines.append("END:VCALENDAR")
-    return "\r\n".join(lines) + "\r\n"
+    folded = [physical for line in lines for physical in _fold_content_line(line)]
+    return "\r\n".join(folded) + "\r\n"
 
 
 __all__ = ["build_plan_calendar"]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Literal
 
 from sqlalchemy.exc import IntegrityError
@@ -86,6 +86,7 @@ async def ingest_photo(
     photo_file_id: str,
     image_bytes: bytes,
     today: date,
+    scanned_at: datetime,
     search: ShelfLifeSearchClient | None = None,
 ) -> IngestSummary:
     existing = session.exec(
@@ -138,7 +139,6 @@ async def ingest_photo(
         return summary
 
     try:
-        scanned_at = datetime.now(UTC)
         receipt = Receipt(
             household_id=household_id,
             photo_file_id=photo_file_id,
@@ -196,7 +196,7 @@ async def ingest_photo(
                 storage=storage,
                 stored_on=stored_on,
                 source_receipt_id=receipt.id,
-                created_at=datetime.now(UTC),
+                created_at=scanned_at,
             )
             session.add(pantry_item)
             session.flush()

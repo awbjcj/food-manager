@@ -696,6 +696,7 @@ async def handle_photo(
                 photo_file_id=file_id,
                 image_bytes=await photo_downloader(file_id),
                 today=today,
+                scanned_at=now.astimezone(UTC),
                 search=selected_search,
             )
         except LLMProviderNotConfigured:

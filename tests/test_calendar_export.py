@@ -69,6 +69,21 @@ def test_build_plan_calendar_emits_all_day_event_and_escapes_text():
     assert payload.endswith("END:VCALENDAR\r\n")
 
 
+def test_build_plan_calendar_folds_long_utf8_content_lines():
+    plan, entry = _plan_and_entry()
+    candidate = _candidate(title="晚餐" * 30)
+    candidate.recipe.method_gist = "慢炖" * 40
+    entry.recipe_json = candidate.model_dump_json()
+
+    payload = build_plan_calendar(plan, [entry])
+    physical_lines = payload.removesuffix("\r\n").split("\r\n")
+
+    assert all(len(line.encode("utf-8")) <= 75 for line in physical_lines)
+    assert any(line.startswith(" ") for line in physical_lines)
+    unfolded = payload.replace("\r\n ", "")
+    assert f"SUMMARY:{'晚餐' * 30}\r\n" in unfolded
+
+
 @pytest.fixture
 def session_factory():
     engine = create_engine("sqlite:///:memory:")

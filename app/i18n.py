@@ -1477,12 +1477,6 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "Rejoignez ou créez un foyer en privé avant d'utiliser /bind.",
         "es": "Únete o crea un hogar por chat privado antes de usar /bind.",
     },
-    "group.bind.conflict": {
-        "en": "This group is already bound to another household.",
-        "zh": "此群组已绑定到另一个家庭。",
-        "fr": "Ce groupe est déjà lié à un autre foyer.",
-        "es": "Este grupo ya está vinculado a otro hogar.",
-    },
     "group.dm_only": {
         "en": "Invites and joining are only available in a private chat with the bot.",
         "zh": "邀请和加入仅可在与机器人的私聊中使用。",

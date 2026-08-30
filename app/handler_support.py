@@ -185,9 +185,13 @@ def authorized_callback_user(session: Session, telegram_id: int) -> User | None:
 def authorized_callback_query_user(session: Session, callback) -> User | None:
     message = getattr(callback, "message", None)
     chat = getattr(message, "chat", None)
-    chat_type = getattr(chat, "type", None)
-    if chat_type not in {"group", "supergroup"}:
+    raw_chat_type = getattr(chat, "type", None)
+    if raw_chat_type is None or not isinstance(raw_chat_type, str):
         chat_type = "private"
+    elif raw_chat_type in {"private", "group", "supergroup"}:
+        chat_type = raw_chat_type
+    else:
+        return None
     chat_id = getattr(chat, "id", callback.from_user.id)
     decision = authorize_and_get_user(
         session,

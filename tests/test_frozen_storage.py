@@ -224,6 +224,7 @@ async def test_ingest_marks_frozen_item_with_long_expiry(session):
         photo_file_id="p1",
         image_bytes=b"x",
         today=today,
+        scanned_at=datetime(2026, 6, 8, 12, tzinfo=UTC),
     )
     assert summary.inserted_food_count == 1
     item = session.get(PantryItem, summary.inserted_item_ids[0])
@@ -254,6 +255,7 @@ async def test_ingest_frozen_foodkeeper_miss_uses_search(session):
         photo_file_id="p2",
         image_bytes=b"x",
         today=today,
+        scanned_at=datetime(2026, 6, 8, 12, tzinfo=UTC),
         search=search,
     )
     item = session.get(PantryItem, summary.inserted_item_ids[0])

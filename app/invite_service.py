@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from sqlmodel import Session, select
 
 from app.billing.entitlement import get_or_create_subscription, roll_period_if_due
+from app.group_service import transfer_group_bindings
 from app.models import HouseholdInvite, User
 
 INVITE_TTL_HOURS = 24
@@ -228,6 +229,12 @@ def remove_member(
     if target is None or target.household_id != household_id:
         raise MemberNotFound()
     removed = Member(telegram_id=target.telegram_id, role=target.role)
+    transfer_group_bindings(
+        session,
+        household_id=household_id,
+        from_user_id=target.telegram_id,
+        to_user_id=actor.telegram_id,
+    )
     _revoke_invites_from(session, created_by=target.telegram_id)
     session.delete(target)
     session.commit()
@@ -242,6 +249,20 @@ def leave_household(session: Session, *, telegram_user_id: int) -> None:
         raise MemberNotFound()
     if user.role == "owner":
         raise OwnerCannotLeave()
+    owner = session.exec(
+        select(User).where(
+            User.household_id == user.household_id,
+            User.role == "owner",
+        )
+    ).first()
+    if owner is None:
+        raise OwnerCannotLeave()
+    transfer_group_bindings(
+        session,
+        household_id=user.household_id,
+        from_user_id=telegram_user_id,
+        to_user_id=owner.telegram_id,
+    )
     _revoke_invites_from(session, created_by=telegram_user_id)
     session.delete(user)
     session.commit()

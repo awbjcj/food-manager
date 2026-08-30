@@ -38,6 +38,13 @@ def test_alembic_upgrade_creates_all_tables(tmp_path, monkeypatch):
     }
     assert "llm_provider" in user_columns
 
+    group_foreign_keys = {
+        (row[3], row[2], row[4])
+        for row in cur.execute("PRAGMA foreign_key_list('groupbinding')").fetchall()
+    }
+    assert ("household_id", "household", "id") in group_foreign_keys
+    assert ("bound_by_user_id", "user", "telegram_id") in group_foreign_keys
+
     indexes = {
         row[1]: bool(row[2])
         for row in cur.execute("PRAGMA index_list('receipt')").fetchall()

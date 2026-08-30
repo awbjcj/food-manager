@@ -7,9 +7,10 @@ import pytest
 from sqlmodel import Session, SQLModel, create_engine
 
 from app import handler_support
-from app.group_service import GroupBindingConflict, bind_group
+from app.group_service import bind_group
 from app.handlers.household import handle_bind, handle_invite, handle_join
 from app.handlers.meta import handle_photo
+from app.invite_service import leave_household
 from app.models import GroupBinding, Household, User
 
 
@@ -32,6 +33,7 @@ def session():
                 telegram_id=1,
                 chat_id=1,
                 household_id=first.id,
+                role="owner",
                 created_at=datetime.now(UTC),
             )
         )
@@ -60,7 +62,7 @@ def _msg(text: str, *, user_id: int = 1, chat_id: int = -100, chat_type="group")
     return msg
 
 
-def test_binding_is_idempotent_and_cannot_be_hijacked(session):
+def test_binding_is_idempotent_and_can_be_rebound(session):
     user = session.get(User, 1)
     other = session.get(User, 2)
     assert user is not None
@@ -83,14 +85,16 @@ def test_binding_is_idempotent_and_cannot_be_hijacked(session):
     assert first.created is True
     assert repeated.created is False
 
-    with pytest.raises(GroupBindingConflict):
-        bind_group(
-            session,
-            chat_id=-100,
-            household_id=other.household_id,
-            bound_by_user_id=other.telegram_id,
-            created_at=datetime.now(UTC),
-        )
+    rebound = bind_group(
+        session,
+        chat_id=-100,
+        household_id=other.household_id,
+        bound_by_user_id=other.telegram_id,
+        created_at=datetime.now(UTC),
+    )
+    assert rebound.created is False
+    assert rebound.binding.household_id == other.household_id
+    assert rebound.binding.bound_by_user_id == other.telegram_id
 
 
 def test_group_authorization_requires_binding_and_matching_membership(session):
@@ -158,6 +162,41 @@ def test_group_callback_uses_the_same_household_boundary(session, monkeypatch):
     assert handler_support.authorized_callback_query_user(session, cb) == user
     cb.from_user = MagicMock(id=2)
     assert handler_support.authorized_callback_query_user(session, cb) is None
+
+
+def test_group_callback_rejects_unsupported_chat_type(session, monkeypatch):
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
+    cb = MagicMock()
+    cb.from_user = MagicMock(id=1)
+    cb.message.chat = MagicMock(id=-100, type="channel")
+    assert handler_support.authorized_callback_query_user(session, cb) is None
+
+
+def test_departing_binder_transfers_reference_to_owner(session):
+    owner = session.get(User, 1)
+    assert owner is not None
+    member = User(
+        telegram_id=3,
+        chat_id=3,
+        household_id=owner.household_id,
+        role="member",
+        created_at=datetime.now(UTC),
+    )
+    session.add(member)
+    session.commit()
+    bind_group(
+        session,
+        chat_id=-100,
+        household_id=owner.household_id,
+        bound_by_user_id=member.telegram_id,
+        created_at=datetime.now(UTC),
+    )
+
+    leave_household(session, telegram_user_id=member.telegram_id)
+
+    binding = session.get(GroupBinding, -100)
+    assert binding is not None
+    assert binding.bound_by_user_id == owner.telegram_id
 
 
 @pytest.mark.asyncio

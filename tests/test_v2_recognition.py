@@ -62,6 +62,7 @@ async def test_ingest_excludes_non_trackable_and_reports(session):
     summary = await ingest_photo(
         session, llm, household_id=1, photo_file_id="fid", image_bytes=b"jpg",
         today=date(2026, 5, 28),
+        scanned_at=datetime(2026, 5, 28, 12, tzinfo=UTC),
     )
     assert summary.inserted_food_count == 1
     assert summary.skipped_excluded_count == 2

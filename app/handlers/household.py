@@ -17,7 +17,7 @@ from app.commands import (
     parse_member_id,
     parse_tz,
 )
-from app.group_service import GroupBindingConflict, bind_group
+from app.group_service import bind_group
 from app.i18n import DEFAULT_LANG, LANGS, t
 from app.invite_service import (
     AlreadyMember,
@@ -273,17 +273,13 @@ async def handle_bind(
             await msg.answer(t("group.bind.member_required", DEFAULT_LANG))
             return
         user = status.user
-        try:
-            bind_group(
-                session,
-                chat_id=msg.chat.id,
-                household_id=user.household_id,
-                bound_by_user_id=user.telegram_id,
-                created_at=datetime.now(UTC),
-            )
-        except GroupBindingConflict:
-            await msg.answer(t("group.bind.conflict", user.lang))
-            return
+        bind_group(
+            session,
+            chat_id=msg.chat.id,
+            household_id=user.household_id,
+            bound_by_user_id=user.telegram_id,
+            created_at=datetime.now(UTC),
+        )
         await msg.answer(t("group.bind.success", user.lang, id=msg.chat.id))
 
 

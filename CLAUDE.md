@@ -111,7 +111,7 @@ Per-user language (`User.lang`, one of `en|zh|fr|es`; `/lang` to set). **The DB 
 A household can have multiple members who share everything household-scoped (pantry, shopping list, `ShelfLifeCache`, food profile) automatically — sharing is a consequence of every domain row being keyed by `household_id`, so no per-feature work is needed. Per-user settings (`lang`, `tz`, `digest_hour`, `llm_provider`, digest job) stay on `User`.
 
 - **Single authorization gate**: `resolve_authorization()` in `handler_support.py` allows a non-banned existing member, or first contact when `OPEN_REGISTRATION` is enabled (the bootstrap `ALLOWED_TELEGRAM_USER_ID` is always eligible). Bans are rejected before handlers run; invite redemption remains a separate admission path.
-- **Group binding**: in hosted mode, an existing member can run `/bind` in a group or supergroup. `GroupBinding` fixes that chat to one household; every command and callback checks the sender still belongs to it. Unknown users are never provisioned from group traffic, a different household cannot rebind the chat, and receipt photos plus invite/join flows remain private-only.
+- **Group binding**: in hosted mode, an existing member can run `/bind` in a group or supergroup. `GroupBinding` maps that chat to one household; rebinding is an explicit upsert, and every later command/callback checks the sender belongs to the current household. Unknown users are never provisioned from group traffic, and receipt photos plus invite/join flows remain private-only. If a binder leaves, the audit FK transfers to the household owner.
 
 ### Commercial entitlement (v6.0)
 

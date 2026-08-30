@@ -3,16 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.models import GroupBinding, User
 
 
 class GroupBindingError(ValueError):
-    pass
-
-
-class GroupBindingConflict(GroupBindingError):
     pass
 
 
@@ -48,8 +44,12 @@ def bind_group(
 
     existing = get_group_binding(session, chat_id=chat_id)
     if existing is not None:
-        if existing.household_id != household_id:
-            raise GroupBindingConflict("group is already bound to another household")
+        existing.household_id = household_id
+        existing.bound_by_user_id = bound_by_user_id
+        existing.created_at = created_at
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
         return BindResult(existing, created=False)
 
     binding = GroupBinding(
@@ -62,3 +62,26 @@ def bind_group(
     session.commit()
     session.refresh(binding)
     return BindResult(binding, created=True)
+
+
+def transfer_group_bindings(
+    session: Session,
+    *,
+    household_id: int,
+    from_user_id: int,
+    to_user_id: int,
+) -> int:
+    """Keep group-binding audit references valid when a member leaves."""
+    replacement = session.get(User, to_user_id)
+    if replacement is None or replacement.household_id != household_id:
+        raise GroupBindingUnauthorized("replacement is not a household member")
+    rows = session.exec(
+        select(GroupBinding).where(
+            GroupBinding.household_id == household_id,
+            GroupBinding.bound_by_user_id == from_user_id,
+        )
+    ).all()
+    for row in rows:
+        row.bound_by_user_id = to_user_id
+        session.add(row)
+    return len(rows)

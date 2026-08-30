@@ -71,14 +71,11 @@ class User(SQLModel, table=True):
 
 class GroupBinding(SQLModel, table=True):
     """A Telegram group chat bound to exactly one household.
-
-    ``bound_by_user_id`` is intentionally not a foreign key: the binding must
-    survive if the member who created it later leaves the household.
     """
 
     chat_id: int = Field(primary_key=True)
     household_id: int = Field(foreign_key="household.id", index=True)
-    bound_by_user_id: int
+    bound_by_user_id: int = Field(foreign_key="user.telegram_id")
     created_at: datetime
 
 

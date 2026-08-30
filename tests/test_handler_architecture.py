@@ -53,6 +53,7 @@ def test_dispatcher_rosters_cover_every_supported_entry_point():
         "cook",
         "history",
         "plan",
+        "calendar",
         "shopping",
         "favorites",
         "llm",

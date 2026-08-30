@@ -5,11 +5,13 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+from aiogram.types import BufferedInputFile
 from sqlmodel import Session, select
 
 import app.plan_service as plan_service_mod
 from app import handler_support, views
 from app.billing.meter import admit, commit
+from app.calendar_export import build_plan_calendar
 from app.client_set import EMPTY_CLIENTS, PerUserClients
 from app.commands import (
     CommandError,
@@ -228,6 +230,48 @@ async def handle_plan_current(
         await msg.answer(text, reply_markup=keyboard)
 
 
+async def handle_calendar(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+) -> None:
+    """Export the active household meal plan as an iCalendar document."""
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+    ) as ctx:
+        if ctx is None:
+            return
+        plan = ctx.session.exec(
+            select(MealPlan)
+            .where(
+                MealPlan.household_id == ctx.user.household_id,
+                MealPlan.status == "active",
+            )
+            .order_by(MealPlan.created_at.desc())  # type: ignore[union-attr]
+        ).first()
+        if plan is None:
+            await msg.answer(t("plan.none_active", ctx.user.lang))
+            return
+        assert plan.id is not None
+        entries = list(
+            ctx.session.exec(
+                select(MealPlanEntry)
+                .where(MealPlanEntry.plan_id == plan.id)
+                .order_by(MealPlanEntry.day_index)  # type: ignore[arg-type]
+            ).all()
+        )
+        document = BufferedInputFile(
+            build_plan_calendar(plan, entries).encode("utf-8"),
+            filename=f"meal-plan-{plan.start_date.isoformat()}.ics",
+        )
+        await msg.answer_document(
+            document, caption=t("calendar.exported", ctx.user.lang)
+        )
+
+
 def _plan_entry_rows(session, plan_id: int):
     entries = list(
         session.exec(
@@ -274,5 +318,10 @@ COMMANDS = (
             "on_user_created",
             "translation_llm",
         ),
+    ),
+    (
+        "calendar",
+        handle_calendar,
+        ("session_factory", "on_user_created"),
     ),
 )

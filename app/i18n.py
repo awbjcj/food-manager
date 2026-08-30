@@ -560,6 +560,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "{date} · {title} · {source}",
         "es": "{date} · {title} · {source}",
     },
+    "calendar.exported": {
+        "en": "Calendar exported.",
+        "zh": "日历已导出。",
+        "fr": "Calendrier exporté.",
+        "es": "Calendario exportado.",
+    },
     "nl.shopping.added": {
         "en": "Added {n} item(s) to your shopping list.",
         "zh": "已向购物清单添加 {n} 项。",
@@ -955,6 +961,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /cook - get a recipe from your pantry\n"
             "  /history - show meals your household cooked\n"
             "  /plan [3-7] - plan dinners for the week (default 5 days)\n"
+            "  /calendar - export the active plan to your calendar\n"
             "  /shopping - view your to-buy list; tap an item when bought\n"
             "  /favorites - view saved recipes; tap to re-cook against your pantry\n"
             "  /invite [family] - invite one person (or 'family' for a reusable link)\n"
@@ -992,6 +999,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /cook - 从您的储藏获取食谱\n"
             "  /history - 查看家庭烹饪记录\n"
             "  /plan [3-7] - 规划本周晚餐（默认5天）\n"
+            "  /calendar - 将当前计划导出到日历\n"
             "  /shopping - 查看待购清单；点击已购买的物品\n"
             "  /favorites - 查看已保存食谱；点击重新烹饪\n"
             "  /invite [family] - 邀请一人（或用 'family' 生成可重复使用的链接）\n"
@@ -1029,6 +1037,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /cook - obtenir une recette depuis votre garde-manger\n"
             "  /history - afficher les repas cuisinés du foyer\n"
             "  /plan [3-7] - planifier les dîners de la semaine (5 jours par défaut)\n"
+            "  /calendar - exporter le plan actif vers votre calendrier\n"
             "  /shopping - voir votre liste de courses ; appuyez sur un article acheté\n"
             "  /favorites - voir les recettes sauvegardées ; appuyez pour recuire\n"
             "  /invite [family] - inviter une personne (ou 'family' pour un lien réutilisable)\n"
@@ -1066,6 +1075,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /cook - obtener una receta de tu despensa\n"
             "  /history - ver las comidas cocinadas del hogar\n"
             "  /plan [3-7] - planifica las cenas de la semana (5 días por defecto)\n"
+            "  /calendar - exportar el plan activo a tu calendario\n"
             "  /shopping - ver tu lista de compras; toca un artículo comprado\n"
             "  /favorites - ver recetas guardadas; toca para volver a cocinar\n"
             "  /invite [family] - invitar a una persona (o 'family' para un enlace reutilizable)\n"

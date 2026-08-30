@@ -31,9 +31,9 @@ share-ready promotional copy and onboarding instructions.
 5. **Shelf life learning**: When you apply a `/correct` proposal, that correction can teach future imports of the same item.
 6. **Manual add**: Use `/add` for items you didn't receive a receipt for. The bot proposes parsed items before inserting them.
 7. **Recipes from your pantry**: `/cook` suggests a recipe built from what's about to expire, respecting your food profile (`/prefs`); save favorites and build a shopping list for what's missing.
-8. **Meal planning and feedback**: `/plan 3` through `/plan 7` creates a multi-day dinner plan, aggregates missing ingredients, and lets you record what was cooked so pantry quantities and waste analytics stay current.
-9. **Natural conversation**: Tell the bot “bought milk and eggs,” “ate the yogurt,” or “how long does salmon keep?” instead of memorizing every command.
-10. **Shared households**: `/invite` a household member to share your pantry, shopping list, preferences, quota, and plan; each member still controls their own language, timezone, and LLM provider.
+8. **Meal planning and feedback**: `/plan 3` through `/plan 7` creates a multi-day dinner plan, `/calendar` exports it, and cooked actions plus `/history` keep pantry quantities and meal history current.
+9. **Natural conversation**: Tell the bot “bought milk and eggs,” “remove milk from my shopping list,” “correct yogurt to expire Friday,” or “how long does salmon keep?” instead of memorizing every command.
+10. **Shared households and groups**: `/invite` members to share pantry, shopping, quota, and plans; in hosted mode, `/bind` lets the same household operate safely from a group chat.
 11. **Mini App and billing**: The Telegram Mini App provides account settings, quota visibility, Family-plan checkout, top-ups, and subscription management using Telegram Stars.
 12. **Flexible provider funding**: Operators can keep providers on metered API keys or route individual providers through an existing Sub2API-backed subscription without restarting the bot.
 
@@ -153,11 +153,14 @@ reverted.
 | `/llm [anthropic\|openai\|gemini\|deepseek]` | Show or switch the LLM provider                                                   |
 | `/prefs [sentence]`                          | Show or update your household's food profile                                      |
 | `/cook`                                      | Get a recipe built from your pantry                                               |
+| `/history`                                   | Show meals your household cooked                                                  |
 | `/plan [3-7]`                                | Create a 3–7 day dinner plan (default 5 days)                                     |
+| `/calendar`                                  | Export the active dinner plan as an `.ics` calendar file                          |
 | `/shopping`                                  | View your to-buy list; tap an item once bought                                    |
 | `/favorites`                                 | View saved recipes; tap to re-cook against your current pantry                    |
 | `/invite [family]`                           | Invite one person (or `family` for a reusable link) to your household             |
 | `/join <code>`                               | Join a household you were invited to                                              |
+| `/bind`                                      | Bind the current hosted group chat to your household                              |
 | `/household`                                 | List household members                                                            |
 | `/leave`                                     | Leave your household                                                              |
 | `/remove <id>`                               | (owner) Remove a member from your household                                       |

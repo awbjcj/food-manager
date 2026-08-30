@@ -67,7 +67,9 @@ Single-user Telegram bot: user sends grocery receipt photos → Claude parses th
 | `app/storage_state.py`       | Storage State axis (`default → fridge → frozen`, forward-only) + `shelf_life_origin`/`compute_expiry` shared formula                                                                                                                                                                                                                                                                                                                           |
 | `app/frozen_shelf_life.py`   | `resolve_storage_days` (generic, parameterised by Storage State; `resolve_frozen_days` is a frozen-only wrapper): cache → vendored USDA FoodKeeper table → web search → default fallback                                                                                                                                                                                                                                                       |
 | `app/profile_service.py`     | `FoodProfile` household food-preference model (diet, exclusions, cuisines, cook-time cap) read from/written to `Household`                                                                                                                                                                                                                                                                                                                     |
-| `app/shopping_service.py`    | Shopping list CRUD: add missing `/cook` ingredients, list, mark bought                                                                                                                                                                                                                                                                                                                                                                         |
+| `app/shopping_service.py`    | Shopping list CRUD: add/remove/list, mark bought, and receipt-ingest reconciliation                                                                                                                                                                                                                                                                                                                                                             |
+| `app/group_service.py`       | Durable group-chat binding with conflict-safe household ownership                                                                                                                                                                                                                                                                                                                                                                               |
+| `app/calendar_export.py`     | Standards-compatible `.ics` export of the active meal plan                                                                                                                                                                                                                                                                                                                                                                                       |
 | `app/billing/*`              | Plan catalog, quota admission/recording, entitlement rollover, Stars payment rail, and append-only ledger                                                                                                                                                                                                                                                                                                                                      |
 | `app/handlers/billing.py`    | `/quota`, `/buy`, `/billing`, pre-checkout validation, and atomic successful-payment application                                                                                                                                                                                                                                                                                                                                               |
 | `app/operator/*`             | Fail-closed operator identity, household reports, grants, refunds, bans, revenue, and reconciliation                                                                                                                                                                                                                                                                                                                                           |
@@ -109,6 +111,7 @@ Per-user language (`User.lang`, one of `en|zh|fr|es`; `/lang` to set). **The DB 
 A household can have multiple members who share everything household-scoped (pantry, shopping list, `ShelfLifeCache`, food profile) automatically — sharing is a consequence of every domain row being keyed by `household_id`, so no per-feature work is needed. Per-user settings (`lang`, `tz`, `digest_hour`, `llm_provider`, digest job) stay on `User`.
 
 - **Single authorization gate**: `resolve_authorization()` in `handler_support.py` allows a non-banned existing member, or first contact when `OPEN_REGISTRATION` is enabled (the bootstrap `ALLOWED_TELEGRAM_USER_ID` is always eligible). Bans are rejected before handlers run; invite redemption remains a separate admission path.
+- **Group binding**: in hosted mode, an existing member can run `/bind` in a group or supergroup. `GroupBinding` fixes that chat to one household; every command and callback checks the sender still belongs to it. Unknown users are never provisioned from group traffic, a different household cannot rebind the chat, and receipt photos plus invite/join flows remain private-only.
 
 ### Commercial entitlement (v6.0)
 
@@ -257,6 +260,8 @@ agent (`app/nl_intent.py`, classify-only, stateless, per-provider like the
 text seams) maps the message to a typed `NLIntent`, and the handler dispatches
 to existing services — add → the `/add` pending flow via `_run_add_flow`,
 unambiguous marks apply directly, ambiguous marks show an `item:open` picker,
+corrections reuse the pending Apply/Cancel diff, shopping intents add/remove/show
+through the deterministic shopping service,
 shelf-life questions answer from cache → defaults → web search, pantry queries
 reuse the digest render. Agent failure degrades to a help hint; with no
 provider configured the catch-all is not registered. `/help` is tiered
@@ -302,15 +307,16 @@ migration needed since it's not persisted.
 
 ### Closing the loop (v5.5)
 
-A planned day can be marked cooked from the plan card (`plan:cooked:<id>:<day>`),
+A planned day or an ad-hoc `/cook` result can be marked cooked from its card
+(`plan:cooked:<id>:<day>` or `cookmade:<session_id>`),
 which opens a consume sheet: every active pantry row whose `normalized_name`
 appears in the recipe — the exact complement of `cook/logic.py::shopping_list` —
 pre-checked, toggled via `cooked:tog:<cooked_id>:<item_id>`, and confirmed
 through the existing `mark_eaten`. The `CookedMeal` row is both the pending
 sheet (`selection_json`) and the permanent record; `confirmed_at` is the only
 thing that makes it count, so an abandoned sheet asserts nothing. It is keyed by
-household + `recipe_key` rather than by plan, so wiring `/cook` result cards
-later (`source="cook"`) is a new call site, not a migration.
+household + `recipe_key` rather than by plan. `/history` lists the household's
+confirmed records from both sources.
 
 Confirmed cooks feed `app/cook/novelty.py`, a fifth `blended_score` term
 (`health 0.30 / expiry 0.30 / deliciousness 0.15 / affinity 0.15 / novelty

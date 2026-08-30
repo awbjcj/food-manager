@@ -14,8 +14,9 @@ from app.commands import (
     parse_llm_provider,
 )
 from app.cook.cooked_service import open_sheet
+from app.cook.models import RecipeIngredient
 from app.handlers.cook import handle_cook
-from app.handlers.pantry import _run_add_flow
+from app.handlers.pantry import _propose_and_send_correction, _run_add_flow
 from app.handlers.plan import handle_plan
 from app.i18n import t
 from app.ingest_service import DuplicateReceipt, ingest_photo
@@ -40,12 +41,18 @@ from app.renderer import (
     CallbackButton,
     build_cooked_sheet_keyboard,
     build_digest_keyboard,
+    build_shopping_keyboard,
     build_undo_keyboard,
     render_ingest_reply,
     render_profile,
 )
 from app.shelf_life_defaults import lookup_default
 from app.shelf_life_search import resolve_search_days
+from app.shopping_service import (
+    add_missing,
+    check_off_purchased_names,
+    list_pending,
+)
 from app.telegram_ui import to_aiogram_keyboard
 
 log = logging.getLogger(__name__)
@@ -294,6 +301,103 @@ async def _dispatch_nl_intent(
             clients=clients,
             progress=None,
         )
+        return
+    if intent.kind == "correct" and intent.item_name:
+        matches = match_items(intent.item_name, pantry)
+        if not matches:
+            await finish_progress(
+                progress, msg, t("nl.not_found", user.lang, name=intent.item_name)
+            )
+            return
+        if len(matches) > 1:
+            picker = await views.nl_picker(
+                session, matches, user=user, translation_llm=translation_llm
+            )
+            await finish_progress(
+                progress,
+                msg,
+                t("nl.which_one", user.lang),
+                to_aiogram_keyboard(picker.rows),
+            )
+            return
+        now = now_provider(user.tz)
+        decision = admit(
+            session,
+            household_id=user.household_id,
+            op="edit",
+            provider=user.llm_provider,
+            now=now,
+        )
+        if not decision.allowed:
+            await finish_progress(
+                progress, msg, t("quota.degraded.correction", user.lang)
+            )
+            return
+        await clear_progress(progress)
+        await _propose_and_send_correction(
+            msg,
+            session=session,
+            user=user,
+            item=matches[0],
+            user_text=text,
+            today=today,
+            clients=clients,
+        )
+        commit(
+            session,
+            household_id=user.household_id,
+            op="edit",
+            provider=user.llm_provider,
+            cost_micros=None,
+            now=now,
+        )
+        return
+    if intent.kind == "shopping" and intent.shopping_action:
+        action = intent.shopping_action
+        now = now_provider(user.tz)
+        if action == "show":
+            items = list_pending(session, household_id=user.household_id)
+            view = await views.shopping(
+                session, items, user=user, translation_llm=translation_llm
+            )
+            keyboard = (
+                to_aiogram_keyboard(
+                    build_shopping_keyboard(
+                        [item.id for item in items if item.id], lang=user.lang
+                    )
+                )
+                if items
+                else None
+            )
+            await finish_progress(progress, msg, view.text, keyboard)
+            return
+        if not intent.shopping_items:
+            await finish_progress(progress, msg, t("nl.shopping.invalid", user.lang))
+            return
+        if action == "add":
+            result = add_missing(
+                session,
+                household_id=user.household_id,
+                ingredients=[
+                    RecipeIngredient(name=name) for name in intent.shopping_items
+                ],
+                now=now,
+            )
+            key = "nl.shopping.added" if result.added else "nl.shopping.already"
+            await finish_progress(
+                progress,
+                msg,
+                t(key, user.lang, n=len(result.added or result.already)),
+            )
+            return
+        removed = check_off_purchased_names(
+            session,
+            household_id=user.household_id,
+            names=intent.shopping_items,
+            now=now,
+        )
+        key = "nl.shopping.removed" if removed else "nl.shopping.not_found"
+        await finish_progress(progress, msg, t(key, user.lang, n=len(removed)))
         return
     if intent.kind == "shelf_life_question" and intent.food:
         answer = await _answer_shelf_life(

@@ -10,9 +10,11 @@ import app.handlers.meta as meta_handlers
 from app import handler_support
 from app.billing import meter
 from app.client_set import PerUserClients
+from app.cook.models import RecipeIngredient
 from app.i18n import t
 from app.models import Household, MealPlan, MealPlanEntry, PantryItem, User
 from app.nl_intent import NLIntent
+from app.shopping_service import add_missing, list_pending
 
 
 class FakeIntentAgentSelector:
@@ -293,6 +295,118 @@ async def test_add_routes_raw_text_to_add_flow(session_factory, monkeypatch):
     )
     assert captured["raw_text"] == "bought milk and two avocados"
     assert captured["clients"] is clients
+
+
+@pytest.mark.asyncio
+async def test_correction_intent_reuses_confirmed_correction_flow(
+    session_factory, monkeypatch
+):
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
+    _seed_item(session_factory, "milk")
+    captured = {}
+
+    async def fake_propose(msg, **kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(meta_handlers, "_propose_and_send_correction", fake_propose)
+    msg = _nl_msg("the milk expires tomorrow")
+    clients = PerUserClients.for_tests(text="TEXT_LLM")
+
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
+        intent_agent=FakeIntentAgentSelector(
+            intent=NLIntent(kind="correct", item_name="milk")
+        ),
+        clients=clients,
+    )
+
+    assert captured["item"].normalized_name == "milk"
+    assert captured["user_text"] == "the milk expires tomorrow"
+    assert captured["clients"] is clients
+
+
+@pytest.mark.asyncio
+async def test_shopping_intent_adds_multiple_items(session_factory, monkeypatch):
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
+    msg = _nl_msg("add milk and eggs to my shopping list")
+
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
+        intent_agent=FakeIntentAgentSelector(
+            intent=NLIntent(
+                kind="shopping",
+                shopping_action="add",
+                shopping_items=["milk", "eggs"],
+            )
+        ),
+    )
+
+    with session_factory() as db:
+        assert [row.name_normalized for row in list_pending(db, household_id=1)] == [
+            "milk",
+            "eggs",
+        ]
+    assert "Added 2" in _final_text(msg)
+
+
+@pytest.mark.asyncio
+async def test_shopping_intent_checks_off_named_item(session_factory, monkeypatch):
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
+    with session_factory() as db:
+        add_missing(
+            db,
+            household_id=1,
+            ingredients=[RecipeIngredient(name="Milk"), RecipeIngredient(name="Eggs")],
+            now=datetime(2026, 7, 9, tzinfo=UTC),
+        )
+    msg = _nl_msg("I bought the milk")
+
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
+        intent_agent=FakeIntentAgentSelector(
+            intent=NLIntent(
+                kind="shopping",
+                shopping_action="remove",
+                shopping_items=["milk"],
+            )
+        ),
+    )
+
+    with session_factory() as db:
+        assert [row.name_normalized for row in list_pending(db, household_id=1)] == [
+            "eggs"
+        ]
+    assert "Removed 1" in _final_text(msg)
+
+
+@pytest.mark.asyncio
+async def test_shopping_intent_shows_pending_list(session_factory, monkeypatch):
+    monkeypatch.setattr(handler_support, "ALLOWED_TELEGRAM_USER_ID", 1)
+    with session_factory() as db:
+        add_missing(
+            db,
+            household_id=1,
+            ingredients=[RecipeIngredient(name="Milk")],
+            now=datetime(2026, 7, 9, tzinfo=UTC),
+        )
+    msg = _nl_msg("show my shopping list")
+
+    await bot_mod.handle_nl_message(
+        msg,
+        session_factory=session_factory,
+        now_provider=lambda tz: datetime(2026, 7, 9, tzinfo=UTC),
+        intent_agent=FakeIntentAgentSelector(
+            intent=NLIntent(kind="shopping", shopping_action="show")
+        ),
+    )
+
+    assert "Milk" in _final_text(msg)
 
 
 @pytest.mark.asyncio

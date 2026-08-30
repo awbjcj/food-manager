@@ -20,6 +20,8 @@ def test_nlintent_defaults():
     assert intent.mark_action is None
     assert intent.item_name is None
     assert intent.food is None
+    assert intent.shopping_action is None
+    assert intent.shopping_items == []
 
 
 def test_match_items_exact_beats_substring():
@@ -139,8 +141,16 @@ async def test_shelf_life_unknown_is_honest(session_factory):
 def test_intent_schema_covers_the_v55_kinds():
     from app.nl_intent import NLIntent
 
-    for kind in ("cook", "plan", "cooked"):
+    for kind in ("cook", "plan", "cooked", "correct", "shopping"):
         assert NLIntent(kind=kind).kind == kind
+
+
+def test_shopping_intent_carries_action_and_items():
+    intent = NLIntent(
+        kind="shopping", shopping_action="add", shopping_items=["milk", "eggs"]
+    )
+    assert intent.shopping_action == "add"
+    assert intent.shopping_items == ["milk", "eggs"]
 
 
 def test_plan_intent_carries_an_optional_day_count():
@@ -155,3 +165,5 @@ def test_instructions_draw_the_mark_versus_cooked_boundary():
 
     assert "cooked" in _INSTRUCTIONS
     assert "planned meal" in _INSTRUCTIONS
+    assert '"correct"' in _INSTRUCTIONS
+    assert '"shopping"' in _INSTRUCTIONS

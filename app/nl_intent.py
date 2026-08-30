@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from datetime import date
 from typing import Literal, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.agno_models import build_agno_model
 from app.normalization import normalize
@@ -38,12 +38,16 @@ class NLIntent(BaseModel):
         "cook",
         "plan",
         "cooked",
+        "correct",
+        "shopping",
         "unknown",
     ]
     mark_action: Literal["ate", "tossed", "snooze", "freeze"] | None = None
     item_name: str | None = None
     food: str | None = None
     days: int | None = None
+    shopping_action: Literal["add", "remove", "show"] | None = None
+    shopping_items: list[str] = Field(default_factory=list)
 
 
 class IntentAgent(Protocol):
@@ -70,11 +74,18 @@ Kinds:
 - "cooked": the user made the meal that was PLANNED for a day ("made tonight's
   dinner", "cooked the planned meal"). This is about a planned meal, not about
   one pantry item — "ate the yogurt" is "mark", never "cooked".
+- "correct": the user wants to fix ONE tracked pantry item ("the milk expires
+  tomorrow", "rename spinach to baby spinach"). Set item_name to the tracked item.
+  Classification only: the handler will always show a confirmation diff.
+- "shopping": the user explicitly refers to the shopping list: add items, remove
+  or check off bought items, or show the list. Set shopping_action to add|remove|show
+  and shopping_items to canonical English names for add/remove. Plain "bought milk"
+  is "add" (pantry acquisition), not "shopping", unless the shopping list is explicit.
 - "unknown": anything else, or when you are unsure.
 
 Rules:
 - The message may be in English, Chinese, French, or Spanish. Always return
-  item_name and food as lowercase canonical ENGLISH food names.
+  item_name, food, and shopping_items as lowercase canonical ENGLISH food names.
 - A list of the user's current pantry item names is provided; when the message
   refers to one of them, return that exact name as item_name.
 - Never invent an intent; prefer "unknown" over guessing.

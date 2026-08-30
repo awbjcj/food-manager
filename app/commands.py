@@ -179,6 +179,7 @@ Verb = Literal[
     "plan_shop",
     "plan_cancel",
     "plan_cooked",
+    "cook_cooked",
     "cooked_toggle",
     "cooked_confirm",
     "cooked_none",
@@ -313,6 +314,12 @@ def parse_callback(data: str) -> CallbackAction:
         return CallbackAction(verb="plan_cooked", item_id=plan_id, option_index=day_index)
     if data.startswith("plan:"):
         raise CommandError(f"unrecognized plan callback {data!r}")
+    if data.startswith("cookmade:"):
+        _, _, raw_id = data.partition(":")
+        try:
+            return CallbackAction(verb="cook_cooked", item_id=int(raw_id))
+        except ValueError as exc:
+            raise CommandError(f"bad cook id {raw_id!r}") from exc
     if data.startswith("cooked:"):
         parts = data.split(":")
         if len(parts) == 4 and parts[1] == "tog":

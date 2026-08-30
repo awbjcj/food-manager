@@ -540,6 +540,30 @@ def build_cooked_sheet_keyboard(
     return rows
 
 
+def render_cooked_history(
+    meals,
+    *,
+    today: date,
+    lang: str = "en",
+    names: Mapping[str, str] | None = None,
+) -> str:
+    if not meals:
+        return t("history.empty", lang)
+    lines = [t("history.title", lang), ""]
+    for meal in meals:
+        source = "/cook" if meal.source == "cook" else "/plan"
+        lines.append(
+            t(
+                "history.row",
+                lang,
+                date=_fmt_date(meal.cooked_on, today=today, lang=lang),
+                title=_name(names, meal.recipe_title),
+                source=source,
+            )
+        )
+    return "\n".join(lines)
+
+
 def build_nl_picker_keyboard(items, *, names=None) -> list[list[CallbackButton]]:
     """One labeled row per candidate item; tapping opens its v4.8 card."""
     resolved = names or {}
@@ -579,6 +603,11 @@ def build_cook_result_keyboard(
         [
             CallbackButton(text=t("btn.save", lang), callback_data=f"cooksave:{cook_id}"),
             CallbackButton(text=t("btn.shopping", lang), callback_data=f"cookshop:{cook_id}"),
+        ],
+        [
+            CallbackButton(
+                text=t("btn.cooked.meal", lang), callback_data=f"cookmade:{cook_id}"
+            )
         ],
         [
             CallbackButton(text=t("btn.more_recipes", lang), callback_data=f"cookmore2:{cook_id}"),

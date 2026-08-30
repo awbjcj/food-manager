@@ -51,6 +51,7 @@ def test_dispatcher_rosters_cover_every_supported_entry_point():
         "correct",
         "stats",
         "cook",
+        "history",
         "plan",
         "shopping",
         "favorites",
@@ -61,4 +62,4 @@ def test_dispatcher_rosters_cover_every_supported_entry_point():
         "buy",
         "billing",
     }
-    assert len(EXPECTED_CALLBACK_ROUTES) == 37
+    assert len(EXPECTED_CALLBACK_ROUTES) == 38

@@ -20,6 +20,7 @@ from app.cook import (
 from app.cook import (
     set_message_id as set_cook_message_id,
 )
+from app.cook.cooked_service import list_history
 from app.cook.options import (
     DEFAULT_CUISINES,
     FEATURED_CUISINES,
@@ -78,6 +79,36 @@ async def handle_cook(
         )
         sent = await msg.answer(t("cook.what_cooking", user.lang), reply_markup=keyboard)
         set_cook_message_id(session, cook=cook, message_id=sent.message_id)
+
+
+async def handle_history(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    now_provider: NowProvider,
+    on_user_created: Callable[[User], None] = _noop_user_created,
+    translation_llm=None,
+) -> None:
+    async with _request(
+        msg,
+        session_factory=session_factory,
+        on_user_created=on_user_created,
+        now_provider=now_provider,
+    ) as ctx:
+        if ctx is None:
+            return
+        assert ctx.today is not None
+        meals = list_history(
+            ctx.session, household_id=ctx.user.household_id
+        )
+        view = await views.cooked_history(
+            ctx.session,
+            meals,
+            user=ctx.user,
+            today=ctx.today,
+            translation_llm=translation_llm,
+        )
+        await msg.answer(view.text)
 
 
 def _cuisine_options(household: Household) -> list[str]:
@@ -293,4 +324,14 @@ async def run_cook_and_render(
 
 COMMANDS = (
     ("cook", handle_cook, ("session_factory", "now_provider", "on_user_created")),
+    (
+        "history",
+        handle_history,
+        (
+            "session_factory",
+            "now_provider",
+            "on_user_created",
+            "translation_llm",
+        ),
+    ),
 )

@@ -53,7 +53,9 @@ def test_cooked_meal_defaults_to_unconfirmed(session, household):
 from app.cook.cooked_service import (
     confirm,
     count_confirmed,
+    list_history,
     load_sheet,
+    open_cook_sheet,
     open_sheet,
     toggle,
 )
@@ -63,7 +65,7 @@ from app.cook.models import (
     RecipeIngredient,
     ScoredCandidate,
 )
-from app.models import MealPlan, MealPlanEntry, PantryItem
+from app.models import CookSession, MealPlan, MealPlanEntry, PantryItem
 
 TODAY = date(2026, 8, 14)
 
@@ -147,6 +149,69 @@ def test_open_sheet_is_idempotent_on_a_double_tap(session, household, entry):
     second = open_sheet(session, household_id=household.id, entry=entry, today=TODAY)
     assert first.cooked_id == second.cooked_id
     assert session.query(CookedMeal).count() == 1
+
+
+def test_open_cook_sheet_persists_candidates_without_a_plan_entry(session, household):
+    session.add(_item(household.id, "Chicken Thighs", "chicken"))
+    session.add(_item(household.id, "Greek Yogurt", "yogurt"))
+    session.commit()
+    cook = CookSession(
+        household_id=household.id,
+        status="done",
+        candidates_json=f"[{_candidate('chicken', 'yogurt').model_dump_json()}]",
+        chosen_index=0,
+        chat_id=1,
+        created_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC),
+    )
+    session.add(cook)
+    session.commit()
+    session.refresh(cook)
+
+    sheet = open_cook_sheet(
+        session, household_id=household.id, cook=cook, today=TODAY
+    )
+    assert sheet.recipe_title == "Chicken Tikka"
+    assert sorted(c.raw_name for c in sheet.candidates) == [
+        "Chicken Thighs",
+        "Greek Yogurt",
+    ]
+    dropped = sheet.candidates[0].item_id
+    toggled = toggle(
+        session,
+        household_id=household.id,
+        cooked_id=sheet.cooked_id,
+        item_id=dropped,
+        today=TODAY,
+    )
+    assert toggled is not None
+    assert dropped not in toggled.selected_ids
+    assert {c.item_id for c in toggled.candidates} == {
+        c.item_id for c in sheet.candidates
+    }
+
+
+def test_history_returns_confirmed_meals_newest_first(session, household):
+    for day, title, confirmed in (
+        (date(2026, 8, 12), "Older", datetime(2026, 8, 12, 20, tzinfo=UTC)),
+        (date(2026, 8, 14), "Newest", datetime(2026, 8, 14, 20, tzinfo=UTC)),
+        (date(2026, 8, 15), "Pending", None),
+    ):
+        session.add(
+            CookedMeal(
+                household_id=household.id,
+                source="cook",
+                recipe_key=title.lower(),
+                recipe_title=title,
+                cooked_on=day,
+                confirmed_at=confirmed,
+            )
+        )
+    session.commit()
+
+    rows = list_history(session, household_id=household.id)
+
+    assert [row.recipe_title for row in rows] == ["Newest", "Older"]
 
 
 def test_toggle_round_trips_one_id(session, household, entry):

@@ -14,6 +14,7 @@ from app.renderer import (
     DIGEST_CAP,
     build_nl_picker_keyboard,
     render_cook_result,
+    render_cooked_history,
     render_cooked_sheet,
     render_correct_menu,
     render_digest,
@@ -338,4 +339,18 @@ async def cooked_sheet(
     )
     return LocalizedView(
         render_cooked_sheet(sheet, lang=user.lang, names=names), names
+    )
+
+
+async def cooked_history(
+    session: Session, meals: list, *, user, today: date, translation_llm
+) -> LocalizedView:
+    names = await _names_for(
+        session,
+        lang=user.lang,
+        texts=(meal.recipe_title for meal in meals),
+        translation_llm=translation_llm,
+    )
+    return LocalizedView(
+        render_cooked_history(meals, today=today, lang=user.lang, names=names), names
     )

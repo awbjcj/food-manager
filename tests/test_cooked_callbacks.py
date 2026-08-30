@@ -16,7 +16,15 @@ from app.cook.models import (
     ScoredCandidate,
 )
 from app.i18n import t
-from app.models import CookedMeal, Household, MealPlan, MealPlanEntry, PantryItem, User
+from app.models import (
+    CookedMeal,
+    CookSession,
+    Household,
+    MealPlan,
+    MealPlanEntry,
+    PantryItem,
+    User,
+)
 
 
 def test_plan_cooked_parses_plan_and_day():
@@ -38,6 +46,12 @@ def test_confirm_and_none_parse():
     assert parse_callback("cooked:none:7").verb == "cooked_none"
 
 
+def test_cook_cooked_parses_cook_session():
+    action = parse_callback("cookmade:12")
+    assert action.verb == "cook_cooked"
+    assert action.item_id == 12
+
+
 def test_malformed_cooked_data_is_rejected():
     with pytest.raises(CommandError):
         parse_callback("cooked:tog:7")
@@ -49,7 +63,13 @@ def test_malformed_cooked_data_is_rejected():
 
 def test_every_new_route_has_exactly_one_handler():
     registry = build_callback_registry()
-    for route in ("plan_cooked", "cooked_toggle", "cooked_confirm", "cooked_none"):
+    for route in (
+        "plan_cooked",
+        "cook_cooked",
+        "cooked_toggle",
+        "cooked_confirm",
+        "cooked_none",
+    ):
         assert route in EXPECTED_CALLBACK_ROUTES
         assert registry.routes == EXPECTED_CALLBACK_ROUTES
 
@@ -155,6 +175,90 @@ class _Cb:
         self.from_user = SimpleNamespace(id=user_id)
         self.message = _CbMessage()
         self.answer = AsyncMock()
+
+
+def _build_cook_session(session_factory) -> int:
+    with session_factory() as db:
+        household = Household(created_at=datetime.now(UTC))
+        db.add(household)
+        db.commit()
+        db.refresh(household)
+        assert household.id is not None
+        db.add(
+            User(
+                telegram_id=1,
+                chat_id=1,
+                household_id=household.id,
+                created_at=datetime.now(UTC),
+            )
+        )
+        candidate = ScoredCandidate(
+            recipe=RecipeCandidate(
+                title="Chicken Tikka",
+                cuisine="indian",
+                source_url=None,
+                ingredients=[RecipeIngredient(name="chicken")],
+                method_gist="Cook it.",
+                deliciousness=0.5,
+            ),
+            nutrition=NutritionScore(
+                health_score=50, effort="easy", est_minutes=20, rationale="x"
+            ),
+            expiry_use=0.0,
+            external_id="spoon:10",
+            final_score=0.5,
+        )
+        cook = CookSession(
+            household_id=household.id,
+            status="done",
+            candidates_json=f"[{candidate.model_dump_json()}]",
+            chosen_index=0,
+            chat_id=1,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC),
+        )
+        db.add(cook)
+        db.add(
+            PantryItem(
+                household_id=household.id,
+                raw_name="Chicken Thighs",
+                normalized_name="chicken",
+                category="other",
+                qty=1.0,
+                purchased_on=TODAY,
+                expires_on=date(2026, 8, 20),
+                shelf_life_days=6,
+                shelf_life_source="llm",
+                ingest_shelf_life_source="llm",
+                created_via="manual",
+                created_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+        db.refresh(cook)
+        assert cook.id is not None
+        return cook.id
+
+
+@pytest.mark.asyncio
+async def test_cook_result_opens_the_same_consume_sheet(session_factory):
+    cook_id = _build_cook_session(session_factory)
+    cb = _Cb(f"cookmade:{cook_id}")
+
+    await handle_cooked_callback(
+        cb,
+        session_factory=session_factory,
+        now_provider=_NOW,
+        translation_llm=None,
+    )
+
+    cb.answer.assert_awaited()
+    assert cb.message.edit_text.await_args is not None
+    assert "Chicken Tikka" in cb.message.edit_text.await_args.args[0]
+    with session_factory() as db:
+        row = db.exec(select(CookedMeal)).one()
+        assert row.source == "cook"
+        assert row.plan_entry_id is None
 
 
 @pytest.mark.asyncio

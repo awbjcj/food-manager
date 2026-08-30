@@ -14,7 +14,8 @@ from app import handler_support, views
 from app.callback_dispatch import answer as dispatch_answer
 from app.callback_dispatch import edit_or_resend
 from app.commands import CommandError, parse_callback
-from app.cook.cooked_service import confirm, open_sheet, toggle
+from app.cook import load_cook_session
+from app.cook.cooked_service import confirm, open_cook_sheet, open_sheet, toggle
 from app.i18n import t
 from app.models import MealPlan, MealPlanEntry
 from app.renderer import build_cooked_sheet_keyboard
@@ -24,7 +25,13 @@ log = logging.getLogger(__name__)
 
 _authorized_callback_user = handler_support.authorized_callback_user
 
-_VERBS = ("plan_cooked", "cooked_toggle", "cooked_confirm", "cooked_none")
+_VERBS = (
+    "plan_cooked",
+    "cook_cooked",
+    "cooked_toggle",
+    "cooked_confirm",
+    "cooked_none",
+)
 
 
 async def _show(cb, session, *, user, sheet, translation_llm) -> None:
@@ -80,6 +87,33 @@ async def handle_cooked_callback(
                 session, household_id=user.household_id, entry=entry, today=today
             )
             await _show(cb, session, user=user, sheet=sheet, translation_llm=translation_llm)
+            return
+
+        if action.verb == "cook_cooked":
+            cook = load_cook_session(
+                session, household_id=user.household_id, cook_id=action.item_id
+            )
+            if cook is None or cook.status != "done":
+                await dispatch_answer(cb, t("toast.cook_expired", user.lang))
+                return
+            try:
+                sheet = open_cook_sheet(
+                    session,
+                    household_id=user.household_id,
+                    cook=cook,
+                    today=today,
+                )
+            except ValueError:
+                await dispatch_answer(cb, t("toast.cook_expired", user.lang))
+                return
+            await dispatch_answer(cb)
+            await _show(
+                cb,
+                session,
+                user=user,
+                sheet=sheet,
+                translation_llm=translation_llm,
+            )
             return
 
         if action.verb == "cooked_toggle":

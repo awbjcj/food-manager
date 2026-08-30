@@ -131,6 +131,7 @@ def test_cook_result_keyboard_offers_more_and_adjust_before_alternatives():
     rows = build_cook_result_keyboard(5, has_alternatives=True, lang="en")
     callback_rows = [[button.callback_data for button in row] for row in rows]
 
+    assert ["cookmade:5"] in callback_rows
     assert ["cookmore2:5", "cookadj:5"] in callback_rows
     assert callback_rows.index(["cookmore2:5", "cookadj:5"]) < callback_rows.index(
         ["cookalt:5"]

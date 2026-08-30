@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 
 from app.cook.models import ScoredCandidate
 from app.cook.novelty import count_confirmed, recipe_key
-from app.models import CookedMeal, MealPlanEntry, PantryItem
+from app.models import CookedMeal, CookSession, MealPlanEntry, PantryItem
 from app.normalization import normalize
 from app.pantry_service import ListFilter, list_active, mark_eaten
 
@@ -42,6 +42,34 @@ class ConfirmResult:
     skipped: int
 
 
+def _selection_state(raw: str | None) -> tuple[list[int] | None, set[int]]:
+    """Decode legacy plan selections and source-independent cook selections."""
+    try:
+        payload = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return None, set()
+    if isinstance(payload, list):
+        return None, {value for value in payload if isinstance(value, int)}
+    if isinstance(payload, dict):
+        candidate_ids = payload.get("candidate_ids", [])
+        selected_ids = payload.get("selected_ids", [])
+        return (
+            [value for value in candidate_ids if isinstance(value, int)],
+            {value for value in selected_ids if isinstance(value, int)},
+        )
+    return None, set()
+
+
+def _cook_selection(candidate_ids: list[int], selected_ids: set[int]) -> str:
+    return json.dumps(
+        {
+            "candidate_ids": candidate_ids,
+            "selected_ids": sorted(selected_ids),
+        },
+        separators=(",", ":"),
+    )
+
+
 def _matching_items(
     session: Session, *, household_id: int, candidate: ScoredCandidate, today: date
 ) -> list[PantryItem]:
@@ -58,7 +86,7 @@ def _matching_items(
 
 def _sheet(session: Session, row: CookedMeal, *, today: date) -> CookedSheet:
     assert row.id is not None
-    selected = set(json.loads(row.selection_json or "[]"))
+    _candidate_ids, selected = _selection_state(row.selection_json)
     candidates = [
         ConsumeCandidate(item_id=item.id, raw_name=item.raw_name)
         for item in _candidates_for(session, row, today=today)
@@ -76,6 +104,18 @@ def _sheet(session: Session, row: CookedMeal, *, today: date) -> CookedSheet:
 def _candidates_for(
     session: Session, row: CookedMeal, *, today: date
 ) -> list[PantryItem]:
+    candidate_ids, _selected = _selection_state(row.selection_json)
+    if row.plan_entry_id is None and candidate_ids is not None:
+        rows: list[PantryItem] = []
+        for item_id in candidate_ids:
+            item = session.get(PantryItem, item_id)
+            if (
+                item is not None
+                and item.household_id == row.household_id
+                and item.status == "active"
+            ):
+                rows.append(item)
+        return rows
     entry = (
         session.get(MealPlanEntry, row.plan_entry_id)
         if row.plan_entry_id is not None
@@ -122,6 +162,79 @@ def open_sheet(
     return _sheet(session, row, today=today)
 
 
+def _chosen_candidate(cook: CookSession) -> ScoredCandidate | None:
+    try:
+        cards = [
+            ScoredCandidate.model_validate(card)
+            for card in json.loads(cook.candidates_json or "[]")
+        ]
+    except (TypeError, ValueError):
+        return None
+    if not cards:
+        return None
+    index = cook.chosen_index or 0
+    return cards[index] if 0 <= index < len(cards) else cards[0]
+
+
+def open_cook_sheet(
+    session: Session, *, household_id: int, cook: CookSession, today: date
+) -> CookedSheet:
+    """Open the consume sheet for the selected result of an ad-hoc cook run."""
+    if cook.household_id != household_id or cook.status != "done":
+        raise ValueError("cook result is not available")
+    candidate = _chosen_candidate(cook)
+    if candidate is None:
+        raise ValueError("cook result has no selected recipe")
+    key = recipe_key(candidate)
+    existing = session.exec(
+        select(CookedMeal).where(
+            CookedMeal.household_id == household_id,
+            CookedMeal.source == "cook",
+            CookedMeal.recipe_key == key,
+            CookedMeal.confirmed_at.is_(None),  # type: ignore[union-attr]
+        )
+    ).first()
+    if existing is not None:
+        return _sheet(session, existing, today=today)
+
+    matched = _matching_items(
+        session, household_id=household_id, candidate=candidate, today=today
+    )
+    item_ids = [item.id for item in matched if item.id is not None]
+    row = CookedMeal(
+        household_id=household_id,
+        source="cook",
+        recipe_key=key,
+        recipe_title=candidate.recipe.title,
+        cooked_on=today,
+        selection_json=_cook_selection(item_ids, set(item_ids)),
+    )
+    session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _sheet(session, row, today=today)
+
+
+def list_history(
+    session: Session, *, household_id: int, limit: int = 20
+) -> list[CookedMeal]:
+    """Return confirmed household meals, newest first."""
+    return list(
+        session.exec(
+            select(CookedMeal)
+            .where(
+                CookedMeal.household_id == household_id,
+                CookedMeal.confirmed_at.is_not(None),  # type: ignore[union-attr]
+            )
+            .order_by(
+                CookedMeal.cooked_on.desc(),  # type: ignore[union-attr]
+                CookedMeal.confirmed_at.desc(),  # type: ignore[union-attr]
+            )
+            .limit(limit)
+        ).all()
+    )
+
+
 def _load_row(
     session: Session, *, household_id: int, cooked_id: int
 ) -> CookedMeal | None:
@@ -144,9 +257,16 @@ def toggle(
     row = _load_row(session, household_id=household_id, cooked_id=cooked_id)
     if row is None:
         return None
-    selected = set(json.loads(row.selection_json or "[]"))
+    candidate_ids, selected = _selection_state(row.selection_json)
+    known_ids = {item.id for item in _candidates_for(session, row, today=today)}
+    if item_id not in known_ids:
+        return _sheet(session, row, today=today)
     selected.symmetric_difference_update({item_id})
-    row.selection_json = json.dumps(sorted(selected))
+    row.selection_json = (
+        json.dumps(sorted(selected))
+        if candidate_ids is None
+        else _cook_selection(candidate_ids, selected)
+    )
     session.add(row)
     session.commit()
     session.refresh(row)
@@ -180,7 +300,8 @@ def confirm(
     eaten: list[str] = []
     skipped = 0
     if consume:
-        for item_id in sorted(json.loads(row.selection_json or "[]")):
+        _candidate_ids, selected_ids = _selection_state(row.selection_json)
+        for item_id in sorted(selected_ids):
             result = mark_eaten(
                 session, household_id=household_id, item_id=item_id, today=today
             )
@@ -201,7 +322,9 @@ __all__ = [
     "CookedSheet",
     "confirm",
     "count_confirmed",
+    "list_history",
     "load_sheet",
+    "open_cook_sheet",
     "open_sheet",
     "toggle",
 ]

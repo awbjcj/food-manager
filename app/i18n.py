@@ -530,6 +530,30 @@ MESSAGES: dict[str, dict[str, str]] = {
     "btn.disliked": {"en": "👎 Not for me", "zh": "👎 不喜欢", "fr": "👎 Pas pour moi", "es": "👎 No es para mí"},
     "btn.save": {"en": "★ Save", "zh": "★ 保存", "fr": "★ Sauvegarder", "es": "★ Guardar"},
     "btn.shopping": {"en": "➕ Shopping list", "zh": "➕ 购物清单", "fr": "➕ Liste de courses", "es": "➕ Lista de compras"},
+    "btn.cooked.meal": {
+        "en": "✅ I cooked this",
+        "zh": "✅ 我做了这道菜",
+        "fr": "✅ J’ai cuisiné ce plat",
+        "es": "✅ Cociné este plato",
+    },
+    "history.title": {
+        "en": "🍽 Cooked history",
+        "zh": "🍽 烹饪记录",
+        "fr": "🍽 Historique des repas",
+        "es": "🍽 Historial de comidas",
+    },
+    "history.empty": {
+        "en": "No cooked meals recorded yet.",
+        "zh": "还没有已记录的烹饪餐食。",
+        "fr": "Aucun repas cuisiné enregistré pour le moment.",
+        "es": "Aún no hay comidas cocinadas registradas.",
+    },
+    "history.row": {
+        "en": "{date} · {title} · {source}",
+        "zh": "{date} · {title} · {source}",
+        "fr": "{date} · {title} · {source}",
+        "es": "{date} · {title} · {source}",
+    },
     "btn.show_alternatives": {"en": "Show alternatives", "zh": "显示替代方案", "fr": "Voir les alternatives", "es": "Ver alternativas"},
     "btn.cook_again": {"en": "Cook this again", "zh": "再做一次", "fr": "Refaire ce plat", "es": "Cocinar de nuevo"},
     "btn.bought": {"en": "Bought ✓", "zh": "已购买 ✓", "fr": "Acheté ✓", "es": "Comprado ✓"},
@@ -893,6 +917,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /llm [anthropic|openai|gemini|deepseek] - show or switch LLM provider\n"
             "  /prefs [sentence] - show or update your food profile\n"
             "  /cook - get a recipe from your pantry\n"
+            "  /history - show meals your household cooked\n"
             "  /plan [3-7] - plan dinners for the week (default 5 days)\n"
             "  /shopping - view your to-buy list; tap an item when bought\n"
             "  /favorites - view saved recipes; tap to re-cook against your pantry\n"
@@ -929,6 +954,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /llm [anthropic|openai|gemini|deepseek] - 显示或切换LLM提供商\n"
             "  /prefs [语句] - 显示或更新您的饮食档案\n"
             "  /cook - 从您的储藏获取食谱\n"
+            "  /history - 查看家庭烹饪记录\n"
             "  /plan [3-7] - 规划本周晚餐（默认5天）\n"
             "  /shopping - 查看待购清单；点击已购买的物品\n"
             "  /favorites - 查看已保存食谱；点击重新烹饪\n"
@@ -965,6 +991,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /llm [anthropic|openai|gemini|deepseek] - afficher ou changer de fournisseur LLM\n"
             "  /prefs [phrase] - afficher ou mettre à jour votre profil alimentaire\n"
             "  /cook - obtenir une recette depuis votre garde-manger\n"
+            "  /history - afficher les repas cuisinés du foyer\n"
             "  /plan [3-7] - planifier les dîners de la semaine (5 jours par défaut)\n"
             "  /shopping - voir votre liste de courses ; appuyez sur un article acheté\n"
             "  /favorites - voir les recettes sauvegardées ; appuyez pour recuire\n"
@@ -1001,6 +1028,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /llm [anthropic|openai|gemini|deepseek] - mostrar o cambiar proveedor LLM\n"
             "  /prefs [frase] - mostrar o actualizar tu perfil alimentario\n"
             "  /cook - obtener una receta de tu despensa\n"
+            "  /history - ver las comidas cocinadas del hogar\n"
             "  /plan [3-7] - planifica las cenas de la semana (5 días por defecto)\n"
             "  /shopping - ver tu lista de compras; toca un artículo comprado\n"
             "  /favorites - ver recetas guardadas; toca para volver a cocinar\n"

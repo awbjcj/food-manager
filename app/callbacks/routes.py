@@ -38,7 +38,11 @@ def build_callback_registry() -> CallbackRegistry:
         return CallbackResult(deferred=run)
 
     @registry.register(
-        "plan_cooked", "cooked_toggle", "cooked_confirm", "cooked_none"
+        "plan_cooked",
+        "cook_cooked",
+        "cooked_toggle",
+        "cooked_confirm",
+        "cooked_none",
     )
     async def cooked_route(_request, context):
         async def run():

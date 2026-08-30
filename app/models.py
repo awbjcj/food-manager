@@ -69,6 +69,19 @@ class User(SQLModel, table=True):
     last_digest_date: date | None = None
 
 
+class GroupBinding(SQLModel, table=True):
+    """A Telegram group chat bound to exactly one household.
+
+    ``bound_by_user_id`` is intentionally not a foreign key: the binding must
+    survive if the member who created it later leaves the household.
+    """
+
+    chat_id: int = Field(primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    bound_by_user_id: int
+    created_at: datetime
+
+
 class Receipt(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("household_id", "photo_file_id", name="uq_receipt_household_photo"),

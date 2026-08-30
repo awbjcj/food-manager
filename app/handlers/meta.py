@@ -18,7 +18,7 @@ from app.cook.models import RecipeIngredient
 from app.handlers.cook import handle_cook
 from app.handlers.pantry import _propose_and_send_correction, _run_add_flow
 from app.handlers.plan import handle_plan
-from app.i18n import t
+from app.i18n import DEFAULT_LANG, t
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import LLMProviderNotConfigured
 from app.models import Household, User
@@ -645,6 +645,12 @@ async def handle_photo(
     bot=None,
     translation_llm=None,
 ) -> None:
+    if msg.chat.type != "private":
+        with session_factory() as session:
+            existing = session.get(User, msg.from_user.id)
+            lang = existing.lang if existing is not None else DEFAULT_LANG
+        await msg.answer(t("group.receipts_private", lang))
+        return
     async with _request(
         msg,
         session_factory=session_factory,

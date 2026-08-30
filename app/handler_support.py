@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime
 from sqlmodel import Session
 
 from app.client_set import PerUserClients
+from app.group_service import get_group_binding
 from app.household_service import provision_solo_household, restore_household_for_user
 from app.models import Household, User
 from app.providers import ALL_PROVIDERS, supports
@@ -87,8 +88,28 @@ def authorize_and_get_user(
     )
     if not status.allowed:
         return AuthDecision(False, None, False, "not authorized")
+    if chat_type in {"group", "supergroup"}:
+        if not multi_tenant_enabled:
+            return AuthDecision(False, None, False, "group chats require hosted mode")
+        if status.user is None:
+            return AuthDecision(
+                False, None, False, "join a household in private chat before using /bind"
+            )
+        binding = get_group_binding(session, chat_id=chat_id)
+        if binding is None:
+            return AuthDecision(False, None, False, "this group is not bound; use /bind")
+        if binding.household_id != status.user.household_id:
+            return AuthDecision(
+                False, None, False, "you are not a member of this group's household"
+            )
+        household = session.get(Household, status.user.household_id)
+        if household is None:
+            household = restore_household_for_user(
+                session, status.user, created_at=datetime.now(UTC)
+            )
+        return AuthDecision(True, status.user, False, "ok", household=household)
     if chat_type != "private":
-        return AuthDecision(False, None, False, "this bot only works in private chat")
+        return AuthDecision(False, None, False, "unsupported chat type")
 
     if status.user is not None:
         household = session.get(Household, status.user.household_id)
@@ -159,6 +180,25 @@ def authorized_callback_user(session: Session, telegram_id: int) -> User | None:
         multi_tenant_enabled=MULTI_TENANT_ENABLED,
     )
     return status.user if status.allowed else None
+
+
+def authorized_callback_query_user(session: Session, callback) -> User | None:
+    message = getattr(callback, "message", None)
+    chat = getattr(message, "chat", None)
+    chat_type = getattr(chat, "type", None)
+    if chat_type not in {"group", "supergroup"}:
+        chat_type = "private"
+    chat_id = getattr(chat, "id", callback.from_user.id)
+    decision = authorize_and_get_user(
+        session,
+        allowed_user_id=ALLOWED_TELEGRAM_USER_ID,
+        telegram_user_id=callback.from_user.id,
+        chat_id=chat_id,
+        chat_type=chat_type,
+        open_registration=OPEN_REGISTRATION,
+        multi_tenant_enabled=MULTI_TENANT_ENABLED,
+    )
+    return decision.user if decision.allowed else None
 
 
 async def guard(

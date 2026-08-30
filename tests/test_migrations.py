@@ -29,6 +29,7 @@ def test_alembic_upgrade_creates_all_tables(tmp_path, monkeypatch):
         "pantryitem",
         "shelflifecache",
         "pendingcorrection",
+        "groupbinding",
     }.issubset(tables)
 
     user_columns = {

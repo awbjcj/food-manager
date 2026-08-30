@@ -17,6 +17,7 @@ from app.commands import (
     parse_member_id,
     parse_tz,
 )
+from app.group_service import GroupBindingConflict, bind_group
 from app.i18n import DEFAULT_LANG, LANGS, t
 from app.invite_service import (
     AlreadyMember,
@@ -188,6 +189,9 @@ async def handle_invite(
     if not hosted_features_enabled:
         await msg.answer(t("hosted_only", DEFAULT_LANG))
         return
+    if msg.chat.type != "private":
+        await msg.answer(t("group.dm_only", DEFAULT_LANG))
+        return
     async with _request(
         msg,
         session_factory=session_factory,
@@ -229,6 +233,9 @@ async def handle_join(
     if not hosted_features_enabled:
         await msg.answer(t("hosted_only", DEFAULT_LANG))
         return
+    if msg.chat.type != "private":
+        await msg.answer(t("group.dm_only", DEFAULT_LANG))
+        return
     with session_factory() as session:
         try:
             token = parse_invite_token(list((msg.text or "").split()[1:]))
@@ -240,6 +247,44 @@ async def handle_join(
         await _try_redeem_invite(
             msg, session, token=token, on_user_created=on_user_created, bot=bot
         )
+
+
+async def handle_bind(
+    msg,
+    *,
+    session_factory: _SessionFactory,
+    hosted_features_enabled: bool = True,
+) -> None:
+    if not hosted_features_enabled:
+        await msg.answer(t("hosted_only", DEFAULT_LANG))
+        return
+    if msg.chat.type not in {"group", "supergroup"}:
+        await msg.answer(t("group.bind.group_only", DEFAULT_LANG))
+        return
+    with session_factory() as session:
+        status = handler_support.resolve_authorization(
+            session,
+            allowed_user_id=handler_support.ALLOWED_TELEGRAM_USER_ID,
+            telegram_user_id=msg.from_user.id,
+            open_registration=handler_support.OPEN_REGISTRATION,
+            multi_tenant_enabled=True,
+        )
+        if not status.allowed or status.user is None:
+            await msg.answer(t("group.bind.member_required", DEFAULT_LANG))
+            return
+        user = status.user
+        try:
+            bind_group(
+                session,
+                chat_id=msg.chat.id,
+                household_id=user.household_id,
+                bound_by_user_id=user.telegram_id,
+                created_at=datetime.now(UTC),
+            )
+        except GroupBindingConflict:
+            await msg.answer(t("group.bind.conflict", user.lang))
+            return
+        await msg.answer(t("group.bind.success", user.lang, id=msg.chat.id))
 
 
 async def handle_household(
@@ -456,6 +501,7 @@ COMMANDS = (
         handle_join,
         ("session_factory", "on_user_created", "bot", "hosted_features_enabled"),
     ),
+    ("bind", handle_bind, ("session_factory", "hosted_features_enabled")),
     (
         "household",
         handle_household,

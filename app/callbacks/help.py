@@ -22,12 +22,12 @@ from app.telegram_ui import to_aiogram_keyboard
 log = logging.getLogger(__name__)
 
 
-_authorized_callback_user = handler_support.authorized_callback_user
+_authorized_callback_user = handler_support.authorized_callback_query_user
 
 
 async def handle_help_callback(cb, *, session_factory) -> None:
     with session_factory() as session:
-        user = _authorized_callback_user(session, cb.from_user.id)
+        user = _authorized_callback_user(session, cb)
         if user is None:
             await dispatch_answer(cb, "not authorized")
             return

@@ -26,7 +26,7 @@ from app.llm import (
     ProfileLLMProviderSelector,
     TextLLMProviderSelector,
 )
-from app.models import Household, PantryItem, User
+from app.models import GroupBinding, Household, PantryItem, User
 from app.scheduler import (
     build_digest_payload,
     register_all_user_digests,
@@ -117,13 +117,22 @@ def test_authorize_and_get_user(session):
         chat_id=99,
         chat_type="private",
     ).allowed is False
+    session.add(
+        GroupBinding(
+            chat_id=-100,
+            household_id=1,
+            bound_by_user_id=1,
+            created_at=datetime.now(UTC),
+        )
+    )
+    session.commit()
     assert authorize_and_get_user(
         session,
         allowed_user_id=1,
         telegram_user_id=1,
         chat_id=-100,
         chat_type="group",
-    ).allowed is False
+    ).allowed is True
     session.delete(session.get(User, 1))
     session.commit()
     decision = authorize_and_get_user(

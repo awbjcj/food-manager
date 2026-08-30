@@ -966,6 +966,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /favorites - view saved recipes; tap to re-cook against your pantry\n"
             "  /invite [family] - invite one person (or 'family' for a reusable link)\n"
             "  /join <code> - join a household you were invited to\n"
+            "  /bind - bind this group chat to your household\n"
             "  /household - list household members\n"
             "  /leave - leave your household\n"
             "  /remove <id> - (owner) remove a member\n"
@@ -1004,6 +1005,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /favorites - 查看已保存食谱；点击重新烹饪\n"
             "  /invite [family] - 邀请一人（或用 'family' 生成可重复使用的链接）\n"
             "  /join <code> - 加入您被邀请的家庭\n"
+            "  /bind - 将此群聊绑定到您的家庭\n"
             "  /household - 列出家庭成员\n"
             "  /leave - 离开您的家庭\n"
             "  /remove <id> -（所有者）移除成员\n"
@@ -1042,6 +1044,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /favorites - voir les recettes sauvegardées ; appuyez pour recuire\n"
             "  /invite [family] - inviter une personne (ou 'family' pour un lien réutilisable)\n"
             "  /join <code> - rejoindre un foyer où vous êtes invité\n"
+            "  /bind - lier ce groupe à votre foyer\n"
             "  /household - lister les membres du foyer\n"
             "  /leave - quitter votre foyer\n"
             "  /remove <id> - (propriétaire) retirer un membre\n"
@@ -1080,6 +1083,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /favorites - ver recetas guardadas; toca para volver a cocinar\n"
             "  /invite [family] - invitar a una persona (o 'family' para un enlace reutilizable)\n"
             "  /join <code> - unirte a un hogar al que te invitaron\n"
+            "  /bind - vincular este grupo con tu hogar\n"
             "  /household - listar miembros del hogar\n"
             "  /leave - salir de tu hogar\n"
             "  /remove <id> - (propietario) quitar un miembro\n"
@@ -1217,6 +1221,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "👪 Household commands:\n"
             "  /invite [family] - invite one person (or 'family' for a reusable link)\n"
             "  /join <code> - join a household you were invited to\n"
+            "  /bind - bind this group chat to your household\n"
             "  /household - list household members\n"
             "  /leave - leave your household\n"
             "  /remove <id> - (owner) remove a member"
@@ -1225,6 +1230,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "👪 家庭命令：\n"
             "  /invite [family] - 邀请一人（或用 'family' 生成可重复使用的链接）\n"
             "  /join <code> - 加入被邀请的家庭\n"
+            "  /bind - 将此群聊绑定到您的家庭\n"
             "  /household - 列出家庭成员\n"
             "  /leave - 离开你的家庭\n"
             "  /remove <id> - （所有者）移除成员"
@@ -1233,6 +1239,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "👪 Commandes foyer :\n"
             "  /invite [family] - inviter une personne (ou « family » pour un lien réutilisable)\n"
             "  /join <code> - rejoindre un foyer auquel vous avez été invité\n"
+            "  /bind - lier ce groupe à votre foyer\n"
             "  /household - lister les membres du foyer\n"
             "  /leave - quitter votre foyer\n"
             "  /remove <id> - (propriétaire) retirer un membre"
@@ -1241,6 +1248,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "👪 Comandos de hogar:\n"
             "  /invite [family] - invitar a una persona (o 'family' para un enlace reutilizable)\n"
             "  /join <code> - unirte a un hogar al que te invitaron\n"
+            "  /bind - vincular este grupo con tu hogar\n"
             "  /household - listar miembros del hogar\n"
             "  /leave - salir de tu hogar\n"
             "  /remove <id> - (propietario) quitar un miembro"
@@ -1451,6 +1459,42 @@ MESSAGES: dict[str, dict[str, str]] = {
     "household.role.owner": {"en": "owner", "zh": "所有者", "fr": "propriétaire", "es": "propietario"},
     "household.role.member": {"en": "member", "zh": "成员", "fr": "membre", "es": "miembro"},
     "household.you": {"en": " (you)", "zh": "（您）", "fr": " (vous)", "es": " (tú)"},
+    "group.bind.success": {
+        "en": "This group is now bound to your household (chat {id}).",
+        "zh": "此群组现已绑定到您的家庭（聊天 {id}）。",
+        "fr": "Ce groupe est maintenant lié à votre foyer (discussion {id}).",
+        "es": "Este grupo ahora está vinculado a tu hogar (chat {id}).",
+    },
+    "group.bind.group_only": {
+        "en": "Use /bind inside the group you want to connect.",
+        "zh": "请在要连接的群组中使用 /bind。",
+        "fr": "Utilisez /bind dans le groupe que vous souhaitez connecter.",
+        "es": "Usa /bind dentro del grupo que quieres conectar.",
+    },
+    "group.bind.member_required": {
+        "en": "Join or create a household in private chat before using /bind.",
+        "zh": "使用 /bind 前，请先在私聊中加入或创建家庭。",
+        "fr": "Rejoignez ou créez un foyer en privé avant d'utiliser /bind.",
+        "es": "Únete o crea un hogar por chat privado antes de usar /bind.",
+    },
+    "group.bind.conflict": {
+        "en": "This group is already bound to another household.",
+        "zh": "此群组已绑定到另一个家庭。",
+        "fr": "Ce groupe est déjà lié à un autre foyer.",
+        "es": "Este grupo ya está vinculado a otro hogar.",
+    },
+    "group.dm_only": {
+        "en": "Invites and joining are only available in a private chat with the bot.",
+        "zh": "邀请和加入仅可在与机器人的私聊中使用。",
+        "fr": "Les invitations et l'adhésion ne sont disponibles qu'en privé avec le bot.",
+        "es": "Las invitaciones y unirse solo están disponibles en un chat privado con el bot.",
+    },
+    "group.receipts_private": {
+        "en": "Send receipt photos in a private chat with the bot.",
+        "zh": "请在与机器人的私聊中发送收据照片。",
+        "fr": "Envoyez les photos de reçus dans une conversation privée avec le bot.",
+        "es": "Envía las fotos de recibos en un chat privado con el bot.",
+    },
     "leave.success": {
         "en": "You've left the household and no longer have access. Ask a member for a new /invite to rejoin.",
         "zh": "您已离开家庭，不再拥有访问权限。如需重新加入，请向成员索取新的 /invite。",

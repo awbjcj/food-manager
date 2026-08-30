@@ -35,6 +35,7 @@ def test_dispatcher_rosters_cover_every_supported_entry_point():
         "start",
         "invite",
         "join",
+        "bind",
         "household",
         "leave",
         "remove",

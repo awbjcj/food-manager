@@ -1,5 +1,7 @@
 # Food Manager hosted service
 
+[English](hosted-service.md) | [简体中文](hosted-service.zh-CN.md)
+
 ## Start now
 
 Open [@foodie_manager_bot](https://t.me/foodie_manager_bot) in Telegram and tap

@@ -1,5 +1,7 @@
 # food-manager
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 [![CI/CD](https://github.com/awbjcj/food-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/awbjcj/food-manager/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 

@@ -1,5 +1,7 @@
 # Operating the bot
 
+[English](operations.md) | [简体中文](operations.zh-CN.md)
+
 One long-running process (ADR 0001). In-process, `app/resilience.py` restarts a
 crashed polling loop with backoff, and startup catch-up (`catch_up_missed_digests`)
 re-sends a digest missed during downtime. The layers below cover hard process

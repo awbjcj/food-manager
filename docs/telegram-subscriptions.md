@@ -1,5 +1,7 @@
 # Subscribe through Telegram
 
+[English](telegram-subscriptions.md) | [简体中文](telegram-subscriptions.zh-CN.md)
+
 Food Manager uses Telegram Stars for the Family plan and one-time quota
 top-ups. Billing is pooled by household, so a purchase changes the limits for
 everyone in that household.

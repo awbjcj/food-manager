@@ -1,5 +1,7 @@
 # Local setup
 
+[English](local-setup.md) | [简体中文](local-setup.zh-CN.md)
+
 The bot, scheduler, operator bot, Mini App API, and built Mini App frontend all
 run in one process. Run only one process for a Telegram bot token: Telegram
 long-polling does not support two consumers using the same token.

@@ -1,0 +1,76 @@
+name: Sync dev with master
+
+# Merges into master use "Rebase and merge", which rewrites commit SHAs. That
+# leaves dev holding the same tree as master under different commit ids. This
+# job replays dev onto master so the two branches stay identical: commits that
+# already landed on master drop out via patch-id, and any genuinely new dev
+# work is preserved on top.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-dev-with-master
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Rebase dev onto master
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          fetch-depth: 0
+          # Credentials are kept on purpose: this job pushes the synced dev.
+          persist-credentials: true
+
+      - name: Rebase dev onto master
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --quiet origin master dev
+
+          before="$(git rev-parse origin/dev)"
+          git checkout --quiet -B dev "$before"
+
+          if git merge-base --is-ancestor origin/master dev; then
+            echo "dev already contains master ($(git rev-parse --short origin/master)); nothing to do."
+            exit 0
+          fi
+
+          if ! git rebase origin/master; then
+            git rebase --abort || true
+            echo "::error::dev could not be rebased onto master automatically." \
+                 "Resolve by hand: git fetch origin && git rebase origin/master dev && git push --force-with-lease origin dev"
+            exit 1
+          fi
+
+          after="$(git rev-parse HEAD)"
+          if [ "$after" = "$before" ]; then
+            echo "dev unchanged after rebase; nothing to push."
+            exit 0
+          fi
+
+          echo "Syncing dev: ${before} -> ${after}"
+          git push --force-with-lease="refs/heads/dev:${before}" origin dev
+
+      - name: Report result
+        if: always()
+        run: |
+          git fetch --quiet origin master dev
+          echo "master: $(git rev-parse --short origin/master)"
+          echo "dev:    $(git rev-parse --short origin/dev)"
+          if git merge-base --is-ancestor origin/master origin/dev; then
+            echo "dev contains master."
+          else
+            echo "::warning::dev does NOT contain master; branches are still out of sync."
+          fi

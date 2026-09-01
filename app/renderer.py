@@ -45,13 +45,27 @@ def _qty_prefix(qty: float, unit: str | None) -> str:
 
 _STORAGE_BADGES = {"frozen": "❄️ ", "fridge": "🧊 "}
 
+# Telegram does not support arbitrary font colours in bot messages or inline
+# keyboard buttons.  A coloured receipt badge is the portable equivalent: the
+# receipt id keeps the group unambiguous even after this compact palette wraps.
+_RECEIPT_COLOURS = ("🟦", "🟪", "🟧", "🟩", "🟫", "⬛")
+
 
 def _storage_badge(item) -> str:
     return _STORAGE_BADGES.get(getattr(item, "storage", "default"), "")
 
 
+def _receipt_badge(item) -> str:
+    receipt_id = getattr(item, "source_receipt_id", None)
+    if not isinstance(receipt_id, int) or receipt_id < 1:
+        return ""
+    colour = _RECEIPT_COLOURS[(receipt_id - 1) % len(_RECEIPT_COLOURS)]
+    return f"{colour}R{receipt_id} "
+
+
 def render_item_line(item, *, today: date, lang: str = "en", names=None) -> str:
     icon = _urgency_icon(item.expires_on, today=today)
+    receipt = _receipt_badge(item)
     badge = _storage_badge(item)
     qty = _qty_prefix(item.qty, item.unit)
     name = _name(names, item.raw_name)
@@ -64,7 +78,7 @@ def render_item_line(item, *, today: date, lang: str = "en", names=None) -> str:
         tail = t("item.tail.tomorrow", lang)
     else:
         tail = f"{_fmt_date(item.expires_on, today=today, lang=lang)} {t('item.tail.days', lang, n=delta)}"
-    return f"{icon} {badge}#{item.id} {qty}{name} · {tail}"
+    return f"{icon} {receipt}{badge}#{item.id} {qty}{name} · {tail}"
 
 
 def _fmt_cost(micros: int | None, *, lang: str = "en") -> str:
@@ -246,14 +260,17 @@ def build_digest_keyboard(
 
     buttons = [
         CallbackButton(
-            text=f"{_urgency_icon(item.expires_on, today=today)} #{item.id} {_name(names, item.raw_name)}",
+            text=(
+                f"{_urgency_icon(item.expires_on, today=today)} "
+                f"{_receipt_badge(item)}#{item.id} {_name(names, item.raw_name)}"
+            ),
             callback_data=_open_data(item.id),
         )
         for item in items
     ]
-    rows: list[list[CallbackButton]] = [
-        buttons[i:i + 2] for i in range(0, len(buttons), 2)
-    ]
+    # One button per row gives long branded product names the full message
+    # width. Telegram clients otherwise ellipsize two half-width buttons.
+    rows: list[list[CallbackButton]] = [[button] for button in buttons]
     if has_more:
         rows.append(
             [

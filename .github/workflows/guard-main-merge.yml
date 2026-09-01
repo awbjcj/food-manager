@@ -1,0 +1,29 @@
+name: Guard main merges
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  check-source-branch:
+    name: Verify PR source branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Enforce dev/hotfix-only merges into master
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          echo "Source branch: $HEAD_REF"
+          case "$HEAD_REF" in
+            dev|hotfix/*)
+              echo "Allowed source branch for master."
+              ;;
+            *)
+              echo "::error::Only 'dev' or 'hotfix/*' branches may merge into master (got '$HEAD_REF')."
+              exit 1
+              ;;
+          esac

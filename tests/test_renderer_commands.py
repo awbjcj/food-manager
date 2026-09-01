@@ -36,6 +36,7 @@ from app.renderer import (
     render_digest,
     render_ingest_reply,
     render_item_card,
+    render_item_line,
     render_list,
     render_remove_confirm,
     render_stats,
@@ -213,12 +214,15 @@ def _pantry_item(name, expires_on, item_id):
     )
 
 
-def _digest_item(item_id, name, expires_on, storage="default"):
+def _digest_item(
+    item_id, name, expires_on, storage="default", source_receipt_id=None
+):
     return SimpleNamespace(
         id=item_id,
         raw_name=name,
         expires_on=expires_on,
         storage=storage,
+        source_receipt_id=source_receipt_id,
         qty=1,
         unit=None,
     )
@@ -233,7 +237,38 @@ def test_digest_keyboard_emits_labeled_open_buttons():
     rows = build_digest_keyboard(items, has_more=False, today=today, lang="en")
     assert rows[0][0].callback_data == "item:open:3"
     assert rows[0][0].text == "🔴 #3 spinach"
-    assert rows[0][1].callback_data == "item:open:7"
+    assert rows[1][0].callback_data == "item:open:7"
+
+
+def test_receipt_items_share_a_stable_colour_badge():
+    today = date(2026, 6, 9)
+    same_receipt = [
+        _digest_item(3, "spinach", today, source_receipt_id=1),
+        _digest_item(7, "milk", today, source_receipt_id=1),
+    ]
+    other_receipt = _digest_item(9, "spinach", today, source_receipt_id=2)
+
+    first = render_item_line(same_receipt[0], today=today)
+    second = render_item_line(same_receipt[1], today=today)
+    other = render_item_line(other_receipt, today=today)
+
+    assert "🟦R1" in first and "🟦R1" in second
+    assert "🟪R2" in other
+
+
+def test_digest_keyboard_gives_long_product_names_a_full_row():
+    today = date(2026, 6, 9)
+    long_name = "President's Choice Blue Menu Free From Extra Lean Ground Turkey"
+    items = [
+        _digest_item(3, long_name, today, source_receipt_id=1),
+        _digest_item(7, "milk", today, source_receipt_id=1),
+    ]
+
+    rows = build_digest_keyboard(items, has_more=False, today=today)
+
+    assert len(rows) == 2
+    assert all(len(row) == 1 for row in rows)
+    assert rows[0][0].text == f"🟡 🟦R1 #3 {long_name}"
 
 
 def test_digest_keyboard_can_return_to_full_pantry():
@@ -297,7 +332,7 @@ def test_render_digest_truncates_at_10():
     )
     assert rendered.rendered_count == 10
     assert "15 more" in rendered.text
-    assert len(build_digest_keyboard(rendered.rendered_items, has_more=True, today=today)) == 6
+    assert len(build_digest_keyboard(rendered.rendered_items, has_more=True, today=today)) == 11
 
 
 def _card_item(item_id=3, name="spinach", storage="default", days=7):

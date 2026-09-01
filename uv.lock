@@ -8,7 +8,7 @@ resolution-markers = [
 
 [[package]]
 name = "agno"
-version = "2.9.0"
+version = "3.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "agnoctl" },
@@ -22,23 +22,24 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/27/aa/6fe38af2242e805b4da1f608f02aaa4aebc97b0f4abd1e62f6128dff0ada/agno-2.9.0.tar.gz", hash = "sha256:7d9c134703e3c2798023cd57dcb9caa8e1174f6914813f9b130becfc3521a46f", size = 2650220, upload-time = "2026-08-13T12:09:13.379Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/4f/e694f4a76076e69f0f68e428a028fc84de05d66ace80cfe85926e09432f3/agno-3.0.1.tar.gz", hash = "sha256:1ff07520449d57f823f9475b55547ce58f47581224ad5f5c581796bd5569dfa0", size = 3295709, upload-time = "2026-08-26T10:20:23.647Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/1b/da091bccb467c7ced634225f76b37e5d1da82d32734815264276658281a0/agno-2.9.0-py3-none-any.whl", hash = "sha256:7777674b3931b341fad4fcf02a61b185a08588c509101348facf87feb2144c0c", size = 3078965, upload-time = "2026-08-13T12:09:10.488Z" },
+    { url = "https://files.pythonhosted.org/packages/23/bb/cbc641f76e351607a5587d8d95af2cad06319162ca185f9e8501a6f67bc8/agno-3.0.1-py3-none-any.whl", hash = "sha256:d617748623d6af8d5861b316c792f9661dfaf16c75848e86bf1ec977c1394418", size = 3755814, upload-time = "2026-08-26T10:20:20.724Z" },
 ]
 
 [[package]]
 name = "agnoctl"
-version = "0.1.2"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
+    { name = "questionary" },
     { name = "rich" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e9/c4/a3a0879d11656dcd0cc44182a9d4808eff279b1ab9b875d12941ea811568/agnoctl-0.1.2.tar.gz", hash = "sha256:0ca7c56a27b1b4fe20632ac4318ebf5af20f2281bcc4474de335001d8fcaf8a5", size = 88947, upload-time = "2026-07-09T11:35:11.007Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1e/d4/def5c39d71a8029ab83de433405846f6b3bb6e3bbaaeb99c2935087b3c4e/agnoctl-0.2.0.tar.gz", hash = "sha256:fcc5f150e1aab3e128815c79a28e03bad4446d46864f5c39d434985e89ea214f", size = 100771, upload-time = "2026-08-24T12:52:32.205Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4f/94/f65f8c9ad5bcd455f0d667b25bd2d068b5db30fc58ad4e29a4d79c915a6a/agnoctl-0.1.2-py3-none-any.whl", hash = "sha256:bcb41c80a871b8c358a6024ed9288e4f2d669b9a70b7448b0b28c1439875be39", size = 71918, upload-time = "2026-07-09T11:35:09.794Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/3b/6b78308441db94ed4a1a5bf967a8da4ede0f6c3608ea1eb37a9cb7e6ad04/agnoctl-0.2.0-py3-none-any.whl", hash = "sha256:eee03a1febcd11d80b524aac2da527ffa134d88d92c19a529b1862fa6f965d69", size = 76352, upload-time = "2026-08-24T12:52:30.761Z" },
 ]
 
 [[package]]
@@ -582,7 +583,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agno", specifier = ">=2.8.5" },
+    { name = "agno", specifier = ">=3.0.1,<4.0" },
     { name = "aiogram", specifier = ">=3.30.0,<4.0" },
     { name = "aiohttp", specifier = ">=3.14.0,<4.0" },
     { name = "alembic", specifier = ">=1.18.5,<2.0" },
@@ -1386,6 +1387,18 @@ wheels = [
 ]
 
 [[package]]
+name = "prompt-toolkit"
+version = "3.0.53"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "wcwidth" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7d/ea/39b988c938f75cb75d7045b5c69f8bfed47ee2152c8837fb403de29d6fb8/prompt_toolkit-3.0.53.tar.gz", hash = "sha256:9ec8a0ad96d5c56148b3f914aa79c1564c3fde5d2e6b876e7bc327e353cf8fa6", size = 435492, upload-time = "2026-07-26T20:56:14.758Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/6f/84908cad2d6aa5144abcf7b42709fe4fdb459bc640ec7ac5786e7693dabc/prompt_toolkit-3.0.53-py3-none-any.whl", hash = "sha256:01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2", size = 392288, upload-time = "2026-07-26T20:56:12.512Z" },
+]
+
+[[package]]
 name = "propcache"
 version = "0.5.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1765,6 +1778,18 @@ wheels = [
 ]
 
 [[package]]
+name = "questionary"
+version = "2.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "prompt-toolkit" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f6/45/eafb0bba0f9988f6a2520f9ca2df2c82ddfa8d67c95d6625452e97b204a5/questionary-2.1.1.tar.gz", hash = "sha256:3d7e980292bb0107abaa79c68dd3eee3c561b83a0f89ae482860b181c8bd412d", size = 25845, upload-time = "2025-08-28T19:00:20.851Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3c/26/1062c7ec1b053db9e499b4d2d5bc231743201b74051c973dadeac80a8f43/questionary-2.1.1-py3-none-any.whl", hash = "sha256:a51af13f345f1cdea62347589fbb6df3b290306ab8930713bfae4d475a7d4a59", size = 36753, upload-time = "2025-08-28T19:00:19.56Z" },
+]
+
+[[package]]
 name = "requests"
 version = "2.34.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2044,6 +2069,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/53/0c/06f8b233b8fd13b9e5ee11424ef85419ba0d8ba0b3138bf360be2ff56953/urllib3-2.7.0.tar.gz", hash = "sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c", size = 433602, upload-time = "2026-05-07T16:13:18.596Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897", size = 131087, upload-time = "2026-05-07T16:13:17.151Z" },
+]
+
+[[package]]
+name = "wcwidth"
+version = "0.8.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/36/57/ed58088fafdf4c55a0ad6bde846502567645424d7ebf325230b9237f4085/wcwidth-0.8.3.tar.gz", hash = "sha256:d128512515fbf4612e0ff21fd6380399210318b7b54a9af59dff8454cf9730eb", size = 1458450, upload-time = "2026-08-28T18:10:06.875Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/0e/57f6bb3024a597b2e8ec4aee710ffe62ddc95af2e2bb1ee7a7abdc22c68c/wcwidth-0.8.3-py3-none-any.whl", hash = "sha256:d5b73dba6158a595ec9370350e7f2637bcac8d6c5e4fde34f30fcffb6103a5e4", size = 331669, upload-time = "2026-08-28T18:10:04.909Z" },
 ]
 
 [[package]]

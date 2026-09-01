@@ -4,6 +4,25 @@
 
 系统使用一个长期运行的进程（ADR 0001）。在进程内，`app/resilience.py` 会以退避策略重启崩溃的轮询循环；启动补偿逻辑（`catch_up_missed_digests`）会补发停机期间错过的摘要。以下机制用于应对进程彻底终止（内存不足、未处理退出、主机重启）。必须只运行一个实例；同一个令牌上的两个轮询器会发生冲突。
 
+## 分支与合并策略
+
+`dev` 是默认分支，所有改动都先合入这里；`master` 是 Railway 部署的分支。只有 `dev` 或 `hotfix/*` 分支可以向 `master` 发起拉取请求——`.github/workflows/guard-main-merge.yml` 会让其他来源分支失败。
+
+**合并到 `master` 一律使用「Rebase and merge」（变基合并）。** 仓库级别已禁用 squash 合并和合并提交，因此只剩下变基按钮可用，并且 `master` 要求线性历史。这样不会产生合并提交，也不会生成新的提交信息：`master` 得到的正是在 `dev` 上评审过的那些提交，只是重放到了最新位置。
+
+变基会改写提交 SHA，因此每次合并后 `dev` 都会与 `master` 产生偏离。`.github/workflows/sync-dev-with-master.yml` 负责闭环：每次推送到 `master` 后，它会把 `dev` 变基到 `master` 之上——已经进入 `master` 的提交会按 patch-id 自动丢弃，`dev` 上更新的工作则会保留——然后用 `--force-with-lease` 强制推送结果。稳定状态是 `master` 为 `dev` 的祖先，且两者内容完全一致。
+
+有两点需要注意：
+
+- `dev` 会被 CI 强制推送。更新本地克隆请使用 `git pull --rebase`（或 `git fetch && git reset --hard origin/dev`），不要使用普通合并。
+- 同步推送使用 `GITHUB_TOKEN`，按设计不会触发后续工作流，因此 Dev CI 不会在同步后的提交上重跑——这些提交已经在拉取请求中通过了检查。
+
+如果变基发生冲突，工作流会中止并明确报错，而不会自行猜测。请手工解决：
+
+    git fetch origin
+    git rebase origin/master dev
+    git push --force-with-lease origin dev
+
 ## GitHub Actions 与 Railway
 
 `.github/workflows/ci.yml` 会在拉取请求、推送到 `master` 以及每周定时任务中运行。它会检查 Ruff、Pyright、空数据库上的 Alembic 升级、完整测试套件、Python 和 Docker 构建，以及锁定依赖的安全审计。

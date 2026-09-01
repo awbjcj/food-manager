@@ -8,6 +8,41 @@ re-sends a digest missed during downtime. The layers below cover hard process
 death (OOM, unhandled exit, host reboot) — run exactly one instance; two pollers
 on one token conflict.
 
+## Branch and merge policy
+
+`dev` is the default branch and where everything lands first; `master` is what
+Railway deploys. Only `dev` or a `hotfix/*` branch may open a pull request
+against `master` — `.github/workflows/guard-main-merge.yml` fails any other
+source branch.
+
+**Merges into `master` use "Rebase and merge".** Squash merging and merge
+commits are disabled at the repository level, so the rebase button is the only
+one available, and `master` requires linear history. No merge commit is created
+and no new commit message is written: `master` receives exactly the commits that
+were reviewed on `dev`, replayed on top.
+
+Rebasing rewrites commit SHAs, so `dev` would drift from `master` after every
+merge. `.github/workflows/sync-dev-with-master.yml` closes that loop: on every
+push to `master` it rebases `dev` onto `master` — commits already on `master`
+drop out by patch-id, any newer `dev` work is preserved — and force-pushes the
+result with `--force-with-lease`. Steady state is `master` being an ancestor of
+`dev`, with identical trees.
+
+Two consequences worth knowing:
+
+- `dev` is force-pushed by CI. Update local clones with `git pull --rebase`
+  (or `git fetch && git reset --hard origin/dev`), not a plain merge.
+- The sync push uses `GITHUB_TOKEN`, which by design does not trigger further
+  workflows, so Dev CI does not re-run on the synced commits. They already
+  passed on the pull request.
+
+If the rebase conflicts, the workflow aborts and fails loudly rather than
+guessing. Resolve it by hand:
+
+    git fetch origin
+    git rebase origin/master dev
+    git push --force-with-lease origin dev
+
 ## GitHub Actions and Railway
 
 `.github/workflows/ci.yml` runs on pull requests and pushes to `master`, plus a

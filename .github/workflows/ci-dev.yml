@@ -1,0 +1,49 @@
+name: Dev CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "true"
+  UV_NO_PROGRESS: "true"
+  TELEGRAM_BOT_TOKEN: ci-placeholder
+  ALLOWED_TELEGRAM_USER_ID: "1"
+  ANTHROPIC_API_KEY: ci-placeholder
+
+jobs:
+  quick-check:
+    name: Lint & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.16"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --all-groups
+
+      - name: Lint
+        run: uv run ruff check app tests bin migrations
+
+      - name: Run tests
+        run: uv run pytest -q

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { cancelRenewal, createCheckout, loadAccount, saveAccount } from './api'
 import {
   countLabel,
@@ -45,7 +45,7 @@ function Icon({ name, size = 24 }: { name: IconName; size?: number }) {
 }
 
 function Logo() {
-  return <div className="brand-mark"><Icon name="leaf" size={22} /></div>
+  return <div className="brand-mark" aria-hidden="true"><Icon name="leaf" size={22} /></div>
 }
 
 function UsageRow({ icon, label, used, limit, locale }: { icon: IconName; label: string; used: number; limit: number; locale: Locale }) {
@@ -55,7 +55,7 @@ function UsageRow({ icon, label, used, limit, locale }: { icon: IconName; label:
     <span className="icon-disc"><Icon name={icon} /></span>
     <div className="usage-content">
       <div className="usage-copy"><strong>{label}</strong><span>{t(locale, 'usage.usedOf', values)}</span></div>
-      <div className="progress" aria-label={t(locale, 'usage.ariaUsedOf', { label, ...values })}>
+      <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={limit} aria-valuenow={Math.min(used, limit)} aria-label={t(locale, 'usage.ariaUsedOf', { label, ...values })}>
         <span style={{ width: String(percent) + '%' }} />
       </div>
     </div>
@@ -95,8 +95,8 @@ function HomeView({ data, locale, selectTab, openChat }: { data: AccountData; lo
       <UsageRow icon="brain" label={t(locale, 'usage.actions')} used={data.quota.actionsUsed} limit={data.quota.actionsLimit} locale={locale} />
       <p className="reset-copy"><Icon name="refresh" size={18} /> {t(locale, 'usage.resets', { date: reset })}</p>
     </section>}
-    {data.hostedFeaturesEnabled && <section><SectionLabel>{t(locale, 'home.myHousehold')}</SectionLabel><OpenRow icon="household" title={data.household.name} detail={countLabel(locale, data.household.members, 'count.member.one', 'count.member.many')} action={t(locale, 'home.manage')} onClick={() => selectTab('account')} /></section>}
-    <section><SectionLabel>{t(locale, 'home.quickAccess')}</SectionLabel><div className="open-list">
+    {data.hostedFeaturesEnabled && <section className="content-section"><SectionLabel>{t(locale, 'home.myHousehold')}</SectionLabel><OpenRow icon="household" title={data.household.name} detail={countLabel(locale, data.household.members, 'count.member.one', 'count.member.many')} action={t(locale, 'home.manage')} onClick={() => selectTab('account')} /></section>}
+    <section className="content-section"><SectionLabel>{t(locale, 'home.quickAccess')}</SectionLabel><div className="open-list">
       <OpenRow icon="pantry" title={t(locale, 'shortcut.pantry')} action="/pantry" onClick={() => openChat('pantry')} />
       <OpenRow icon="recipes" title={t(locale, 'shortcut.cook')} action="/cook" onClick={() => openChat('cook')} />
       <OpenRow icon="calendar" title={t(locale, 'shortcut.plan')} action="/plan" onClick={() => openChat('plan')} />
@@ -157,7 +157,7 @@ function AccountView({ data, locale, onSaved, selectTab, openChat }: { data: Acc
   }
   return <main className="page account-page">
     <section className="page-heading"><h1>{t(locale, 'account.title')}</h1><p>{t(locale, 'account.subtitle')}</p></section>
-    <div className="profile-row"><div className="avatar large">{initials}</div><div><strong>{data.user.name}</strong><span>{data.user.role === 'owner' ? t(locale, 'account.owner') : t(locale, 'account.member')}</span></div></div>
+    <div className="profile-row"><div className="avatar large" aria-hidden="true">{initials}</div><div><strong>{data.user.name}</strong><span>{data.user.role === 'owner' ? t(locale, 'account.owner') : t(locale, 'account.member')}</span></div></div>
     <form onSubmit={submit}>
       <fieldset><legend>{t(locale, 'account.household')}</legend><label>{t(locale, 'account.householdName')}<input value={form.householdName} disabled={data.user.role !== 'owner'} maxLength={80} onChange={event => setForm({ ...form, householdName: event.target.value })} /></label>{data.hostedFeaturesEnabled && <p className="field-note">{t(locale, 'account.seatsUsed', { used: formatNumber(locale, data.household.members), limit: formatNumber(locale, data.household.seatCap) })}</p>}</fieldset>
       <fieldset><legend>{t(locale, 'account.dailyDigest')}</legend><label>{t(locale, 'account.deliveryTime')}<select value={form.digestHour} onChange={event => setForm({ ...form, digestHour: Number(event.target.value) })}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{formatDigestHour(locale, hour)}</option>)}</select></label><label>{t(locale, 'account.timeZone')}<select value={form.timeZone} onChange={event => setForm({ ...form, timeZone: event.target.value })}>{zones.map(zone => <option key={zone}>{zone}</option>)}</select></label></fieldset>
@@ -169,12 +169,41 @@ function AccountView({ data, locale, onSaved, selectTab, openChat }: { data: Acc
 }
 
 function BottomNav({ tab, locale, select, hostedFeaturesEnabled }: { tab: Tab; locale: Locale; select: (tab: Tab) => void; hostedFeaturesEnabled: boolean }) {
-  return <nav className="bottom-nav" aria-label={t(locale, 'nav.primary')}><button className={tab === 'home' ? 'active' : ''} onClick={() => select('home')}><Icon name="home" /><span>{t(locale, 'nav.home')}</span></button>{hostedFeaturesEnabled && <button className={tab === 'plans' ? 'active' : ''} onClick={() => select('plans')}><Icon name="plan" /><span>{t(locale, 'nav.plans')}</span></button>}<button className={tab === 'account' ? 'active' : ''} onClick={() => select('account')}><Icon name="account" /><span>{t(locale, 'nav.account')}</span></button></nav>
+  return <nav className="bottom-nav" aria-label={t(locale, 'nav.primary')}><button type="button" className={tab === 'home' ? 'active' : ''} aria-current={tab === 'home' ? 'page' : undefined} onClick={() => select('home')}><Icon name="home" /><span>{t(locale, 'nav.home')}</span></button>{hostedFeaturesEnabled && <button type="button" className={tab === 'plans' ? 'active' : ''} aria-current={tab === 'plans' ? 'page' : undefined} onClick={() => select('plans')}><Icon name="plan" /><span>{t(locale, 'nav.plans')}</span></button>}<button type="button" className={tab === 'account' ? 'active' : ''} aria-current={tab === 'account' ? 'page' : undefined} onClick={() => select('account')}><Icon name="account" /><span>{t(locale, 'nav.account')}</span></button></nav>
 }
 
 function ManageSheet({ data, locale, close, cancel }: { data: AccountData; locale: Locale; close: () => void; cancel: () => void }) {
   const until = formatShortDate(locale, new Date(data.plan.periodEnd), data.user.timeZone)
-  return <div className="sheet-backdrop" onMouseDown={event => event.target === event.currentTarget && close()}><section className="sheet" role="dialog" aria-modal="true" aria-labelledby="manage-title"><button className="sheet-close" onClick={close} aria-label={t(locale, 'common.close')}><Icon name="close" /></button><div className="sheet-handle" /><h2 id="manage-title">{t(locale, 'manage.title')}</h2><div className="active-status"><span><Icon name="check" size={17} /></span><div><strong>{t(locale, 'manage.activeUntil', { date: until })}</strong><p>{data.plan.renews ? t(locale, 'manage.renews') : t(locale, 'manage.cancelled')}</p></div></div><button className="button primary" onClick={close}>{t(locale, 'manage.keep')}</button>{data.plan.renews && data.plan.canManage && <button className="cancel-button" onClick={cancel}>{t(locale, 'manage.cancel')}</button>}</section></div>
+  const sheetRef = useRef<HTMLElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    closeRef.current?.focus()
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        close()
+        return
+      }
+      if (event.key !== 'Tab' || !sheetRef.current) return
+      const focusable = Array.from(sheetRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      previousFocus?.focus()
+    }
+  }, [close])
+  return <div className="sheet-backdrop" onMouseDown={event => event.target === event.currentTarget && close()}><section ref={sheetRef} className="sheet" role="dialog" aria-modal="true" aria-labelledby="manage-title"><button ref={closeRef} className="sheet-close" type="button" onClick={close} aria-label={t(locale, 'common.close')}><Icon name="close" /></button><div className="sheet-handle" aria-hidden="true" /><h2 id="manage-title">{t(locale, 'manage.title')}</h2><div className="active-status"><span><Icon name="check" size={17} /></span><div><strong>{t(locale, 'manage.activeUntil', { date: until })}</strong><p>{data.plan.renews ? t(locale, 'manage.renews') : t(locale, 'manage.cancelled')}</p></div></div><button className="button primary" type="button" onClick={close}>{t(locale, 'manage.keep')}</button>{data.plan.renews && data.plan.canManage && <button className="cancel-button" type="button" onClick={cancel}>{t(locale, 'manage.cancel')}</button>}</section></div>
 }
 
 export function App() {
@@ -244,8 +273,8 @@ export function App() {
   }
   if (error && !data) return <main className="fatal-state"><Logo /><h1>{t(locale, 'error.openInTelegram.title')}</h1><p>{t(locale, error)}</p><button className="button primary" onClick={() => window.location.reload()}>{t(locale, 'error.tryAgain')}</button></main>
   if (!data) return <main className="loading-state"><Logo /><div className="spinner" /><span>{t(locale, 'loading.preparing')}</span></main>
-  return <div className={busy ? 'app busy' : 'app'}>
-    {error && <button className="error-toast" onClick={() => setError(null)} aria-label={t(locale, 'common.close')}>{t(locale, error)}<Icon name="close" size={18} /></button>}
+  return <div className={busy ? 'app busy' : 'app'} aria-busy={busy}>
+    {error && <div className="error-toast" role="alert"><span>{t(locale, error)}</span><button type="button" onClick={() => setError(null)} aria-label={t(locale, 'common.close')}><Icon name="close" size={18} /></button></div>}
     {tab === 'home' && <HomeView data={data} locale={locale} selectTab={setTab} openChat={openChat} />}
     {tab === 'plans' && data.hostedFeaturesEnabled && <PlansView data={data} locale={locale} checkout={checkout} manage={() => setManage(true)} />}
     {tab === 'account' && <AccountView data={data} locale={locale} onSaved={setData} selectTab={setTab} openChat={openChat} />}

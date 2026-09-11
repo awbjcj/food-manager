@@ -300,7 +300,7 @@ async def test_ingest_photo_confidence_and_purchase_date_fallback(session):
 
 def _item(session, name, days_from_today, *, today=date(2026, 5, 26), status="active",
           category="produce", snoozed_until=None, created_via="manual",
-          ingest_source="llm") -> PantryItem:
+          ingest_source="llm", source_receipt_id=None) -> PantryItem:
     pantry_item = PantryItem(
         household_id=1,
         raw_name=name,
@@ -316,6 +316,7 @@ def _item(session, name, days_from_today, *, today=date(2026, 5, 26), status="ac
         status=status,
         snoozed_until=snoozed_until,
         created_via=created_via,
+        source_receipt_id=source_receipt_id,
         created_at=datetime.now(UTC),
     )
     session.add(pantry_item)
@@ -338,6 +339,65 @@ def test_pantry_list_filters_and_digest_due(session):
     _item(session, "snoozed", 3, today=today, snoozed_until=today + timedelta(days=2))
     assert [r.raw_name for r in list_digest_due(session, household_id=1, today=today)] == ["expired", "A", "B", "C"]
     assert "dairy" in ALLOWED_CATEGORIES and "wine" not in ALLOWED_CATEGORIES
+
+
+def test_pantry_list_supports_receipt_category_and_expiry_ordering(session):
+    today = date(2026, 5, 26)
+    old_receipt = Receipt(
+        household_id=1,
+        photo_file_id="old-receipt",
+        purchase_date=today - timedelta(days=7),
+        purchase_date_source="receipt",
+        scanned_at=datetime(2026, 5, 19, 12, tzinfo=UTC),
+    )
+    new_receipt = Receipt(
+        household_id=1,
+        photo_file_id="new-receipt",
+        purchase_date=today - timedelta(days=1),
+        purchase_date_source="receipt",
+        scanned_at=datetime(2026, 5, 25, 12, tzinfo=UTC),
+    )
+    session.add_all([old_receipt, new_receipt])
+    session.commit()
+    session.refresh(old_receipt)
+    session.refresh(new_receipt)
+    assert old_receipt.id is not None
+    assert new_receipt.id is not None
+
+    _item(
+        session, "Old produce", 4, today=today, category="produce",
+        created_via="receipt", source_receipt_id=old_receipt.id,
+    )
+    _item(
+        session, "Old dairy", 10, today=today, category="dairy",
+        created_via="receipt", source_receipt_id=old_receipt.id,
+    )
+    _item(
+        session, "New dairy", 1, today=today, category="dairy",
+        created_via="receipt", source_receipt_id=new_receipt.id,
+    )
+    _item(session, "Manual other", 2, today=today, category="other")
+
+    receipt_order = list_active(
+        session, household_id=1, f=ListFilter.default(), today=today, sort_by="receipt"
+    )
+    assert [item.raw_name for item in receipt_order] == [
+        "Old produce", "Old dairy", "New dairy", "Manual other",
+    ]
+
+    category_order = list_active(
+        session, household_id=1, f=ListFilter.default(), today=today, sort_by="category"
+    )
+    assert [item.raw_name for item in category_order] == [
+        "New dairy", "Old dairy", "Manual other", "Old produce",
+    ]
+
+    expiry_order = list_active(
+        session, household_id=1, f=ListFilter.default(), today=today, sort_by="expires"
+    )
+    assert [item.raw_name for item in expiry_order] == [
+        "New dairy", "Manual other", "Old produce", "Old dairy",
+    ]
 
 
 def test_pantry_mutations_and_correction(session):

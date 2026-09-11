@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
+from sqlalchemy import case
 from sqlmodel import Session, col, select
 
 from app.cache import write_user_correction
@@ -22,6 +23,8 @@ ALLOWED_CATEGORIES = frozenset({
 })
 
 Window = Literal["all", "week", "expired"]
+PantrySort = Literal["receipt", "category", "expires"]
+PANTRY_SORTS: tuple[PantrySort, ...] = ("receipt", "category", "expires")
 
 
 @dataclass(frozen=True)
@@ -34,7 +37,14 @@ class ListFilter:
         return cls()
 
 
-def list_active(session: Session, *, household_id: int, f: ListFilter, today: date) -> list[PantryItem]:
+def list_active(
+    session: Session,
+    *,
+    household_id: int,
+    f: ListFilter,
+    today: date,
+    sort_by: PantrySort = "expires",
+) -> list[PantryItem]:
     query = select(PantryItem).where(
         PantryItem.household_id == household_id,
         PantryItem.status == "active",
@@ -48,7 +58,33 @@ def list_active(session: Session, *, household_id: int, f: ListFilter, today: da
         )
     elif f.window == "expired":
         query = query.where(col(PantryItem.expires_on) < today)
-    query = query.order_by(col(PantryItem.expires_on).asc())
+    if sort_by == "receipt":
+        # Keep every receipt together, oldest purchase first. Manual items have
+        # no receipt to rank against, so they follow the receipt-backed groups.
+        receipt_missing = case((col(Receipt.id).is_(None), 1), else_=0)
+        query = query.outerjoin(
+            Receipt, col(PantryItem.source_receipt_id) == col(Receipt.id)
+        ).order_by(
+            receipt_missing.asc(),
+            col(Receipt.purchase_date).asc(),
+            col(Receipt.scanned_at).asc(),
+            col(Receipt.id).asc(),
+            col(PantryItem.purchased_on).asc(),
+            col(PantryItem.created_at).asc(),
+            col(PantryItem.id).asc(),
+        )
+    elif sort_by == "category":
+        category_missing = case((col(PantryItem.category).is_(None), 1), else_=0)
+        query = query.order_by(
+            category_missing.asc(),
+            col(PantryItem.category).asc(),
+            col(PantryItem.expires_on).asc(),
+            col(PantryItem.id).asc(),
+        )
+    else:
+        query = query.order_by(
+            col(PantryItem.expires_on).asc(), col(PantryItem.id).asc()
+        )
     return list(session.exec(query).all())
 
 

@@ -75,6 +75,9 @@ def test_callback_parser():
         item_id=42,
         back_to="all",
     )
+    assert parse_callback("act:ate:42:all:category") == CallbackAction(
+        verb="ate", item_id=42, back_to="all", sort_by="category",
+    )
     assert parse_callback("show:all") == CallbackAction(verb="show_all", item_id=None)
     for bad in ("act:nope:1", "act:ate:42:unknown"):
         with pytest.raises(CommandError):
@@ -104,10 +107,13 @@ def test_parse_item_callback_back_to_origin():
         item_id=5,
         back_to="all",
     )
+    assert parse_item_callback("item:open:5:all:expires") == ItemAction(
+        kind="open", item_id=5, back_to="all", sort_by="expires",
+    )
 
 
 def test_parse_item_callback_rejects_bad_back_to_origin():
-    for bad in ("item:list:unknown", "item:open:5:unknown", "item:corr:5:all"):
+    for bad in ("item:list:unknown", "item:open:5:unknown", "item:corr:5:all:unknown"):
         with pytest.raises(CommandError):
             parse_item_callback(bad)
 
@@ -115,6 +121,11 @@ def test_parse_item_callback_rejects_bad_back_to_origin():
 def test_parse_pantry_arg():
     assert parse_pantry_arg([]) == "all"
     assert parse_pantry_arg(["digest"]) == "digest"
+    assert parse_pantry_arg(["receipt"]) == "receipt"
+    assert parse_pantry_arg(["category"]) == "category"
+    assert parse_pantry_arg(["expires"]) == "expires"
+    assert parse_pantry_arg(["expiry"]) == "expires"
+    assert parse_pantry_arg(["expiration"]) == "expires"
     assert parse_pantry_arg(["5"]) == 5
     assert parse_pantry_arg(["#42"]) == 42
     for bad in (["unknown"], ["digest", "extra"]):
@@ -215,12 +226,13 @@ def _pantry_item(name, expires_on, item_id):
 
 
 def _digest_item(
-    item_id, name, expires_on, storage="default", source_receipt_id=None
+    item_id, name, expires_on, storage="default", source_receipt_id=None, category="other"
 ):
     return SimpleNamespace(
         id=item_id,
         raw_name=name,
         expires_on=expires_on,
+        category=category,
         storage=storage,
         source_receipt_id=source_receipt_id,
         qty=1,
@@ -279,7 +291,21 @@ def test_digest_keyboard_can_return_to_full_pantry():
         today=today,
         back_to="all",
     )
-    assert rows[0][0].callback_data == "item:open:5:all"
+    assert [button.callback_data for button in rows[0]] == [
+        "item:list:all", "item:list:all:category", "item:list:all:expires",
+    ]
+    assert rows[0][0].text.startswith("✓ ")
+    assert rows[1][0].callback_data == "item:open:5:all"
+
+
+def test_full_pantry_keyboard_preserves_the_selected_sort():
+    rows = build_digest_keyboard(
+        [_digest_item(5, "milk", date(2026, 6, 10))],
+        has_more=False, today=date(2026, 6, 9), back_to="all", sort_by="category",
+    )
+
+    assert rows[0][1].text.startswith("✓ ")
+    assert rows[1][0].callback_data == "item:open:5:all:category"
 
 
 def test_digest_keyboard_show_all_when_more():
@@ -300,6 +326,29 @@ def test_render_digest_cap_none_shows_all():
     assert capped.has_more is True and len(capped.rendered_items) == 10
     full = render_digest(items, today=today, cap=None)
     assert full.has_more is False and len(full.rendered_items) == 15
+
+
+def test_full_pantry_non_expiry_sorts_preserve_the_requested_order():
+    today = date(2026, 6, 9)
+    receipt_order = [
+        _digest_item(1, "Old receipt", today + timedelta(days=8)),
+        _digest_item(2, "New receipt", today - timedelta(days=1)),
+    ]
+    rendered_receipts = render_digest(
+        receipt_order, today=today, cap=None, sort_by="receipt"
+    )
+    assert rendered_receipts.text.index("Old receipt") < rendered_receipts.text.index("New receipt")
+
+    category_order = [
+        _digest_item(3, "Milk", today + timedelta(days=3), category="dairy"),
+        _digest_item(4, "Apples", today + timedelta(days=1), category="produce"),
+    ]
+    rendered_categories = render_digest(
+        category_order, today=today, cap=None, sort_by="category"
+    )
+    assert "🏷 DAIRY" in rendered_categories.text
+    assert "🏷 PRODUCE" in rendered_categories.text
+    assert rendered_categories.text.index("Milk") < rendered_categories.text.index("Apples")
 
 
 def test_render_digest_buckets_and_keyboard():
@@ -367,6 +416,18 @@ def test_card_keyboard_can_return_to_full_pantry():
     assert "act:snooze2:5:all" in datas
     assert "act:freeze:5:all" in datas
     assert rows[-1][0].callback_data == "item:list:all"
+
+
+def test_card_keyboard_preserves_a_nondefault_full_pantry_sort():
+    rows = build_item_card_keyboard(
+        _card_item(item_id=5), lang="en", back_to="all", sort_by="category"
+    )
+    datas = [button.callback_data for row in rows for button in row]
+
+    assert "act:ate:5:all:category" in datas
+    assert "item:corr:5:all:category" in datas
+    assert "item:rm:5:all:category" in datas
+    assert rows[-1][0].callback_data == "item:list:all:category"
 
 
 def test_card_keyboard_hides_freeze_when_frozen():

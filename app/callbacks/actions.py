@@ -90,6 +90,7 @@ async def handle_callback(
                     today,
                     lang=user.lang,
                     translation_llm=translation_llm,
+                    sort_by=action.sort_by,
                 )
                 return
             await _refresh_digest_message(

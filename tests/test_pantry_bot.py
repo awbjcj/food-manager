@@ -9,7 +9,7 @@ from sqlmodel import Session, SQLModel, create_engine
 import app.bot as bot_mod
 import app.callbacks.actions as action_callbacks
 import app.callbacks.items as item_callbacks
-from app.models import Household, NameTranslation, PantryItem, User
+from app.models import Household, NameTranslation, PantryItem, Receipt, User
 from tests.fakes import FakeTranslationLLM
 
 
@@ -64,7 +64,8 @@ def _cb(data: str):
 
 
 def _active_item(
-    session_factory, *, expires_in_days: int = 3, status: str = "active"
+    session_factory, *, name: str = "Milk", category: str = "dairy",
+    expires_in_days: int = 3, status: str = "active", source_receipt_id: int | None = None,
 ) -> int:
     today = date(2026, 6, 14)
     with session_factory() as db:
@@ -72,9 +73,9 @@ def _active_item(
         assert user is not None
         item = PantryItem(
             household_id=user.household_id,
-            raw_name="Milk",
-            normalized_name="milk",
-            category="dairy",
+            raw_name=name,
+            normalized_name=name.lower(),
+            category=category,
             qty=1.0,
             unit=None,
             purchased_on=today,
@@ -83,7 +84,8 @@ def _active_item(
             ingest_shelf_life_source="llm",
             expires_on=today + timedelta(days=expires_in_days),
             status=status,
-            created_via="manual",
+            created_via="receipt" if source_receipt_id is not None else "manual",
+            source_receipt_id=source_receipt_id,
             created_at=datetime.now(UTC),
         )
         db.add(item)
@@ -91,6 +93,24 @@ def _active_item(
         db.refresh(item)
         assert item.id is not None
         return item.id
+
+
+def _receipt_id(session_factory, *, photo_file_id: str, purchase_date: date) -> int:
+    with session_factory() as db:
+        user = db.get(User, 1)
+        assert user is not None
+        receipt = Receipt(
+            household_id=user.household_id,
+            photo_file_id=photo_file_id,
+            purchase_date=purchase_date,
+            purchase_date_source="receipt",
+            scanned_at=datetime.combine(purchase_date, datetime.min.time(), UTC),
+        )
+        db.add(receipt)
+        db.commit()
+        db.refresh(receipt)
+        assert receipt.id is not None
+        return receipt.id
 
 
 def _keyboard_data(markup) -> list[str]:
@@ -111,6 +131,24 @@ async def test_item_list_all_callback_refreshes_full_pantry(session_factory):
         )
 
     refresh.assert_awaited_once()
+    assert refresh.await_args.kwargs["sort_by"] == "receipt"
+
+
+@pytest.mark.asyncio
+async def test_item_list_category_callback_refreshes_the_category_order(session_factory):
+    cb = _cb("item:list:all:category")
+
+    with patch.object(
+        item_callbacks, "_refresh_pantry_message", new_callable=AsyncMock
+    ) as refresh:
+        await bot_mod.handle_item_callback(
+            cb,
+            session_factory=session_factory,
+            now_provider=_now,
+        )
+
+    refresh.assert_awaited_once()
+    assert refresh.await_args.kwargs["sort_by"] == "category"
 
 
 @pytest.mark.asyncio
@@ -232,6 +270,42 @@ async def test_pantry_all_mode_sends_interactive_full_pantry(session_factory):
     assert "Milk" in text
     datas = _keyboard_data(msg.answer.await_args.kwargs["reply_markup"])
     assert any(data.endswith(":all") for data in datas)
+
+
+@pytest.mark.asyncio
+async def test_pantry_defaults_to_oldest_receipt_first(session_factory):
+    today = date(2026, 6, 14)
+    old_receipt_id = _receipt_id(
+        session_factory, photo_file_id="old-receipt", purchase_date=today - timedelta(days=7)
+    )
+    new_receipt_id = _receipt_id(
+        session_factory, photo_file_id="new-receipt", purchase_date=today - timedelta(days=1)
+    )
+    _active_item(
+        session_factory, name="Old receipt item", expires_in_days=30,
+        source_receipt_id=old_receipt_id,
+    )
+    _active_item(
+        session_factory, name="New receipt item", expires_in_days=1,
+        source_receipt_id=new_receipt_id,
+    )
+    _active_item(session_factory, name="Manual item", expires_in_days=2)
+    msg = _msg("/pantry")
+
+    await bot_mod.handle_pantry(
+        msg,
+        session_factory=session_factory,
+        now_provider=_now,
+    )
+
+    text = msg.answer.await_args.args[0]
+    assert text.index("Old receipt item") < text.index("New receipt item")
+    assert text.index("New receipt item") < text.index("Manual item")
+    controls = msg.answer.await_args.kwargs["reply_markup"].inline_keyboard[0]
+    assert [button.callback_data for button in controls] == [
+        "item:list:all", "item:list:all:category", "item:list:all:expires",
+    ]
+    assert controls[0].text.startswith("✓ ")
 
 
 @pytest.mark.asyncio

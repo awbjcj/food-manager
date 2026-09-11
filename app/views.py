@@ -9,6 +9,7 @@ from datetime import date
 from sqlmodel import Session
 
 from app.cook.models import ScoredCandidate
+from app.pantry_service import PantrySort
 from app.plan_service import tonight_entry
 from app.renderer import (
     DIGEST_CAP,
@@ -103,6 +104,7 @@ async def digest(
     today: date,
     translation_llm,
     cap: int | None = DIGEST_CAP,
+    sort_by: PantrySort = "expires",
 ) -> LocalizedDigestView:
     title = _tonight_title(session, household_id=user.household_id, today=today)
     names = await _names_for(
@@ -119,6 +121,7 @@ async def digest(
             names=names,
             cap=cap,
             tonight=None if title is None else names.get(title, title),
+            sort_by=sort_by,
         ),
         names,
     )
@@ -132,6 +135,7 @@ def digest_cached(
     today: date,
     household_id: int,
     cap: int | None = DIGEST_CAP,
+    sort_by: PantrySort = "expires",
 ) -> LocalizedDigestView:
     title = _tonight_title(session, household_id=household_id, today=today)
     names = cached_names(
@@ -145,6 +149,7 @@ def digest_cached(
             names=names,
             cap=cap,
             tonight=None if title is None else names.get(title, title),
+            sort_by=sort_by,
         ),
         names,
     )

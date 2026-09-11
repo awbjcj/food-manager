@@ -10,10 +10,12 @@ from app.i18n import LANGS
 from app.pantry_service import (
     ALLOWED_CATEGORIES,
     NUDGE_CODES,
+    PANTRY_SORTS,
     SNOOZE_DAYS_DEFAULT,
     SNOOZE_DAYS_MAX,
     SNOOZE_DAYS_MIN,
     ListFilter,
+    PantrySort,
 )
 from app.providers import ALL_PROVIDERS, Provider
 
@@ -193,6 +195,21 @@ class CallbackAction:
     option_index: int | None = None
     round_name: str | None = None
     back_to: str = "digest"
+    sort_by: PantrySort = "receipt"
+
+
+def _parse_pantry_origin(
+    parts: list[str], *, start: int, data: str
+) -> tuple[str, PantrySort]:
+    if len(parts) == start:
+        return "digest", "receipt"
+    if parts[start] != "all":
+        raise CommandError(f"bad action origin {parts[start]!r}")
+    if len(parts) == start + 1:
+        return "all", "receipt"
+    if len(parts) == start + 2 and parts[start + 1] in PANTRY_SORTS:
+        return "all", cast(PantrySort, parts[start + 1])
+    raise CommandError(f"bad item callback {data!r}")
 
 
 def parse_callback(data: str) -> CallbackAction:
@@ -360,21 +377,17 @@ def parse_callback(data: str) -> CallbackAction:
         except ValueError as exc:
             raise CommandError(f"bad cookpick data {data!r}") from exc
     parts = data.split(":")
-    if len(parts) not in (3, 4) or parts[0] != "act":
+    if len(parts) < 3 or parts[0] != "act":
         raise CommandError(f"unrecognized callback data {data!r}")
     verb = parts[1]
     if verb not in ("ate", "toss", "snooze2", "freeze", "fridge"):
         raise CommandError(f"unknown verb {verb!r}")
-    back_to = "digest"
-    if len(parts) == 4:
-        if parts[3] != "all":
-            raise CommandError(f"bad action origin {parts[3]!r}")
-        back_to = "all"
+    back_to, sort_by = _parse_pantry_origin(parts, start=3, data=data)
     try:
         item_id = int(parts[2])
     except ValueError as exc:
         raise CommandError(f"bad item id {parts[2]!r}") from exc
-    return CallbackAction(verb=verb, item_id=item_id, back_to=back_to)
+    return CallbackAction(verb=verb, item_id=item_id, back_to=back_to, sort_by=sort_by)
 
 
 ItemKind = Literal["open", "list", "corr", "nudge", "ctext", "rm", "rmok"]
@@ -386,6 +399,7 @@ class ItemAction:
     item_id: int | None = None
     nudge_code: str | None = None
     back_to: str = "digest"
+    sort_by: PantrySort = "receipt"
 
 
 def parse_item_callback(data: str) -> ItemAction:
@@ -394,30 +408,30 @@ def parse_item_callback(data: str) -> ItemAction:
         raise CommandError(f"not an item callback {data!r}")
     kind = parts[1]
     if kind == "list":
-        if len(parts) == 2:
-            return ItemAction(kind="list", back_to="digest")
-        if len(parts) == 3 and parts[2] == "all":
-            return ItemAction(kind="list", back_to="all")
-        raise CommandError(f"bad item callback {data!r}")
+        back_to, sort_by = _parse_pantry_origin(parts, start=2, data=data)
+        return ItemAction(kind="list", back_to=back_to, sort_by=sort_by)
     if kind == "nudge":
-        if len(parts) != 4 or parts[3] not in NUDGE_CODES:
+        if len(parts) < 4 or parts[3] not in NUDGE_CODES:
             raise CommandError(f"bad item nudge {data!r}")
         try:
-            return ItemAction(kind="nudge", item_id=int(parts[2]), nudge_code=parts[3])
+            back_to, sort_by = _parse_pantry_origin(parts, start=4, data=data)
+            return ItemAction(
+                kind="nudge", item_id=int(parts[2]), nudge_code=parts[3],
+                back_to=back_to, sort_by=sort_by,
+            )
         except ValueError as exc:
             raise CommandError(f"bad item id {parts[2]!r}") from exc
     if kind in ("open", "corr", "ctext", "rm", "rmok"):
-        if len(parts) == 3:
-            try:
-                return ItemAction(kind=cast(ItemKind, kind), item_id=int(parts[2]))
-            except ValueError as exc:
-                raise CommandError(f"bad item id {parts[2]!r}") from exc
-        if kind == "open" and len(parts) == 4 and parts[3] == "all":
-            try:
-                return ItemAction(kind="open", item_id=int(parts[2]), back_to="all")
-            except ValueError as exc:
-                raise CommandError(f"bad item id {parts[2]!r}") from exc
-        raise CommandError(f"bad item callback {data!r}")
+        if len(parts) < 3:
+            raise CommandError(f"bad item callback {data!r}")
+        try:
+            back_to, sort_by = _parse_pantry_origin(parts, start=3, data=data)
+            return ItemAction(
+                kind=cast(ItemKind, kind), item_id=int(parts[2]),
+                back_to=back_to, sort_by=sort_by,
+            )
+        except ValueError as exc:
+            raise CommandError(f"bad item id {parts[2]!r}") from exc
     raise CommandError(f"unknown item kind {kind!r}")
 
 
@@ -471,18 +485,24 @@ def parse_callback_request(data: str) -> CallbackRequest:
     return ActionCallbackRequest(action=parse_callback(data))
 
 
-def parse_pantry_arg(args: Sequence[str]) -> Literal["all", "digest"] | int:
+def parse_pantry_arg(args: Sequence[str]) -> Literal["all", "digest"] | PantrySort | int:
     if not args:
         return "all"
     if len(args) > 1:
-        raise CommandError("usage: /pantry [digest|<item_id>]")
-    token = args[0].strip()
+        raise CommandError("usage: /pantry [receipt|category|expires|digest|<item_id>]")
+    token = args[0].strip().lower()
     if token == "digest":
         return "digest"
+    if token in PANTRY_SORTS:
+        return cast(PantrySort, token)
+    if token in {"expiry", "expiration"}:
+        return "expires"
     try:
         return parse_item_id_arg(token)
     except CommandError as exc:
-        raise CommandError("usage: /pantry [digest|<item_id>]") from exc
+        raise CommandError(
+            "usage: /pantry [receipt|category|expires|digest|<item_id>]"
+        ) from exc
 
 
 _CORRECT_REPLY_MARKER = re.compile(r"\[correct:#(\d+)\]")

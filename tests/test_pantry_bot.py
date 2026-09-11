@@ -131,7 +131,9 @@ async def test_item_list_all_callback_refreshes_full_pantry(session_factory):
         )
 
     refresh.assert_awaited_once()
-    assert refresh.await_args.kwargs["sort_by"] == "receipt"
+    await_args = refresh.await_args
+    assert await_args is not None
+    assert await_args.kwargs["sort_by"] == "receipt"
 
 
 @pytest.mark.asyncio
@@ -148,7 +150,9 @@ async def test_item_list_category_callback_refreshes_the_category_order(session_
         )
 
     refresh.assert_awaited_once()
-    assert refresh.await_args.kwargs["sort_by"] == "category"
+    await_args = refresh.await_args
+    assert await_args is not None
+    assert await_args.kwargs["sort_by"] == "category"
 
 
 @pytest.mark.asyncio

@@ -255,14 +255,14 @@ async def test_deepseek_parse_add_happy_path():
             )
         ]
     )
-    client = DeepSeekTextLLMClient(sdk, "deepseek-v4-flash")
+    client = DeepSeekTextLLMClient(sdk, "deepseek-v4-pro")
     from datetime import date
 
     items, cost = await client.parse_add(
         user_text="oat milk", today=date(2026, 6, 29), tz="UTC"
     )
     assert [i.name for i in items] == ["Oat Milk"]
-    assert cost == round(10 * 0.14 + 5 * 0.28)  # deepseek-v4-flash pricing
+    assert cost == round(10 * 0.30 + 5 * 1.20)  # V4.1 Flash via v4-pro route
     # every text call carries the native web_search tool
     assert sdk.responses.calls[0]["tools"] == [
         {"type": "web_search", "search_context_size": "low"}
@@ -373,14 +373,17 @@ class FakeGenAIClient:
         self.aio = SimpleNamespace(models=_FakeAioModels(responses))
 
 
-def _gemini_response(text, *, parsed=None, in_tokens=10, out_tokens=4):
+def _gemini_response(
+    text, *, parsed=None, in_tokens=10, out_tokens=4, thought_tokens=0
+):
     return SimpleNamespace(
         text=text,
         parsed=parsed,
         usage_metadata=SimpleNamespace(
             prompt_token_count=in_tokens,
             candidates_token_count=out_tokens,
-            total_token_count=in_tokens + out_tokens,
+            thoughts_token_count=thought_tokens,
+            total_token_count=in_tokens + out_tokens + thought_tokens,
         ),
     )
 
@@ -405,6 +408,32 @@ async def test_gemini_image_extract():
     )
     assert result.parse.items == []
     assert result.cost_micros_usd == round(10 * 0.3 + 4 * 2.5)
+
+
+async def test_gemini_37_cost_includes_thinking_tokens():
+    client = FakeGenAIClient(
+        [_gemini_response('{"items":[]}', thought_tokens=6)]
+    )
+    result = await GeminiLLMClient(client, "gemini-3.7-flash").extract_items_from_image(
+        b"\x89PNG\r\n\x1a\n", image_media_type="image/png"
+    )
+
+    assert result.cost_micros_usd == round(10 * 0.75 + (4 + 6) * 3.75)
+    assert result.provider_usage == {
+        "prompt_token_count": 10,
+        "candidates_token_count": 4,
+        "thoughts_token_count": 6,
+        "total_token_count": 20,
+    }
+
+
+async def test_gemini_38_has_current_cost_rate():
+    client = FakeGenAIClient([_gemini_response('{"items":[]}')])
+    result = await GeminiLLMClient(client, "gemini-3.8-flash").extract_items_from_image(
+        b"\x89PNG\r\n\x1a\n", image_media_type="image/png"
+    )
+
+    assert result.cost_micros_usd == round(10 * 0.75 + 4 * 3.75)
 
 
 @pytest.mark.parametrize("model_cls", [ParseResult, ProposedAddItems])

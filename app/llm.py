@@ -199,15 +199,18 @@ _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     # a prompt-size tier (a higher rate above 200k input tokens); receipts and
     # text prompts here stay far under that, so the <=200k standard rate is used.
     "gemini-2.5-flash": {"input": 0.3, "output": 2.5},
+    # Introductory Standard-tier pricing through 2026-12-31. Gemini bills
+    # generated thinking tokens at the output rate; _gemini_cost adds the
+    # SDK's separate thoughts_token_count to candidates_token_count.
+    "gemini-3.8-flash": {"input": 0.75, "output": 3.75},
+    "gemini-3.7-flash": {"input": 0.75, "output": 3.75},
     "gemini-3.5-flash": {"input": 1.5, "output": 9.0},
     "gemini-3.1-pro-preview": {"input": 2.0, "output": 12.0},
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.5},
-    # Cache-miss input rate (conservative, matching this table's treatment of
-    # every other provider's cache pricing as out of scope). These rates hold
-    # through 16:00 UTC on 2026-08-16, after which DeepSeek switches to
-    # peak/off-peak billing this table does not model; update then.
-    "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
-    "deepseek-v4-pro": {"input": 0.435, "output": 0.87},
+    # Conservative peak-hour, cache-miss rates. The v4-pro route serves
+    # V4.1 Flash from 2026-09-10 until the V4.1 Pro launch.
+    "deepseek-v4-flash": {"input": 0.44, "output": 1.32},
+    "deepseek-v4-pro": {"input": 0.30, "output": 1.20},
 }
 
 _OPENAI_WEB_SEARCH_TOOL = {

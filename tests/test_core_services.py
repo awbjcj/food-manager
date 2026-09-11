@@ -65,6 +65,9 @@ def test_settings_load_from_env(monkeypatch):
     assert settings.anthropic_text_model == "claude-haiku-4-5-20251001"
     assert settings.openai_model == "gpt-5.6-terra"
     assert settings.openai_text_model == "gpt-5.6-luna"
+    assert settings.gemini_model == "gemini-3.8-flash"
+    assert settings.gemini_text_model == "gemini-3.8-flash"
+    assert settings.deepseek_model == "deepseek-v4-pro"
 
 
 def test_settings_load_openai_provider_from_env(monkeypatch):

@@ -9,7 +9,7 @@ from app.correction_service import AddPayload, CorrectPayload
 from app.i18n import format_date, t, weekday_abbr
 from app.ingest_service import IngestSummary
 from app.models import SavedRecipe, ShoppingList
-from app.pantry_service import Stats
+from app.pantry_service import ALLOWED_CATEGORIES, PantrySort, Stats
 from app.profile_service import FoodProfile
 from app.storage_state import next_storage_options
 
@@ -61,6 +61,20 @@ def _receipt_badge(item) -> str:
         return ""
     colour = _RECEIPT_COLOURS[(receipt_id - 1) % len(_RECEIPT_COLOURS)]
     return f"{colour}R{receipt_id} "
+
+
+def _item_origin_suffix(*, back_to: str, sort_by: PantrySort) -> str:
+    if back_to != "all":
+        return ""
+    return ":all" if sort_by == "receipt" else f":all:{sort_by}"
+
+
+def _category_label(category: str | None, *, lang: str) -> str:
+    if category is None:
+        return t("category.uncategorized", lang)
+    if category in ALLOWED_CATEGORIES:
+        return t(f"category.{category}", lang)
+    return category.replace("_", " ").title()
 
 
 def render_item_line(item, *, today: date, lang: str = "en", names=None) -> str:
@@ -190,27 +204,30 @@ def render_digest(
     names=None,
     cap: int | None = DIGEST_CAP,
     tonight: str | None = None,
+    sort_by: PantrySort = "expires",
 ) -> DigestRender:
     total = len(items)
     if total == 0:
         return DigestRender(text="", rendered_count=0, total_count=0, has_more=False)
 
     capped = items if cap is None else items[:cap]
+    group_by_expiry = cap is not None or sort_by == "expires"
     buckets: dict[str, list] = {
         "expired": [],
         "today": [],
         "this_week": [],
         "later": [],
     }
-    for item in capped:
-        if item.expires_on < today:
-            buckets["expired"].append(item)
-        elif item.expires_on == today:
-            buckets["today"].append(item)
-        elif item.expires_on <= today + timedelta(days=7):
-            buckets["this_week"].append(item)
-        else:
-            buckets["later"].append(item)
+    if group_by_expiry:
+        for item in capped:
+            if item.expires_on < today:
+                buckets["expired"].append(item)
+            elif item.expires_on == today:
+                buckets["today"].append(item)
+            elif item.expires_on <= today + timedelta(days=7):
+                buckets["this_week"].append(item)
+            else:
+                buckets["later"].append(item)
 
     def line_for(item) -> str:
         return "  " + render_item_line(item, today=today, lang=lang, names=names)
@@ -218,18 +235,29 @@ def render_digest(
     title = t("digest.title", lang, weekday=weekday_abbr(today, lang=lang), date=_fmt_date(today, today=today, lang=lang))
     summary_key = "digest.attention" if cap is not None else "pantry.tracked"
     lines = [title, t(summary_key, lang, n=total), ""]
-    section_icons = {
-        "expired": "🔴",
-        "today": "🟠",
-        "this_week": "🟢",
-        "later": "⚪",
-    }
-    for key in ("expired", "today", "this_week", "later"):
-        if buckets[key]:
-            heading = t(f"digest.section.{key}", lang).upper()
-            lines.append(f"{section_icons[key]} {heading}")
-            lines.extend(line_for(item) for item in buckets[key])
-            lines.append("")
+    if group_by_expiry:
+        section_icons = {
+            "expired": "🔴",
+            "today": "🟠",
+            "this_week": "🟢",
+            "later": "⚪",
+        }
+        for key in ("expired", "today", "this_week", "later"):
+            if buckets[key]:
+                heading = t(f"digest.section.{key}", lang).upper()
+                lines.append(f"{section_icons[key]} {heading}")
+                lines.extend(line_for(item) for item in buckets[key])
+                lines.append("")
+    elif sort_by == "category":
+        previous_category: str | None | object = object()
+        for item in capped:
+            category = getattr(item, "category", None)
+            if category != previous_category:
+                lines.append(f"🏷 {_category_label(category, lang=lang).upper()}")
+                previous_category = category
+            lines.append(line_for(item))
+    else:
+        lines.extend(line_for(item) for item in capped)
 
     has_more = cap is not None and total > cap
     if has_more:
@@ -251,12 +279,18 @@ def render_digest(
 
 
 def build_digest_keyboard(
-    items: list, *, has_more: bool, today: date, lang: str = "en", names=None, back_to: str = "digest"
+    items: list,
+    *,
+    has_more: bool,
+    today: date,
+    lang: str = "en",
+    names=None,
+    back_to: str = "digest",
+    sort_by: PantrySort = "receipt",
 ) -> list[list[CallbackButton]]:
     def _open_data(item_id: int) -> str:
-        if back_to == "all":
-            return f"item:open:{item_id}:all"
-        return f"item:open:{item_id}"
+        suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by)
+        return f"item:open:{item_id}{suffix}"
 
     buttons = [
         CallbackButton(
@@ -270,7 +304,23 @@ def build_digest_keyboard(
     ]
     # One button per row gives long branded product names the full message
     # width. Telegram clients otherwise ellipsize two half-width buttons.
-    rows: list[list[CallbackButton]] = [[button] for button in buttons]
+    rows: list[list[CallbackButton]] = []
+    if back_to == "all":
+        rows.append([
+            CallbackButton(
+                text=("✓ " if sort_by == "receipt" else "") + t("btn.sort_receipt", lang),
+                callback_data="item:list:all",
+            ),
+            CallbackButton(
+                text=("✓ " if sort_by == "category" else "") + t("btn.sort_category", lang),
+                callback_data="item:list:all:category",
+            ),
+            CallbackButton(
+                text=("✓ " if sort_by == "expires" else "") + t("btn.sort_expires", lang),
+                callback_data="item:list:all:expires",
+            ),
+        ])
+    rows.extend([button] for button in buttons)
     if has_more:
         rows.append(
             [
@@ -312,55 +362,63 @@ def render_remove_confirm(item, *, lang: str = "en", names=None) -> str:
     return t("remove.confirm", lang, id=item.id, name=_name(names, item.raw_name))
 
 
-def build_item_card_keyboard(item, *, lang: str = "en", back_to: str = "digest") -> list[list[CallbackButton]]:
+def build_item_card_keyboard(
+    item, *, lang: str = "en", back_to: str = "digest", sort_by: PantrySort = "receipt"
+) -> list[list[CallbackButton]]:
     item_id = item.id
-    back_data = "item:list:all" if back_to == "all" else "item:list"
-    act_suffix = ":all" if back_to == "all" else ""
+    origin_suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by)
+    back_data = f"item:list{origin_suffix}"
     rows: list[list[CallbackButton]] = [
         [
-            CallbackButton(text=t("btn.ate", lang), callback_data=f"act:ate:{item_id}{act_suffix}"),
-            CallbackButton(text=t("btn.tossed", lang), callback_data=f"act:toss:{item_id}{act_suffix}"),
+            CallbackButton(text=t("btn.ate", lang), callback_data=f"act:ate:{item_id}{origin_suffix}"),
+            CallbackButton(text=t("btn.tossed", lang), callback_data=f"act:toss:{item_id}{origin_suffix}"),
         ]
     ]
     second = [
-        CallbackButton(text=t("btn.snooze2", lang), callback_data=f"act:snooze2:{item_id}{act_suffix}")
+        CallbackButton(text=t("btn.snooze2", lang), callback_data=f"act:snooze2:{item_id}{origin_suffix}")
     ]
     # Forward-only storage moves (default -> fridge -> frozen).
     _STORAGE_BUTTONS = {
-        "fridge": ("btn.fridge", f"act:fridge:{item_id}{act_suffix}"),
-        "frozen": ("btn.freeze", f"act:freeze:{item_id}{act_suffix}"),
+        "fridge": ("btn.fridge", f"act:fridge:{item_id}{origin_suffix}"),
+        "frozen": ("btn.freeze", f"act:freeze:{item_id}{origin_suffix}"),
     }
     for target in next_storage_options(getattr(item, "storage", "default")):
         key, data = _STORAGE_BUTTONS[target]
         second.append(CallbackButton(text=t(key, lang), callback_data=data))
     rows.append(second)
     rows.append([
-        CallbackButton(text=t("btn.correct", lang), callback_data=f"item:corr:{item_id}"),
-        CallbackButton(text=t("btn.remove", lang), callback_data=f"item:rm:{item_id}"),
+        CallbackButton(text=t("btn.correct", lang), callback_data=f"item:corr:{item_id}{origin_suffix}"),
+        CallbackButton(text=t("btn.remove", lang), callback_data=f"item:rm:{item_id}{origin_suffix}"),
     ])
     rows.append([CallbackButton(text=t("btn.back_to_list", lang), callback_data=back_data)])
     return rows
 
 
-def build_correct_menu_keyboard(item_id: int, *, lang: str = "en") -> list[list[CallbackButton]]:
+def build_correct_menu_keyboard(
+    item_id: int, *, lang: str = "en", back_to: str = "digest", sort_by: PantrySort = "receipt"
+) -> list[list[CallbackButton]]:
+    origin_suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by)
     return [
         [
-            CallbackButton(text=t("btn.nudge_plus_week", lang), callback_data=f"item:nudge:{item_id}:p7"),
-            CallbackButton(text=t("btn.nudge_plus_3d", lang), callback_data=f"item:nudge:{item_id}:p3"),
+            CallbackButton(text=t("btn.nudge_plus_week", lang), callback_data=f"item:nudge:{item_id}:p7{origin_suffix}"),
+            CallbackButton(text=t("btn.nudge_plus_3d", lang), callback_data=f"item:nudge:{item_id}:p3{origin_suffix}"),
         ],
         [
-            CallbackButton(text=t("btn.nudge_minus_3d", lang), callback_data=f"item:nudge:{item_id}:m3"),
-            CallbackButton(text=t("btn.nudge_use_today", lang), callback_data=f"item:nudge:{item_id}:today"),
+            CallbackButton(text=t("btn.nudge_minus_3d", lang), callback_data=f"item:nudge:{item_id}:m3{origin_suffix}"),
+            CallbackButton(text=t("btn.nudge_use_today", lang), callback_data=f"item:nudge:{item_id}:today{origin_suffix}"),
         ],
-        [CallbackButton(text=t("btn.correct_other", lang), callback_data=f"item:ctext:{item_id}")],
-        [CallbackButton(text=t("btn.back", lang), callback_data=f"item:open:{item_id}")],
+        [CallbackButton(text=t("btn.correct_other", lang), callback_data=f"item:ctext:{item_id}{origin_suffix}")],
+        [CallbackButton(text=t("btn.back", lang), callback_data=f"item:open:{item_id}{origin_suffix}")],
     ]
 
 
-def build_remove_confirm_keyboard(item_id: int, *, lang: str = "en") -> list[list[CallbackButton]]:
+def build_remove_confirm_keyboard(
+    item_id: int, *, lang: str = "en", back_to: str = "digest", sort_by: PantrySort = "receipt"
+) -> list[list[CallbackButton]]:
+    origin_suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by)
     return [[
-        CallbackButton(text=t("btn.remove_yes", lang), callback_data=f"item:rmok:{item_id}"),
-        CallbackButton(text=t("btn.cancel", lang), callback_data=f"item:open:{item_id}"),
+        CallbackButton(text=t("btn.remove_yes", lang), callback_data=f"item:rmok:{item_id}{origin_suffix}"),
+        CallbackButton(text=t("btn.cancel", lang), callback_data=f"item:open:{item_id}{origin_suffix}"),
     ]]
 
 

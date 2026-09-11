@@ -34,6 +34,7 @@ from app.normalization import normalize
 from app.pantry_service import (
     ListFilter,
     NotOwnerOrMissing,
+    PantrySort,
     compute_stats,
     list_active,
     list_digest_due,
@@ -149,7 +150,9 @@ async def handle_pantry(
             await msg.answer(
                 view.text,
                 reply_markup=to_aiogram_keyboard(
-                    build_item_card_keyboard(item, lang=user.lang, back_to="all")
+                    build_item_card_keyboard(
+                        item, lang=user.lang, back_to="all", sort_by="receipt"
+                    )
                 ),
             )
             return
@@ -161,12 +164,15 @@ async def handle_pantry(
             back_to = "digest"
             cap = 10
             empty_key = "digest.pantry_clear"
+            sort_by: PantrySort = "expires"
         else:
+            sort_by = "receipt" if mode == "all" else mode
             items = list_active(
                 session,
                 household_id=user.household_id,
                 f=ListFilter.default(),
                 today=today,
+                sort_by=sort_by,
             )
             back_to = "all"
             cap = None
@@ -179,6 +185,7 @@ async def handle_pantry(
             today=today,
             translation_llm=translation_llm,
             cap=cap,
+            sort_by=sort_by,
         )
         if not view.text:
             await msg.answer(t(empty_key, user.lang))
@@ -191,6 +198,7 @@ async def handle_pantry(
                 lang=user.lang,
                 names=view.names,
                 back_to=back_to,
+                sort_by=sort_by,
             )
         )
         await msg.answer(view.text, reply_markup=keyboard)

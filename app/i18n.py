@@ -214,6 +214,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     "category.beverage": {"en": "Beverage", "zh": "饮料", "fr": "Boissons", "es": "Bebidas"},
     "category.pantry": {"en": "Pantry", "zh": "杂货", "fr": "Garde-manger", "es": "Despensa"},
     "category.other": {"en": "Other", "zh": "其他", "fr": "Autre", "es": "Otro"},
+    "category.uncategorized": {"en": "Uncategorized", "zh": "未分类", "fr": "Sans catégorie", "es": "Sin categoría"},
     "lang.set": {
         "en": "Language set to {lang}.",
         "zh": "语言已设置为 {lang}。",
@@ -339,6 +340,9 @@ MESSAGES: dict[str, dict[str, str]] = {
     "btn.freeze": {"en": "❄️ Freeze", "zh": "❄️ 冷冻", "fr": "❄️ Congeler", "es": "❄️ Congelar"},
     "btn.fridge": {"en": "🧊 Fridge", "zh": "🧊 冷藏", "fr": "🧊 Frigo", "es": "🧊 Nevera"},
     "btn.show_all": {"en": "☰ View full pantry", "zh": "☰ 查看全部储藏", "fr": "☰ Voir tout le garde-manger", "es": "☰ Ver toda la despensa"},
+    "btn.sort_receipt": {"en": "🧾 Receipt", "zh": "🧾 小票", "fr": "🧾 Ticket", "es": "🧾 Recibo"},
+    "btn.sort_category": {"en": "🏷 Category", "zh": "🏷 类别", "fr": "🏷 Catégorie", "es": "🏷 Categoría"},
+    "btn.sort_expires": {"en": "📅 Expiry", "zh": "📅 到期日", "fr": "📅 Expiration", "es": "📅 Caducidad"},
     "btn.undo": {"en": "Undo", "zh": "撤销", "fr": "Annuler", "es": "Deshacer"},
     "btn.apply": {"en": "Apply", "zh": "应用", "fr": "Appliquer", "es": "Aplicar"},
     "btn.cancel": {"en": "Cancel", "zh": "取消", "fr": "Annuler", "es": "Cancelar"},
@@ -944,7 +948,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - set your language\n"
             "  /digest_at <0..23> - set digest hour\n"
             "  /list [category|week|expired] - show pantry\n"
-            "  /pantry [digest|<id>] - interactive pantry controls\n"
+            "  /pantry [receipt|category|expires|digest|<id>] - interactive pantry controls\n"
             "  /add <free text> - propose new items in natural language.\n"
             "      Replies with a diff per item; tap Apply or Cancel.\n"
             "      Proposals expire after 10 min.\n"
@@ -983,7 +987,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - 设置语言\n"
             "  /digest_at <0..23> - 设置每日摘要时间\n"
             "  /list [category|week|expired] - 显示食品储藏\n"
-            "  /pantry [digest|<id>] - 交互式食品储藏管理\n"
+            "  /pantry [receipt|category|expires|digest|<id>] - 交互式食品储藏管理\n"
             "  /add <自然语言> - 以自然语言提议添加食品。\n"
             "      每项显示差异；点击应用或取消。\n"
             "      提议10分钟后过期。\n"
@@ -1022,7 +1026,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - définir votre langue\n"
             "  /digest_at <0..23> - heure du résumé quotidien\n"
             "  /list [category|week|expired] - afficher le garde-manger\n"
-            "  /pantry [digest|<id>] - contrôles interactifs du garde-manger\n"
+            "  /pantry [receipt|category|expires|digest|<id>] - contrôles interactifs du garde-manger\n"
             "  /add <texte libre> - proposer de nouveaux articles en langage naturel.\n"
             "      Répond avec un diff par article ; appuyez sur Appliquer ou Annuler.\n"
             "      Les propositions expirent après 10 min.\n"
@@ -1061,7 +1065,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - establecer tu idioma\n"
             "  /digest_at <0..23> - hora del resumen diario\n"
             "  /list [category|week|expired] - mostrar despensa\n"
-            "  /pantry [digest|<id>] - controles interactivos de despensa\n"
+            "  /pantry [receipt|category|expires|digest|<id>] - controles interactivos de despensa\n"
             "  /add <texto libre> - proponer nuevos artículos en lenguaje natural.\n"
             "      Responde con un diff por artículo; toca Aplicar o Cancelar.\n"
             "      Las propuestas expiran después de 10 min.\n"
@@ -1140,7 +1144,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": (
             "🥕 Pantry commands:\n"
             "  /list [category|week|expired] - show pantry\n"
-            "  /pantry [digest|<id>] - interactive pantry controls\n"
+            "  /pantry [receipt|category|expires|digest|<id>] - interactive pantry controls\n"
             "  /add <free text> - propose new items in natural language\n"
             "  /ate <id> - mark eaten\n"
             "  /toss <id> - mark tossed\n"
@@ -1152,7 +1156,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "zh": (
             "🥕 食品储藏命令：\n"
             "  /list [category|week|expired] - 显示食品储藏\n"
-            "  /pantry [digest|<id>] - 交互式食品储藏管理\n"
+            "  /pantry [receipt|category|expires|digest|<id>] - 交互式食品储藏管理\n"
             "  /add <自然语言> - 以自然语言提议添加食品\n"
             "  /ate <id> - 标记为已食用\n"
             "  /toss <id> - 标记为已丢弃\n"
@@ -1164,7 +1168,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": (
             "🥕 Commandes garde-manger :\n"
             "  /list [category|week|expired] - afficher le garde-manger\n"
-            "  /pantry [digest|<id>] - contrôles interactifs\n"
+            "  /pantry [receipt|category|expires|digest|<id>] - contrôles interactifs\n"
             "  /add <texte libre> - proposer de nouveaux articles\n"
             "  /ate <id> - marquer comme mangé\n"
             "  /toss <id> - marquer comme jeté\n"
@@ -1176,7 +1180,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": (
             "🥕 Comandos de despensa:\n"
             "  /list [category|week|expired] - mostrar despensa\n"
-            "  /pantry [digest|<id>] - controles interactivos\n"
+            "  /pantry [receipt|category|expires|digest|<id>] - controles interactivos\n"
             "  /add <texto libre> - proponer nuevos artículos\n"
             "  /ate <id> - marcar como comido\n"
             "  /toss <id> - marcar como desechado\n"
@@ -1386,10 +1390,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Tu despensa está vacía.",
     },
     "pantry.usage": {
-        "en": "usage: /pantry [digest|<id>]",
-        "zh": "用法：/pantry [digest|<id>]",
-        "fr": "usage : /pantry [digest|<id>]",
-        "es": "uso: /pantry [digest|<id>]",
+        "en": "usage: /pantry [receipt|category|expires|digest|<id>]",
+        "zh": "用法：/pantry [receipt|category|expires|digest|<id>]",
+        "fr": "usage : /pantry [receipt|category|expires|digest|<id>]",
+        "es": "uso: /pantry [receipt|category|expires|digest|<id>]",
     },
     "pantry.no_item": {
         "en": "no item #{id}",

@@ -20,6 +20,7 @@ from app.i18n import t
 from app.models import PantryItem
 from app.pantry_service import (
     ListFilter,
+    PantrySort,
     compute_nudge_days,
     correct_item,
     list_active,
@@ -80,6 +81,7 @@ async def handle_item_callback(
                     today,
                     lang=user.lang,
                     translation_llm=translation_llm,
+                    sort_by=action.sort_by,
                 )
                 return
             await refresh()
@@ -122,7 +124,10 @@ async def handle_item_callback(
                 cb,
                 view.text,
                 to_aiogram_keyboard(
-                    build_correct_menu_keyboard(item_id, lang=user.lang)
+                    build_correct_menu_keyboard(
+                        item_id, lang=user.lang,
+                        back_to=action.back_to, sort_by=action.sort_by,
+                    )
                 ),
             )
             return
@@ -135,7 +140,7 @@ async def handle_item_callback(
                 today=today,
             )
             await dispatch_answer(cb, "removed")
-            await refresh()
+            await refresh_for_origin()
             return
 
         if action.kind == "ctext":
@@ -169,6 +174,7 @@ async def handle_item_callback(
                         item,
                         lang=user.lang,
                         back_to=action.back_to,
+                        sort_by=action.sort_by,
                     )
                 ),
             )
@@ -178,7 +184,10 @@ async def handle_item_callback(
                 cb,
                 view.text,
                 to_aiogram_keyboard(
-                    build_correct_menu_keyboard(item_id, lang=user.lang)
+                    build_correct_menu_keyboard(
+                        item_id, lang=user.lang,
+                        back_to=action.back_to, sort_by=action.sort_by,
+                    )
                 ),
             )
         elif action.kind == "rm":
@@ -187,7 +196,10 @@ async def handle_item_callback(
                 cb,
                 view.text,
                 to_aiogram_keyboard(
-                    build_remove_confirm_keyboard(item_id, lang=user.lang)
+                    build_remove_confirm_keyboard(
+                        item_id, lang=user.lang,
+                        back_to=action.back_to, sort_by=action.sort_by,
+                    )
                 ),
             )
 
@@ -228,16 +240,19 @@ async def _refresh_pantry_message(
     *,
     lang: str = "en",
     translation_llm=None,
+    sort_by: PantrySort = "receipt",
 ) -> None:
     remaining = list_active(
         session,
         household_id=household_id,
         f=ListFilter.default(),
         today=today,
+        sort_by=sort_by,
     )
     if remaining:
         view = views.digest_cached(
-            session, remaining, lang=lang, today=today, household_id=household_id, cap=None
+            session, remaining, lang=lang, today=today, household_id=household_id,
+            cap=None, sort_by=sort_by,
         )
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
@@ -247,6 +262,7 @@ async def _refresh_pantry_message(
                 lang=lang,
                 names=view.names,
                 back_to="all",
+                sort_by=sort_by,
             )
         )
         await edit_or_resend(cb, view.text, keyboard)

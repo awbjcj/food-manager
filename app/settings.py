@@ -44,18 +44,17 @@ class Settings(BaseSettings):
         default="claude-sonnet-5", alias="ANTHROPIC_SEARCH_MODEL"
     )
     gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
-    gemini_model: str = Field(default="gemini-3.1-pro-preview", alias="GEMINI_MODEL")
+    gemini_model: str = Field(default="gemini-3.8-flash", alias="GEMINI_MODEL")
     gemini_text_model: str = Field(
-        default="gemini-3.5-flash", alias="GEMINI_TEXT_MODEL"
+        default="gemini-3.8-flash", alias="GEMINI_TEXT_MODEL"
     )
     # DeepSeek is OpenAI-Responses-API-compatible; it has no image capability,
     # but does have a native web_search tool. One model field suffices since
     # a single model serves both the text and search capabilities.
     deepseek_api_key: str | None = Field(default=None, alias="DEEPSEEK_API_KEY")
-    # deepseek-chat is a Chat Completions-only alias; the Responses API this
-    # module now uses (app.deepseek_llm) only documents deepseek-v4-flash and
-    # deepseek-v4-pro as supported models.
-    deepseek_model: str = Field(default="deepseek-v4-flash", alias="DEEPSEEK_MODEL")
+    # DeepSeek V4.1 Flash is served through the documented deepseek-v4-pro API
+    # route; there is no separate public deepseek-v4.1 model identifier.
+    deepseek_model: str = Field(default="deepseek-v4-pro", alias="DEEPSEEK_MODEL")
     deepseek_base_url: str = Field(
         default="https://api.deepseek.com", alias="DEEPSEEK_BASE_URL"
     )

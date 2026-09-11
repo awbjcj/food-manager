@@ -73,7 +73,11 @@ def _gemini_cost(response, model: str) -> int | None:
         return None
     try:
         in_tokens = getattr(usage, "prompt_token_count", None) or 0
-        out_tokens = getattr(usage, "candidates_token_count", None) or 0
+        # The SDK reports internal thinking separately from visible candidate
+        # tokens, while Gemini prices both as output tokens.
+        out_tokens = (getattr(usage, "candidates_token_count", None) or 0) + (
+            getattr(usage, "thoughts_token_count", None) or 0
+        )
         return round(in_tokens * price["input"] + out_tokens * price["output"])
     except Exception:  # noqa: BLE001 - cost estimate is best-effort
         return None
@@ -105,7 +109,13 @@ def _usage_dict(response) -> dict[str, Any] | None:
         return None
     data = {
         key: getattr(usage, key)
-        for key in ("prompt_token_count", "candidates_token_count", "total_token_count")
+        for key in (
+            "prompt_token_count",
+            "candidates_token_count",
+            "thoughts_token_count",
+            "cached_content_token_count",
+            "total_token_count",
+        )
         if getattr(usage, key, None) is not None
     }
     return data or None

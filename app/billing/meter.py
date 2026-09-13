@@ -21,9 +21,9 @@ METERING_ENABLED = True
 @dataclass(frozen=True)
 class QuotaSnapshot:
     receipts_used: int
-    receipts_limit: int
+    receipts_limit: int | None
     actions_used: int
-    actions_limit: int
+    actions_limit: int | None
     per_op: Mapping[str, int]
     period_end: datetime
     tier: str
@@ -47,11 +47,17 @@ def _resolve(session: Session, household_id: int, now: datetime):
 
 
 def _snapshot(sub, usage, limits) -> QuotaSnapshot:
+    receipts_limit = (
+        None if limits.receipts is None else limits.receipts + usage.receipts_granted
+    )
+    actions_limit = (
+        None if limits.actions is None else limits.actions + usage.actions_granted
+    )
     return QuotaSnapshot(
         usage.receipts_used,
-        limits.receipts + usage.receipts_granted,
+        receipts_limit,
         usage.actions_used,
-        limits.actions + usage.actions_granted,
+        actions_limit,
         {
             "cook": usage.cook_used,
             "plan": usage.plan_used,
@@ -91,14 +97,23 @@ def admit(
     if not BILLING_ENABLED:
         return Admission(True, "billing_disabled", False, current)
     degrade = op != "receipt"
-    if op == "receipt" and usage.receipts_used >= current.receipts_limit:
+    if (
+        op == "receipt"
+        and current.receipts_limit is not None
+        and usage.receipts_used >= current.receipts_limit
+    ):
         return Admission(False, "receipts_exhausted", False, current)
     if (
         op != "receipt"
+        and current.actions_limit is not None
         and usage.actions_used + units_for(op, provider) > current.actions_limit
     ):
         return Admission(False, "actions_exhausted", degrade, current)
-    if usage.cost_micros_used >= limits.cost_breaker_micros + usage.cost_micros_granted:
+    if (
+        limits.cost_breaker_micros is not None
+        and usage.cost_micros_used
+        >= limits.cost_breaker_micros + usage.cost_micros_granted
+    ):
         return Admission(False, "cost_breaker", degrade, current)
     return Admission(True, "ok", False, current)
 

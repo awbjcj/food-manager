@@ -103,6 +103,47 @@ async def test_account_api_uses_signed_identity_and_canonical_billing_data(web_s
 
 
 @pytest.mark.asyncio
+async def test_account_api_represents_unlimited_quota_with_null_limits(web_state):
+    sessions, _payments, app = web_state
+    with sessions() as session:
+        sub = session.get(Subscription, 1)
+        assert sub is not None
+        sub.tier = "unlimited"
+        session.add(sub)
+        session.commit()
+
+    async with TestClient(TestServer(app)) as client:
+        response = await client.get(
+            "/api/account", headers={"Authorization": _auth(42)}
+        )
+        assert response.status == 200
+        body = await response.json()
+        assert body["plan"]["tier"] == "unlimited"
+        assert body["quota"]["receiptsLimit"] is None
+        assert body["quota"]["actionsLimit"] is None
+
+
+@pytest.mark.asyncio
+async def test_unlimited_account_cannot_open_a_checkout(web_state):
+    sessions, payments, app = web_state
+    with sessions() as session:
+        sub = session.get(Subscription, 1)
+        assert sub is not None
+        sub.tier = "unlimited"
+        session.add(sub)
+        session.commit()
+
+    async with TestClient(TestServer(app)) as client:
+        response = await client.post(
+            "/api/checkout",
+            headers={"Authorization": _auth(42)},
+            json={"sku": "family_monthly"},
+        )
+        assert response.status == 409
+        assert payments.checkouts == []
+
+
+@pytest.mark.asyncio
 async def test_local_account_omits_plan_surfaces_and_does_not_create_billing_rows(
     web_state, tmp_path
 ):

@@ -30,6 +30,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": "Famille",
         "es": "Familiar",
     },
+    "quota.plan.unlimited": {
+        "en": "Unlimited",
+        "zh": "无限",
+        "fr": "Illimité",
+        "es": "Ilimitado",
+    },
     "quota.receipts": {
         "en": "🧾 Receipts",
         "zh": "🧾 收据",
@@ -145,6 +151,12 @@ MESSAGES: dict[str, dict[str, str]] = {
         "zh": "套餐：免费。使用 /buy 升级",
         "fr": "Forfait : Gratuit. Mise à niveau avec /buy",
         "es": "Plan: Gratis. Mejora con /buy",
+    },
+    "billing.plan_unlimited": {
+        "en": "Plan: Unlimited. This account is managed by the operator.",
+        "zh": "套餐：无限。此账户由运营者管理。",
+        "fr": "Forfait : Illimité. Ce compte est géré par l’opérateur.",
+        "es": "Plan: Ilimitado. Esta cuenta la administra el operador.",
     },
     "billing.plan_family": {
         "en": "Plan: Family. Renews in {days}d. Manage it in Telegram Settings > Stars.",

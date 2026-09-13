@@ -85,6 +85,29 @@ async def test_checkout_rejects_wrong_amount(factory):
 
 
 @pytest.mark.asyncio
+async def test_checkout_rejects_purchases_for_an_unlimited_household(factory):
+    with factory() as db:
+        now = NOW.replace(tzinfo=None)
+        db.add(
+            Subscription(
+                household_id=1,
+                tier="unlimited",
+                status="active",
+                period_start=now,
+                period_end=now + timedelta(days=30),
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.commit()
+    query = _query(invoice_payload("family_monthly", 1))
+
+    await handle_pre_checkout(query, session_factory=factory)
+
+    assert query.answer.await_args.kwargs["ok"] is False
+
+
+@pytest.mark.asyncio
 async def test_successful_payment_is_atomic_and_idempotent(factory):
     msg = _message(1)
     await handle_successful_payment(

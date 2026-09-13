@@ -62,7 +62,7 @@ def roll_period_if_due(
     skipped = (moment - end) // PERIOD
     sub.period_start = end + PERIOD * skipped
     sub.period_end = sub.period_start + PERIOD
-    if sub.tier != "free":
+    if sub.tier not in {"free", "unlimited"}:
         # Any elapsed non-free period reverts to free unless it was renewed
         # (apply_subscription would have pushed period_end into the future
         # before this ever runs). This also covers subscriptions with no

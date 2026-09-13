@@ -250,10 +250,16 @@ class MiniAppApi:
             if sku is None:
                 raise web.HTTPBadRequest(text="unknown plan")
             household_id = user.household_id
-            if sku.kind == "subscription":
-                sub = session.get(Subscription, household_id)
-                if sub and effective_tier(sub) == "family" and sub.telegram_charge_id:
-                    raise web.HTTPConflict(text="household already subscribes")
+            sub = session.get(Subscription, household_id)
+            if sub is not None and effective_tier(sub) == "unlimited":
+                raise web.HTTPConflict(text="unlimited accounts need no purchase")
+            if (
+                sku.kind == "subscription"
+                and sub
+                and effective_tier(sub) == "family"
+                and sub.telegram_charge_id
+            ):
+                raise web.HTTPConflict(text="household already subscribes")
         url = await self.payments.create_checkout(sku=sku, household_id=household_id)
         return web.json_response({"invoiceUrl": url})
 

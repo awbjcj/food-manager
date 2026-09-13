@@ -283,7 +283,15 @@ def _build_llm_clients(settings: Settings, modes: ModeMap | None = None) -> LLMB
         selection_clients["openai"] = OpenAISelectionLLM(
             openai_sdk, settings.openai_model
         )
-        recipe_clients["openai"] = OpenAIRecipeLLM(openai_sdk, settings.openai_model)
+        recipe_clients["openai"] = OpenAIRecipeLLM(
+            openai_sdk,
+            settings.openai_model,
+            # ``max_tool_calls`` is a native Responses API parameter, but the
+            # Sub2API-compatible subscription endpoint rejects it. Keep the
+            # server-side cap for OpenAI's own API and omit the optional field
+            # when this client is routed through the gateway.
+            max_tool_calls=3 if openai_credentials.mode == "api" else None,
+        )
         nutrition_clients["openai"] = OpenAINutritionLLM(
             openai_sdk, settings.openai_model
         )

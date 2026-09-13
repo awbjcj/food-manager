@@ -59,15 +59,15 @@ class RecipeLLMClient(Protocol):
 
 
 class NutritionLLMClient(Protocol):
-    async def score(
-        self, *, prompt: str
-    ) -> tuple[NutritionScores, int | None]: ...
+    async def score(self, *, prompt: str) -> tuple[NutritionScores, int | None]: ...
 
 
 class _AnthropicJSONClient:
     """Shared Anthropic structured-text call with retry + cost, schema-validated."""
 
-    def __init__(self, sdk, model: str, *, web_search: bool = False, sleep=asyncio.sleep):
+    def __init__(
+        self, sdk, model: str, *, web_search: bool = False, sleep=asyncio.sleep
+    ):
         self._sdk = sdk
         self._model = model
         self._web_search = web_search
@@ -97,7 +97,9 @@ class _AnthropicJSONClient:
         unknown_cost = False
         for attempt in range(2):
             msg = await self._create_message(system, user_content, tools)
-            cost = _add_cost(_cost_micros(msg, self._model), _anthropic_search_cost_micros(msg))
+            cost = _add_cost(
+                _cost_micros(msg, self._model), _anthropic_search_cost_micros(msg)
+            )
             if cost is None:
                 unknown_cost = True
             else:
@@ -151,14 +153,25 @@ class AnthropicNutritionLLM(NutritionLLMClient):
         self._client = _AnthropicJSONClient(sdk, model, sleep=sleep)
 
     async def score(self, *, prompt: str) -> tuple[NutritionScores, int | None]:
-        return await self._client._call(NUTRITION_SYSTEM_PROMPT, prompt, NutritionScores)
+        return await self._client._call(
+            NUTRITION_SYSTEM_PROMPT, prompt, NutritionScores
+        )
 
 
 class _OpenAIJSONClient:
-    def __init__(self, sdk, model, *, web_search=False, sleep=asyncio.sleep):
+    def __init__(
+        self,
+        sdk,
+        model,
+        *,
+        web_search=False,
+        max_tool_calls: int | None = None,
+        sleep=asyncio.sleep,
+    ):
         self._sdk = sdk
         self._model = model
         self._web_search = web_search
+        self._max_tool_calls = max_tool_calls
         self._sleep = sleep
 
     async def _create_response(self, system, user_content, tools, model_cls):
@@ -173,8 +186,8 @@ class _OpenAIJSONClient:
             "text_format": model_cls,
             "max_output_tokens": 2048,
         }
-        if self._web_search:
-            kwargs["max_tool_calls"] = 3
+        if self._web_search and self._max_tool_calls is not None:
+            kwargs["max_tool_calls"] = self._max_tool_calls
 
         return await with_transport_retry(
             lambda: self._sdk.responses.parse(**kwargs),
@@ -190,7 +203,9 @@ class _OpenAIJSONClient:
         unknown_cost = False
         for attempt in range(2):
             resp = await self._create_response(system, user_content, tools, model_cls)
-            cost = _add_cost(_cost_micros(resp, self._model), _openai_search_cost_micros(resp))
+            cost = _add_cost(
+                _cost_micros(resp, self._model), _openai_search_cost_micros(resp)
+            )
             if cost is None:
                 unknown_cost = True
             else:
@@ -225,8 +240,21 @@ class OpenAISelectionLLM(SelectionLLMClient):
 
 
 class OpenAIRecipeLLM(RecipeLLMClient):
-    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
-        self._client = _OpenAIJSONClient(sdk, model, web_search=True, sleep=sleep)
+    def __init__(
+        self,
+        sdk,
+        model: str,
+        *,
+        max_tool_calls: int | None = 3,
+        sleep=asyncio.sleep,
+    ):
+        self._client = _OpenAIJSONClient(
+            sdk,
+            model,
+            web_search=True,
+            max_tool_calls=max_tool_calls,
+            sleep=sleep,
+        )
 
     async def fetch_recipes(
         self, *, prompt: str
@@ -239,4 +267,6 @@ class OpenAINutritionLLM(NutritionLLMClient):
         self._client = _OpenAIJSONClient(sdk, model, sleep=sleep)
 
     async def score(self, *, prompt: str) -> tuple[NutritionScores, int | None]:
-        return await self._client._call(NUTRITION_SYSTEM_PROMPT, prompt, NutritionScores)
+        return await self._client._call(
+            NUTRITION_SYSTEM_PROMPT, prompt, NutritionScores
+        )

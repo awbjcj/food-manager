@@ -291,6 +291,25 @@ def test_build_llm_clients_routes_subscription_providers_to_the_gateway():
     assert bundle.text.available_providers == ("anthropic", "gemini")
 
 
+def test_openai_recipe_tool_cap_follows_the_credential_mode():
+    from bin.run import _build_llm_clients
+
+    settings = _settings(
+        LLM_PROVIDER="openai",
+        OPENAI_API_KEY="o-key",
+        SUB2API_BASE_URL=GATEWAY,
+        SUB2API_OPENAI_TOKEN="sub-o",
+    )
+
+    subscription = _build_llm_clients(settings, {"openai": "subscription"})
+    subscription_recipe = cast(Any, subscription.recipe.for_provider("openai"))
+    assert subscription_recipe._client._max_tool_calls is None
+
+    native = _build_llm_clients(settings, {"openai": "api"})
+    native_recipe = cast(Any, native.recipe.for_provider("openai"))
+    assert native_recipe._client._max_tool_calls == 3
+
+
 def test_build_llm_clients_honours_an_api_mode_override():
     from bin.run import _build_llm_clients
 

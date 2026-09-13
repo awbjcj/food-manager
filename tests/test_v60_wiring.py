@@ -25,6 +25,7 @@ def test_operator_commands_are_complete():
     assert {name for name, _handler, _deps, _usage in OPERATOR_COMMANDS} == {
         "whois",
         "grant",
+        "tier",
         "refund",
         "ban",
         "unban",

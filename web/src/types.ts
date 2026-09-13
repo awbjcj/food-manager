@@ -31,9 +31,9 @@ export interface AccountData {
   }
   quota: {
     receiptsUsed: number
-    receiptsLimit: number
+    receiptsLimit: number | null
     actionsUsed: number
-    actionsLimit: number
+    actionsLimit: number | null
   }
   plans: PlanOption[]
   availableProviders: string[]

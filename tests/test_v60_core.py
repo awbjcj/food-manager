@@ -128,6 +128,65 @@ def test_meter_blocks_an_operation_that_would_overshoot(db, monkeypatch):
     assert decision.degrade is True
 
 
+def test_unlimited_tier_records_usage_without_enforcing_any_ceiling(db, monkeypatch):
+    monkeypatch.setattr(meter, "BILLING_ENABLED", True)
+    household_id = _household(db)
+    sub = get_or_create_subscription(db, household_id=household_id, now=NOW)
+    sub.tier = "unlimited"
+    usage = get_or_create_usage(
+        db, household_id=household_id, period_start=sub.period_start
+    )
+    usage.receipts_used = 1_000_000
+    usage.actions_used = 1_000_000
+    usage.cost_micros_used = 1_000_000_000
+    db.add(sub)
+    db.add(usage)
+    db.commit()
+
+    receipt = meter.admit(
+        db, household_id=household_id, op="receipt", provider="anthropic", now=NOW
+    )
+    cook = meter.admit(
+        db, household_id=household_id, op="cook", provider="anthropic", now=NOW
+    )
+
+    assert receipt.allowed is True and cook.allowed is True
+    assert receipt.snapshot.receipts_limit is None
+    assert cook.snapshot.actions_limit is None
+
+
+def test_unlimited_tier_rolls_usage_period_without_expiring(db):
+    household_id = _household(db)
+    sub = get_or_create_subscription(db, household_id=household_id, now=NOW)
+    sub.tier = "unlimited"
+    db.add(sub)
+    db.commit()
+
+    rolled = roll_period_if_due(db, sub=sub, now=NOW + timedelta(days=31))
+
+    assert rolled.status == "active"
+    assert rolled.tier == "unlimited"
+    assert rolled.period_start == (NOW + timedelta(days=30)).replace(tzinfo=None)
+
+
+def test_unlimited_quota_card_uses_infinity_and_has_no_upsell():
+    card = meter.QuotaSnapshot(
+        receipts_used=12,
+        receipts_limit=None,
+        actions_used=45,
+        actions_limit=None,
+        per_op={"cook": 1},
+        period_end=NOW.replace(tzinfo=None),
+        tier="unlimited",
+    )
+
+    rendered = render_quota(card, days_left=20)
+
+    assert "Unlimited" in rendered
+    assert "12 / ∞" in rendered
+    assert "/buy" not in rendered
+
+
 def test_open_registration_never_resurrects_a_banned_user(db):
     household_id = _household(db)
     db.add(

@@ -9,7 +9,7 @@ from app.billing.ledger import find_event, record_payment
 from app.billing.plans import SKUS
 from app.models import Household, PaymentEvent, QuotaUsage, Subscription, User
 from app.operator import auth
-from app.operator.bot import handle_grant, handle_reconcile, handle_refund
+from app.operator.bot import handle_grant, handle_reconcile, handle_refund, handle_tier
 from tests.fakes import FakePaymentProvider
 
 NOW = datetime(2026, 7, 28, 12, tzinfo=UTC)
@@ -27,6 +27,9 @@ def factory(monkeypatch):
         assert household.id is not None
         db.add(
             User(telegram_id=42, chat_id=42, household_id=household.id, created_at=NOW)
+        )
+        db.add(
+            User(telegram_id=7, chat_id=7, household_id=household.id, created_at=NOW)
         )
         db.commit()
     return lambda: Session(engine)
@@ -54,6 +57,59 @@ async def test_grant_rejects_an_unknown_household(factory):
     await handle_grant(msg, session_factory=factory, now_provider=lambda _tz: NOW)
     with factory() as db:
         assert db.exec(select(PaymentEvent)).all() == []
+
+
+@pytest.mark.asyncio
+async def test_operator_can_make_own_household_unlimited(factory):
+    msg = _message("/tier me unlimited")
+
+    await handle_tier(msg, session_factory=factory, now_provider=lambda _tz: NOW)
+
+    with factory() as db:
+        sub = db.get(Subscription, 1)
+        assert sub is not None
+        assert effective_tier(sub) == "unlimited"
+        event = db.exec(select(PaymentEvent)).one()
+        assert event.sku == "operator_tier_unlimited"
+        assert event.payer_telegram_id == 7
+    assert "free -> unlimited" in msg.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_operator_can_set_a_timed_family_tier_by_user_id(factory):
+    msg = _message("/tier 42 family 90")
+
+    await handle_tier(msg, session_factory=factory, now_provider=lambda _tz: NOW)
+
+    with factory() as db:
+        sub = db.get(Subscription, 1)
+        assert sub is not None
+        assert effective_tier(sub) == "family"
+        assert sub.period_end == (NOW + timedelta(days=90)).replace(tzinfo=None)
+
+
+@pytest.mark.asyncio
+async def test_tier_change_refuses_to_overwrite_a_live_paid_subscription(factory):
+    with factory() as db:
+        apply_subscription(
+            db,
+            household_id=1,
+            sku=SKUS["family_monthly"],
+            charge_id="still-renewing",
+            payer_telegram_id=42,
+            expires_at=NOW + timedelta(days=30),
+            now=NOW,
+        )
+        db.commit()
+    msg = _message("/tier 42 unlimited")
+
+    await handle_tier(msg, session_factory=factory, now_provider=lambda _tz: NOW)
+
+    assert "refund or cancel" in msg.answer.await_args.args[0]
+    with factory() as db:
+        sub = db.get(Subscription, 1)
+        assert sub is not None
+        assert effective_tier(sub) == "family"
 
 
 @pytest.mark.asyncio

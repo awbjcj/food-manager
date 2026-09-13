@@ -125,10 +125,27 @@ For unattended operation register it as a Scheduled Task ("At startup",
 ## Operator bot
 
 Set `OPERATOR_BOT_TOKEN` to enable a second private bot in the same process.
-Only IDs in `OPERATOR_TELEGRAM_IDS` can use `/whois`, `/grant`, `/refund`,
+Only IDs in `OPERATOR_TELEGRAM_IDS` can use `/whois`, `/tier`, `/grant`, `/refund`,
 `/ban`, `/unban`, `/revenue`, and `/reconcile`; other senders receive no reply.
 Both bots stay co-located because they share the SQLite volume. Migrating to
 separate processes requires Postgres first.
+
+Admin authority and customer roles are intentionally separate. Configure your
+Telegram ID in `OPERATOR_TELEGRAM_IDS` (the default is
+`ALLOWED_TELEGRAM_USER_ID`), then use the private operator bot:
+
+```text
+/tier me unlimited
+/tier 123456789 family 90
+/tier 123456789 free
+```
+
+The command resolves the target user's household because quota is pooled. Every
+change is recorded in the payment ledger as a zero-Star operator grant.
+`unlimited` never expires and bypasses quota admission while usage and cost are
+still recorded. Operator-comped `family` access defaults to 30 days. Tier
+replacement is refused while a live paid subscription exists; refund or cancel
+that subscription first so billing and access cannot drift apart.
 
 ## v6.0 go-live checklist
 

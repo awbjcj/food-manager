@@ -83,7 +83,17 @@
 
 ## 运营机器人
 
-设置 `OPERATOR_BOT_TOKEN` 可在同一进程中启用第二个私有机器人。只有 `OPERATOR_TELEGRAM_IDS` 中的 ID 可以使用 `/whois`、`/grant`、`/refund`、`/ban`、`/unban`、`/revenue` 和 `/reconcile`；其他发送者不会收到回复。
+设置 `OPERATOR_BOT_TOKEN` 可在同一进程中启用第二个私有机器人。只有 `OPERATOR_TELEGRAM_IDS` 中的 ID 可以使用 `/whois`、`/tier`、`/grant`、`/refund`、`/ban`、`/unban`、`/revenue` 和 `/reconcile`；其他发送者不会收到回复。
+
+管理员权限与普通用户角色相互独立。把你的 Telegram ID 配置到 `OPERATOR_TELEGRAM_IDS`（默认值是 `ALLOWED_TELEGRAM_USER_ID`），然后在私有运营机器人中使用：
+
+```text
+/tier me unlimited
+/tier 123456789 family 90
+/tier 123456789 free
+```
+
+该命令会根据目标用户找到其家庭，因为配额按家庭共享。每次变更都会作为零 Stars 的运营赠送写入支付账本。`unlimited` 永不过期、不受配额准入限制，但仍记录用量和成本。运营赠送的 `family` 默认持续 30 天。如果存在有效的付费订阅，系统会拒绝替换套餐；请先退款或取消订阅，避免计费状态与访问权限不一致。
 
 两个机器人共用 SQLite 卷，因此保持在同一进程中。若要拆分为独立进程，必须先迁移到 PostgreSQL。
 

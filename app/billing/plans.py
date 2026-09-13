@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
 
-PlanTier = Literal["free", "family"]
+PlanTier = Literal["free", "family", "unlimited"]
 OpClass = Literal["receipt", "cook", "plan", "edit", "chat", "search"]
 PaymentKind = Literal["subscription", "topup", "refund", "grant"]
 
@@ -30,15 +30,18 @@ PROVIDER_UNIT_MULTIPLIER: Mapping[str, int] = {
 @dataclass(frozen=True)
 class TierLimits:
     tier: PlanTier
-    receipts: int
-    actions: int
+    receipts: int | None
+    actions: int | None
     seats: int
-    cost_breaker_micros: int
+    cost_breaker_micros: int | None
 
 
 TIERS: Mapping[str, TierLimits] = {
     "free": TierLimits("free", 5, 30, 2, 250_000),
     "family": TierLimits("family", 100, 300, 10, 2_500_000),
+    # Internal-only entitlement. It is deliberately absent from SKUS, so it
+    # can only be assigned through the fail-closed operator surface.
+    "unlimited": TierLimits("unlimited", None, None, 10, None),
 }
 
 

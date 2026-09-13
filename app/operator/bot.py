@@ -4,6 +4,7 @@ import json
 import logging
 import uuid
 from datetime import timedelta
+from typing import cast
 
 from aiogram import Dispatcher
 from aiogram.filters import Command
@@ -11,10 +12,16 @@ from sqlmodel import select
 
 from app.billing.entitlement import apply_refund, apply_topup, revoke_topup
 from app.billing.ledger import find_event, record_payment, revenue_stars
-from app.billing.plans import Sku, sku_for
+from app.billing.plans import PlanTier, Sku, sku_for
 from app.models import Household, PaymentEvent, User
 from app.operator.auth import require_operator
 from app.operator.queries import describe_household
+from app.operator.tiers import (
+    PaidSubscriptionConflict,
+    TierAdminError,
+    UserNotFound,
+    set_user_tier,
+)
 from app.provider_mode_service import ProviderModeApplyError, ProviderModeError
 
 log = logging.getLogger(__name__)
@@ -108,6 +115,64 @@ async def handle_grant(msg, *, session_factory, now_provider):
         return
     await msg.answer(
         f"granted household {household_id}: +{receipts} receipts, +{actions} actions"
+    )
+
+
+async def handle_tier(msg, *, session_factory, now_provider):
+    if not await require_operator(msg):
+        return
+    parts = _parts(msg.text)
+    usage = "usage: /tier <telegram_id|me> <free|family|unlimited> [family_days]"
+    try:
+        if len(parts) not in {3, 4}:
+            raise ValueError
+        telegram_id = msg.from_user.id if parts[1].lower() == "me" else int(parts[1])
+        raw_tier = parts[2].lower()
+        if raw_tier not in {"free", "family", "unlimited"}:
+            raise ValueError
+        tier = cast(PlanTier, raw_tier)
+        if len(parts) == 4 and tier != "family":
+            raise ValueError
+        duration_days = int(parts[3]) if len(parts) == 4 else 30
+        if not 1 <= duration_days <= 3650:
+            raise ValueError
+    except (ValueError, TypeError):
+        await msg.answer(usage)
+        return
+
+    try:
+        with session_factory() as session:
+            result = set_user_tier(
+                session,
+                telegram_id=telegram_id,
+                tier=tier,
+                operator_telegram_id=msg.from_user.id,
+                now=now_provider("UTC"),
+                duration_days=duration_days,
+            )
+    except UserNotFound:
+        await msg.answer(f"no user {telegram_id}")
+        return
+    except PaidSubscriptionConflict as exc:
+        await msg.answer(str(exc))
+        return
+    except TierAdminError:
+        await msg.answer(usage)
+        return
+    except Exception as exc:  # noqa: BLE001 - redact failures at the operator seam
+        log.warning("tier_change_failed", extra={"error_class": type(exc).__name__})
+        await msg.answer("tier change failed")
+        return
+
+    if not result.changed:
+        await msg.answer(
+            f"user {telegram_id} household {result.household_id} is already {result.tier}"
+        )
+        return
+    suffix = f" for {duration_days} days" if result.tier == "family" else ""
+    await msg.answer(
+        f"user {telegram_id} household {result.household_id}: "
+        f"{result.previous_tier} -> {result.tier}{suffix}"
     )
 
 
@@ -328,6 +393,12 @@ OPERATOR_COMMANDS = (
         handle_grant,
         ("session_factory", "now_provider"),
         "<household_id> <receipts> <actions> - comp extra quota to a household",
+    ),
+    (
+        "tier",
+        handle_tier,
+        ("session_factory", "now_provider"),
+        "<telegram_id|me> <free|family|unlimited> [family_days] - set a household tier",
     ),
     (
         "refund",

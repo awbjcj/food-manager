@@ -64,11 +64,17 @@ async def handle_buy(
     if not hosted_features_enabled:
         await msg.answer(t("hosted_only", "en"))
         return
-    del now_provider
     async with _request(
         msg, session_factory=session_factory, on_user_created=on_user_created
     ) as ctx:
         if ctx is None:
+            return
+        now = now_provider(ctx.user.tz)
+        sub = get_or_create_subscription(
+            ctx.session, household_id=ctx.user.household_id, now=now
+        )
+        if effective_tier(sub) == "unlimited":
+            await msg.answer(t("billing.plan_unlimited", ctx.user.lang))
             return
         if payments is None:
             await msg.answer(t("billing.payments_unavailable", ctx.user.lang))
@@ -110,15 +116,17 @@ def _validate_checkout(
         raise ValueError("payer is not eligible for household")
     if session.get(Household, household_id) is None:
         raise ValueError("unknown household")
-    if sku.kind == "subscription":
-        sub = session.get(Subscription, household_id)
-        if (
-            not allow_existing_subscription
-            and sub is not None
-            and effective_tier(sub) == "family"
-            and sub.telegram_charge_id
-        ):
-            raise ValueError("already subscribed")
+    sub = session.get(Subscription, household_id)
+    if sub is not None and effective_tier(sub) == "unlimited":
+        raise ValueError("unlimited accounts cannot purchase quota")
+    if (
+        sku.kind == "subscription"
+        and not allow_existing_subscription
+        and sub is not None
+        and effective_tier(sub) == "family"
+        and sub.telegram_charge_id
+    ):
+        raise ValueError("already subscribed")
     return sku, household_id, payer
 
 
@@ -220,8 +228,11 @@ async def handle_billing(
         sub = get_or_create_subscription(
             ctx.session, household_id=ctx.user.household_id, now=now
         )
-        if effective_tier(sub) == "free":
+        tier = effective_tier(sub)
+        if tier == "free":
             text = t("billing.plan_free", ctx.user.lang)
+        elif tier == "unlimited":
+            text = t("billing.plan_unlimited", ctx.user.lang)
         else:
             days = max(0, (sub.period_end - utc_naive(now)).days)
             key = (

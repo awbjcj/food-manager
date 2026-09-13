@@ -48,18 +48,23 @@ function Logo() {
   return <div className="brand-mark" aria-hidden="true"><Icon name="leaf" size={22} /></div>
 }
 
-function UsageRow({ icon, label, used, limit, locale }: { icon: IconName; label: string; used: number; limit: number; locale: Locale }) {
-  const percent = Math.min(100, Math.round((used / Math.max(limit, 1)) * 100))
-  const values = { used: formatNumber(locale, used), limit: formatNumber(locale, limit) }
+function UsageRow({ icon, label, used, limit, locale }: { icon: IconName; label: string; used: number; limit: number | null; locale: Locale }) {
+  const percent = limit == null ? 0 : Math.min(100, Math.round((used / Math.max(limit, 1)) * 100))
+  const values = { used: formatNumber(locale, used), limit: limit == null ? t(locale, 'usage.unlimited') : formatNumber(locale, limit) }
   return <div className="usage-row">
     <span className="icon-disc"><Icon name={icon} /></span>
     <div className="usage-content">
       <div className="usage-copy"><strong>{label}</strong><span>{t(locale, 'usage.usedOf', values)}</span></div>
-      <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={limit} aria-valuenow={Math.min(used, limit)} aria-label={t(locale, 'usage.ariaUsedOf', { label, ...values })}>
+      <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={limit ?? undefined} aria-valuenow={limit == null ? undefined : Math.min(used, limit)} aria-valuetext={limit == null ? t(locale, 'usage.ariaUnlimited', { label, used: values.used }) : undefined} aria-label={t(locale, 'usage.ariaUsedOf', { label, ...values })}>
         <span style={{ width: String(percent) + '%' }} />
       </div>
     </div>
   </div>
+}
+
+function currentPlanName(data: AccountData, locale: Locale): string {
+  if (data.plan.tier === 'unlimited') return t(locale, 'plan.unlimitedPlan')
+  return data.plan.tier === 'family' ? t(locale, 'plan.familyPlan') : t(locale, 'plan.freePlan')
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
@@ -89,7 +94,7 @@ function HomeView({ data, locale, selectTab, openChat }: { data: AccountData; lo
   return <main className="page home-page">
     <Header data={data} locale={locale} />
     <section className="hero-copy"><h1>{greeting}</h1><p>{t(locale, 'home.running')}</p></section>
-    {data.hostedFeaturesEnabled && <button className="plan-band" onClick={() => selectTab('plans')}><span className="plan-dot"><Icon name="leaf" /></span><strong>{data.plan.tier === 'family' ? t(locale, 'plan.familyPlan') : t(locale, 'plan.freePlan')}</strong><span>{t(locale, 'home.viewPlans')}</span><Icon name="arrow" /></button>}
+    {data.hostedFeaturesEnabled && <button className="plan-band" onClick={() => selectTab('plans')}><span className="plan-dot"><Icon name="leaf" /></span><strong>{currentPlanName(data, locale)}</strong><span>{t(locale, 'home.viewPlans')}</span><Icon name="arrow" /></button>}
     {data.hostedFeaturesEnabled && <section className="usage-list">
       <UsageRow icon="receipt" label={t(locale, 'usage.receipts')} used={data.quota.receiptsUsed} limit={data.quota.receiptsLimit} locale={locale} />
       <UsageRow icon="brain" label={t(locale, 'usage.actions')} used={data.quota.actionsUsed} limit={data.quota.actionsLimit} locale={locale} />
@@ -121,6 +126,7 @@ function PlansView({ data, locale, checkout, manage }: { data: AccountData; loca
   const family = data.plans.find(plan => plan.code === 'family_monthly')!
   const topups = data.plans.filter(plan => plan.kind === 'topup')
   const familyActive = data.plan.tier === 'family'
+  const unlimitedActive = data.plan.tier === 'unlimited'
   return <main className="page plans-page">
     <section className="page-heading"><h1>{t(locale, 'plan.choose')}</h1><p>{t(locale, 'plan.subtitle')}</p><small>{t(locale, 'plan.billingCycle')}</small></section>
     <section className="plan-option">
@@ -128,10 +134,11 @@ function PlansView({ data, locale, checkout, manage }: { data: AccountData; loca
       <PlanFeatures plan={free} locale={locale} />
     </section>
     <section className="plan-option featured">
-      <div className="plan-option-head"><span className="icon-disc"><Icon name="household" /></span><div><h2>{planTitle(locale, family.code, family.title)}</h2><p>{t(locale, 'plan.familyPrice', { stars: formatNumber(locale, family.stars) })}</p></div><button className="button primary compact" disabled={!data.billingEnabled} onClick={familyActive ? manage : () => checkout(family.code)}>{familyActive ? t(locale, 'plan.manage') : t(locale, 'plan.upgrade')}</button></div>
+      <div className="plan-option-head"><span className="icon-disc"><Icon name="household" /></span><div><h2>{planTitle(locale, family.code, family.title)}</h2><p>{t(locale, 'plan.familyPrice', { stars: formatNumber(locale, family.stars) })}</p></div><button className="button primary compact" disabled={!data.billingEnabled || unlimitedActive} onClick={familyActive ? manage : () => checkout(family.code)}>{unlimitedActive ? t(locale, 'plan.current') : familyActive ? t(locale, 'plan.manage') : t(locale, 'plan.upgrade')}</button></div>
       <PlanFeatures plan={family} locale={locale} />
     </section>
-    <section className="topups"><h2>{t(locale, 'plan.needMore')}</h2>{topups.map(plan => <OpenRow key={plan.code} icon={plan.receipts ? 'receipt' : 'sparkle'} title={[planTitle(locale, plan.code, plan.title), t(locale, 'plan.stars', { count: formatNumber(locale, plan.stars) })].join(' · ')} onClick={() => checkout(plan.code)} />)}</section>
+    {!unlimitedActive && <section className="topups"><h2>{t(locale, 'plan.needMore')}</h2>{topups.map(plan => <OpenRow key={plan.code} icon={plan.receipts ? 'receipt' : 'sparkle'} title={[planTitle(locale, plan.code, plan.title), t(locale, 'plan.stars', { count: formatNumber(locale, plan.stars) })].join(' · ')} onClick={() => checkout(plan.code)} />)}</section>}
+    {unlimitedActive && <p className="notice">{t(locale, 'plan.unlimitedManaged')}</p>}
     {!data.billingEnabled && <p className="notice">{t(locale, 'plan.paymentsUnavailable')}</p>}
     <p className="payment-note">{t(locale, 'plan.paymentNote')}</p>
   </main>
@@ -164,7 +171,7 @@ function AccountView({ data, locale, onSaved, selectTab, openChat }: { data: Acc
       <fieldset><legend>{t(locale, 'account.preferences')}</legend><label>{t(locale, 'account.language')}<select value={form.language} onChange={event => setForm({ ...form, language: event.target.value })}>{Object.entries(languageNames).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label><label>{t(locale, 'account.provider')}<select value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value })}>{data.availableProviders.map(provider => <option key={provider} value={provider}>{provider[0].toUpperCase() + provider.slice(1)}</option>)}</select></label></fieldset>
       <div className="form-actions"><button className="button primary" type="submit">{t(locale, 'account.save')}</button><button className="button secondary" type="button" onClick={() => openChat()}>{t(locale, 'account.openChat')}</button>{status && <p role="status" className="save-status">{t(locale, status)}</p>}</div>
     </form>
-    {data.hostedFeaturesEnabled && <button className="subscription-row" onClick={() => selectTab('plans')}><strong>{t(locale, 'account.subscription')}</strong><span>{data.plan.tier === 'family' ? t(locale, 'plan.familyPlan') : t(locale, 'plan.freePlan')}</span><b>{t(locale, 'home.viewPlans')}</b><Icon name="arrow" size={20} /></button>}
+    {data.hostedFeaturesEnabled && <button className="subscription-row" onClick={() => selectTab('plans')}><strong>{t(locale, 'account.subscription')}</strong><span>{currentPlanName(data, locale)}</span><b>{t(locale, 'home.viewPlans')}</b><Icon name="arrow" size={20} /></button>}
   </main>
 }
 

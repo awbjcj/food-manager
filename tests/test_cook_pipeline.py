@@ -55,27 +55,49 @@ def _db_with_items(n, expiry_days):
     db.commit()
     db.refresh(household)
     assert household.id is not None
-    db.add(User(telegram_id=1, chat_id=1, household_id=household.id,
-                created_at=datetime.now(UTC)))
+    db.add(
+        User(
+            telegram_id=1,
+            chat_id=1,
+            household_id=household.id,
+            created_at=datetime.now(UTC),
+        )
+    )
     today = date(2026, 5, 30)
     for i in range(n):
-        db.add(PantryItem(
-            household_id=1, raw_name=f"item{i}", normalized_name=f"item{i}",
-            category="produce", qty=1.0, purchased_on=today,
-            shelf_life_days=expiry_days, shelf_life_source="llm",
-            ingest_shelf_life_source="llm",
-            expires_on=today + timedelta(days=expiry_days),
-            status="active", created_via="receipt", created_at=datetime.now(UTC),
-        ))
+        db.add(
+            PantryItem(
+                household_id=1,
+                raw_name=f"item{i}",
+                normalized_name=f"item{i}",
+                category="produce",
+                qty=1.0,
+                purchased_on=today,
+                shelf_life_days=expiry_days,
+                shelf_life_source="llm",
+                ingest_shelf_life_source="llm",
+                expires_on=today + timedelta(days=expiry_days),
+                status="active",
+                created_via="receipt",
+                created_at=datetime.now(UTC),
+            )
+        )
     db.commit()
     return db, today
 
 
 def _cook_row(db):
     now = datetime(2026, 5, 30, 12, 0, tzinfo=UTC)
-    row = CookSession(household_id=1, status="ready", chat_id=1, meal_type="dinner",
-                      cuisine="italian", selected_item_ids="[]",
-                      created_at=now, expires_at=now + timedelta(minutes=10))
+    row = CookSession(
+        household_id=1,
+        status="ready",
+        chat_id=1,
+        meal_type="dinner",
+        cuisine="italian",
+        selected_item_ids="[]",
+        created_at=now,
+        expires_at=now + timedelta(minutes=10),
+    )
     db.add(row)
     db.commit()
     db.refresh(row)
@@ -146,9 +168,7 @@ def test_run_cook_guards_thin_pantry():
                 db,
                 cook=cook,
                 profile=FoodProfile(),
-                selection_llm=FakeSelectionLLM(
-                    canned=(SelectedItems(item_ids=[]), 0)
-                ),
+                selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 0)),
                 source=FakeRecipeSource(),
                 today=today,
             )
@@ -164,9 +184,7 @@ def test_run_cook_excludes_expired_items():
                 db,
                 cook=cook,
                 profile=FoodProfile(),
-                selection_llm=FakeSelectionLLM(
-                    canned=(SelectedItems(item_ids=[]), 0)
-                ),
+                selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 0)),
                 source=FakeRecipeSource(),
                 today=today,
             )
@@ -180,9 +198,7 @@ def test_run_cook_builds_exact_criteria_ranks_and_persists_source_results():
     db.add(cook)
     db.commit()
     ids = _item_ids(db)
-    selection = FakeSelectionLLM(
-        canned=(SelectedItems(item_ids=ids[:2]), 5)
-    )
+    selection = FakeSelectionLLM(canned=(SelectedItems(item_ids=ids[:2]), 5))
     unsafe = _sourced(
         "Peanut Dish",
         ingredients=["peanut"],
@@ -330,9 +346,7 @@ def test_run_cook_empty_selection_uses_all_active_items():
             db,
             cook=cook,
             profile=FoodProfile(),
-            selection_llm=FakeSelectionLLM(
-                canned=(SelectedItems(item_ids=[]), 5)
-            ),
+            selection_llm=FakeSelectionLLM(canned=(SelectedItems(item_ids=[]), 5)),
             source=source,
             today=today,
         )
@@ -366,9 +380,7 @@ def test_run_cook_more_paginates_dedups_and_retains_old_cards():
     db, today = _db_with_items(4, 2)
     ids = _item_ids(db)
     old = ScoredCandidate(
-        recipe=_sourced(
-            "Old Card", ingredients=["item0"], external_id="A"
-        ).recipe,
+        recipe=_sourced("Old Card", ingredients=["item0"], external_id="A").recipe,
         nutrition=NutritionScore(
             health_score=60,
             effort="easy",
@@ -569,12 +581,24 @@ def test_openai_recipe_caps_web_search_tool_calls():
     assert "max_tool_calls" not in nutrition_call
 
 
+def test_openai_recipe_can_omit_web_search_tool_cap_for_a_gateway():
+    sdk = _FakeOpenAISDK()
+
+    asyncio.run(
+        OpenAIRecipeLLM(sdk, "gpt-test", max_tool_calls=None).fetch_recipes(prompt="x")
+    )
+
+    assert "max_tool_calls" not in sdk.responses.calls[0]
+
+
 def test_anthropic_recipe_uses_capped_web_search_tool_only_for_recipes():
-    sdk = _FakeAnthropicSDK([
-        '{"item_ids":[]}',
-        '{"candidates":[]}',
-        '{"scores":[]}',
-    ])
+    sdk = _FakeAnthropicSDK(
+        [
+            '{"item_ids":[]}',
+            '{"candidates":[]}',
+            '{"scores":[]}',
+        ]
+    )
 
     asyncio.run(AnthropicSelectionLLM(sdk, "claude-test").select_items(prompt="x"))
     asyncio.run(AnthropicRecipeLLM(sdk, "claude-test").fetch_recipes(prompt="x"))
@@ -589,10 +613,12 @@ def test_anthropic_recipe_uses_capped_web_search_tool_only_for_recipes():
 
 
 def test_anthropic_schema_repair_retry_accumulates_known_cost():
-    sdk = _FakeAnthropicSDK([
-        "not-json",
-        '{"item_ids":[4],"rationale":"works"}',
-    ])
+    sdk = _FakeAnthropicSDK(
+        [
+            "not-json",
+            '{"item_ids":[4],"rationale":"works"}',
+        ]
+    )
 
     selected, cost = asyncio.run(
         AnthropicSelectionLLM(sdk, "claude-sonnet-4-6").select_items(prompt="x")

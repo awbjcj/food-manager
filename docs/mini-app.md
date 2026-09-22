@@ -7,6 +7,10 @@ forms and interactive result cards for all commands registered on the user bot.
 Home shortcuts open the corresponding Kitchen feature. No command typing or
 return to the chat is required for these workflows.
 
+Choose **Pantry**, **Meals**, **Household**, or **Settings & help**, then select an
+action within that category. Forms and activity appear side by side on wider
+screens and stack on phones. Account settings use the same spacing and controls.
+
 | Area | Available workflows | Bot command equivalents |
 | --- | --- | --- |
 | Pantry | Browse, filter, scan JPEG/PNG receipts up to 10 MB, add food, approve/cancel corrections, undo, mark eaten/discarded, remove, snooze, refrigerate/freeze, statistics | `/pantry`, `/list`, `/add`, `/correct`, `/ate`, `/toss`, `/delete`, `/snooze`, `/stats`, photo uploads and item buttons |
@@ -27,6 +31,12 @@ content uses the same translation path as the bot. AI features require the same
 configured providers as their chat equivalents. Telegram Stars checkout opens
 Telegram's payment interface; calendar export downloads a file for the user to
 import.
+
+Workspace validation, pantry action confirmations, and empty states follow the
+saved account language. Changing language updates the interface and subsequent
+results; existing activity cards retain the language in which they were created.
+Shared labels use one frontend glossary. Catalog checks require all four locales
+and matching interpolation placeholders.
 
 ## Runtime and verification
 
@@ -58,6 +68,7 @@ uv run pytest tests/test_miniapp_workspace.py tests/test_webapp_api.py tests/tes
 uv run ruff check app/miniapp_workspace.py app/webapp.py bin/run.py tests/test_miniapp_workspace.py
 uv run pyright
 cd web
+npm test # Node.js 22.18+; translation coverage and glossary checks
 npm run build
 ```
 

@@ -104,13 +104,13 @@ function HomeView({ data, locale, selectTab, openFeature }: { data: AccountData;
     </section>}
     {data.hostedFeaturesEnabled && <section className="content-section"><SectionLabel>{t(locale, 'home.myHousehold')}</SectionLabel><OpenRow icon="household" title={data.household.name} detail={countLabel(locale, data.household.members, 'count.member.one', 'count.member.many')} action={t(locale, 'home.manage')} onClick={() => selectTab('account')} /></section>}
     <section className="content-section"><SectionLabel>{t(locale, 'home.quickAccess')}</SectionLabel><div className="open-list">
-      <OpenRow icon="pantry" title={t(locale, 'shortcut.pantry')} action="/pantry" onClick={() => openFeature('pantry')} />
-      <OpenRow icon="recipes" title={t(locale, 'shortcut.cook')} action="/cook" onClick={() => openFeature('cook')} />
-      <OpenRow icon="calendar" title={t(locale, 'shortcut.plan')} action="/plan" onClick={() => openFeature('plan')} />
-      <OpenRow icon="shopping" title={t(locale, 'shortcut.shopping')} action="/shopping" onClick={() => openFeature('shopping')} />
-      <OpenRow icon="recipes" title={t(locale, 'shortcut.favorites')} action="/favorites" onClick={() => openFeature('favorites')} />
-      <OpenRow icon="brain" title={t(locale, 'shortcut.preferences')} action="/prefs" onClick={() => openFeature('prefs')} />
-      <OpenRow icon="plan" title={t(locale, 'shortcut.stats')} action="/stats" onClick={() => openFeature('stats')} />
+      <OpenRow icon="pantry" title={t(locale, 'shortcut.pantry')} onClick={() => openFeature('pantry')} />
+      <OpenRow icon="recipes" title={t(locale, 'shortcut.cook')} onClick={() => openFeature('cook')} />
+      <OpenRow icon="calendar" title={t(locale, 'shortcut.plan')} onClick={() => openFeature('plan')} />
+      <OpenRow icon="shopping" title={t(locale, 'shortcut.shopping')} onClick={() => openFeature('shopping')} />
+      <OpenRow icon="recipes" title={t(locale, 'shortcut.favorites')} onClick={() => openFeature('favorites')} />
+      <OpenRow icon="brain" title={t(locale, 'shortcut.preferences')} onClick={() => openFeature('prefs')} />
+      <OpenRow icon="plan" title={t(locale, 'shortcut.stats')} onClick={() => openFeature('stats')} />
     </div></section>
   </main>
 }
@@ -169,9 +169,9 @@ function AccountView({ data, locale, onSaved, selectTab, openFeature }: { data: 
     <div className="profile-row"><div className="avatar large" aria-hidden="true">{initials}</div><div><strong>{data.user.name}</strong><span>{data.user.role === 'owner' ? t(locale, 'account.owner') : t(locale, 'account.member')}</span></div></div>
     <form onSubmit={submit}>
       <fieldset><legend>{t(locale, 'account.household')}</legend><label>{t(locale, 'account.householdName')}<input value={form.householdName} disabled={data.user.role !== 'owner'} maxLength={80} onChange={event => setForm({ ...form, householdName: event.target.value })} /></label>{data.hostedFeaturesEnabled && <p className="field-note">{t(locale, 'account.seatsUsed', { used: formatNumber(locale, data.household.members), limit: formatNumber(locale, data.household.seatCap) })}</p>}</fieldset>
-      <fieldset><legend>{t(locale, 'account.dailyDigest')}</legend><label>{t(locale, 'account.deliveryTime')}<select value={form.digestHour} onChange={event => setForm({ ...form, digestHour: Number(event.target.value) })}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{formatDigestHour(locale, hour)}</option>)}</select></label><label>{t(locale, 'account.timeZone')}<select value={form.timeZone} onChange={event => setForm({ ...form, timeZone: event.target.value })}>{zones.map(zone => <option key={zone}>{zone}</option>)}</select></label></fieldset>
-      <fieldset><legend>{t(locale, 'account.preferences')}</legend><label>{t(locale, 'account.language')}<select value={form.language} onChange={event => setForm({ ...form, language: event.target.value })}>{Object.entries(languageNames).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label><label>{t(locale, 'account.provider')}<select value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value })}>{data.availableProviders.map(provider => <option key={provider} value={provider}>{provider[0].toUpperCase() + provider.slice(1)}</option>)}</select></label></fieldset>
-      <div className="form-actions"><button className="button primary" type="submit">{t(locale, 'account.save')}</button><button className="button secondary" type="button" onClick={() => openFeature()}>{w(locale, 'kitchen')}</button>{status && <p role="status" className="save-status">{t(locale, status)}</p>}</div>
+      <fieldset><legend>{t(locale, 'account.dailyDigest')}</legend><div className="form-fields"><label>{t(locale, 'account.deliveryTime')}<select value={form.digestHour} onChange={event => setForm({ ...form, digestHour: Number(event.target.value) })}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{formatDigestHour(locale, hour)}</option>)}</select></label><label>{t(locale, 'account.timeZone')}<select value={form.timeZone} onChange={event => setForm({ ...form, timeZone: event.target.value })}>{zones.map(zone => <option key={zone}>{zone}</option>)}</select></label></div></fieldset>
+      <fieldset><legend>{t(locale, 'account.preferences')}</legend><div className="form-fields"><label>{t(locale, 'account.language')}<select value={form.language} onChange={event => setForm({ ...form, language: event.target.value })}>{Object.entries(languageNames).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label><label>{t(locale, 'account.provider')}<select value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value })}>{data.availableProviders.map(provider => <option key={provider} value={provider}>{provider === 'openai' ? 'OpenAI' : provider === 'deepseek' ? 'DeepSeek' : provider[0].toUpperCase() + provider.slice(1)}</option>)}</select></label></div></fieldset>
+      <div className="form-actions"><button className="button primary" type="submit" disabled={status === 'account.saving'}>{t(locale, status === 'account.saving' ? 'account.saving' : 'account.save')}</button><button className="button secondary" type="button" onClick={() => openFeature()}>{w(locale, 'kitchen')}</button>{status && <p role="status" className="save-status">{t(locale, status)}</p>}</div>
     </form>
     {data.hostedFeaturesEnabled && <button className="subscription-row" onClick={() => selectTab('plans')}><strong>{t(locale, 'account.subscription')}</strong><span>{currentPlanName(data, locale)}</span><b>{t(locale, 'home.viewPlans')}</b><Icon name="arrow" size={20} /></button>}
   </main>

@@ -15,8 +15,9 @@ def test_t_returns_requested_language():
     assert t("digest.section.today", "en") == "Today"
 
 
-def test_t_falls_back_to_english_when_lang_missing():
-    assert t("list.empty", "zh") == MESSAGES["list.empty"]["en"]
+def test_t_falls_back_to_english_when_lang_missing(monkeypatch):
+    monkeypatch.setitem(MESSAGES, "_test.partial", {"en": "English fallback"})
+    assert t("_test.partial", "zh") == "English fallback"
 
 
 def test_t_interpolates_named_placeholders():
@@ -61,6 +62,11 @@ def _placeholders(template: str) -> set[str]:
 def test_every_key_has_english():
     for key, variants in MESSAGES.items():
         assert "en" in variants, f"missing en for {key}"
+
+
+def test_every_catalog_key_covers_all_supported_languages():
+    for key, variants in MESSAGES.items():
+        assert set(variants) == set(LANGS), f"incomplete translations for {key}"
 
 
 def test_translations_use_only_known_langs():

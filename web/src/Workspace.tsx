@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ApiError, loadWorkspace, uploadReceipt, workspaceAction } from './api'
-import type { Locale } from './i18n'
+import { languageNames, type Locale } from './i18n'
 import type { AccountData, WorkspaceCard, WorkspaceState } from './types'
 import { w, type WorkspaceKey } from './workspace-copy'
 
@@ -41,6 +41,21 @@ export const features: Feature[] = [
   { command: 'start', group: 'settingsGroup' },
   { command: 'text', group: 'settingsGroup', input: 'text' },
 ]
+
+const groups = [
+  { key: 'pantryGroup', hint: 'pantryHint' },
+  { key: 'mealsGroup', hint: 'mealsHint' },
+  { key: 'householdGroup', hint: 'householdHint' },
+  { key: 'settingsGroup', hint: 'settingsHint' },
+] as const
+
+function errorText(cause: unknown, locale: Locale): string {
+  if (!(cause instanceof ApiError)) return w(locale, 'error')
+  if (cause.status === 401 || cause.status === 403) return w(locale, 'access')
+  if (cause.status === 413) return w(locale, 'receiptHint')
+  if (cause.status >= 500) return w(locale, 'unavailable')
+  return cause.message || w(locale, 'invalidRequest')
+}
 
 function safeUrl(raw: string): string | null {
   try {
@@ -97,10 +112,11 @@ export function WorkspaceView({ data, locale, entry, onAccountChanged }: { data:
   const accountChanged = useRef(onAccountChanged)
   accountChanged.current = onAccountChanged
   const busy = sending || !!state?.busy
-  const feature = features.find(item => item.command === selected) ?? features[0]
   const hosted = data?.hostedFeaturesEnabled ?? state?.hostedFeaturesEnabled ?? false
   const registered = state?.registered ?? !!data
   const available = features.filter(item => registered ? (!item.hosted || hosted) && (!item.owner || data?.user.role === 'owner') : item.command === 'start' || (item.command === 'join' && hosted))
+  const feature = available.find(item => item.command === selected) ?? available[0]
+  const category = groups.find(group => group.key === feature.group)!
 
   function choose(command: string) {
     setSelected(command)
@@ -111,6 +127,9 @@ export function WorkspaceView({ data, locale, entry, onAccountChanged }: { data:
   }
 
   useEffect(() => { choose(entry.command) }, [entry.command, entry.nonce])
+  useEffect(() => {
+    if (state && selected !== feature.command) choose(feature.command)
+  }, [state, selected, feature.command])
   useEffect(() => {
     active.current = true
     let stopped = false
@@ -149,7 +168,7 @@ export function WorkspaceView({ data, locale, entry, onAccountChanged }: { data:
       accountChanged.current()
       if ('kind' in body && body.kind !== 'callback' && body.kind !== 'reply') resultsRef.current?.scrollIntoView({ block: 'start' })
     } catch (cause) {
-      if (active.current) setError(cause instanceof ApiError && cause.status === 401 ? w(locale, 'access') : cause instanceof Error ? cause.message : w(locale, 'error'))
+      if (active.current) setError(errorText(cause, locale))
     } finally {
       inFlight.current = false
       if (active.current) setSending(false)
@@ -160,35 +179,45 @@ export function WorkspaceView({ data, locale, entry, onAccountChanged }: { data:
     event.preventDefault()
     if (feature.confirm && !confirmation) { setConfirmation(true); return }
     const text = [value, extra].filter(Boolean).join(' ')
-    if (selected === 'photo') {
+    if (feature.command === 'photo') {
       if (!file || file.size > 10 * 1024 * 1024 || !['image/jpeg', 'image/png'].includes(file.type)) { setError(w(locale, 'receiptHint')); return }
       void act({ kind: 'photo' }, file)
     } else {
-      void act({ kind: selected === 'text' ? 'text' : 'command', command: selected, text })
+      void act({ kind: feature.command === 'text' ? 'text' : 'command', command: feature.command, text })
     }
   }
 
   const input = feature.input
   return <main className="page workspace-page">
     <section className="page-heading"><h1>{w(locale, 'kitchen')}</h1><p>{w(locale, registered ? 'subtitle' : 'onboarding')}</p></section>
+    <div className="workspace-categories" role="group" aria-label={w(locale, 'categories')}>
+      {groups.filter(group => available.some(item => item.group === group.key)).map(group =>
+        <button key={group.key} type="button" disabled={busy || !state} aria-pressed={feature.group === group.key}
+          onClick={() => choose(available.find(item => item.group === group.key)!.command)}>
+          {w(locale, group.key)}
+        </button>,
+      )}
+    </div>
     <div className="workspace-layout">
       <section className="workspace-controls" aria-label={w(locale, 'kitchen')}>
-        <label>{w(locale, 'feature')}<select value={selected} disabled={busy} onChange={event => choose(event.target.value)}>{(['pantryGroup', 'mealsGroup', 'householdGroup', 'settingsGroup'] as WorkspaceKey[]).map(group => <optgroup key={group} label={w(locale, group)}>{available.filter(item => item.group === group).map(item => <option key={item.command} value={item.command}>{w(locale, item.command)}</option>)}</optgroup>)}</select></label>
-        <div className="workspace-shortcuts">{(registered ? ['pantry', 'photo', 'cook', 'plan_current', 'shopping', 'favorites'] : ['start', ...(hosted ? ['join'] : [])]).map(command => <button key={command} type="button" disabled={busy} aria-pressed={selected === command} onClick={() => choose(command)}>{w(locale, command as WorkspaceKey)}</button>)}</div>
+        <div className="workspace-control-heading"><h2>{w(locale, category.key)}</h2><p>{w(locale, category.hint)}</p></div>
+        <label className="workspace-feature">{w(locale, 'feature')}<select value={feature.command} disabled={busy || !state} onChange={event => choose(event.target.value)}>{available.filter(item => item.group === feature.group).map(item => <option key={item.command} value={item.command}>{w(locale, item.command)}</option>)}</select></label>
         <form onSubmit={submit}>
-          <fieldset disabled={busy || !state}>
+          <fieldset className="workspace-action" disabled={busy || !state}>
             <legend>{w(locale, feature.command)}</legend>
-            {selected === 'photo' && <label>{w(locale, 'receiptHint')}<input type="file" accept="image/jpeg,image/png" required onChange={event => setFile(event.target.files?.[0] ?? null)} /></label>}
+            <div className="workspace-fields" key={feature.command}>
+            {selected === 'photo' && <label className="receipt-picker"><span>{w(locale, 'choosePhoto')}</span><input type="file" accept="image/jpeg,image/png" required aria-describedby="receipt-hint" onChange={event => setFile(event.target.files?.[0] ?? null)} /><span className="receipt-name">{file?.name ?? w(locale, 'noPhoto')}</span><small id="receipt-hint">{w(locale, 'receiptHint')}</small></label>}
             {['item', 'correct', 'snooze', 'member', 'groupId', 'plan', 'hour'].includes(input ?? '') && <label>{w(locale, input === 'member' ? 'member' : input === 'groupId' ? 'groupId' : input === 'plan' ? 'days' : input === 'hour' ? 'digest_at' : 'item')}<input type="number" step="1" min={input === 'groupId' ? undefined : input === 'hour' ? 0 : input === 'plan' ? 3 : 1} max={input === 'hour' ? 23 : input === 'plan' ? 7 : undefined} required value={value} onChange={event => setValue(event.target.value)} /></label>}
             {(input === 'text' || input === 'correct') && <label>{w(locale, selected === 'add' ? 'addHint' : selected === 'prefs' ? 'prefsHint' : 'details')}<textarea maxLength={input === 'correct' ? 3900 : 4000} required={selected !== 'prefs'} value={input === 'correct' ? extra : value} onChange={event => input === 'correct' ? setExtra(event.target.value) : setValue(event.target.value)} /></label>}
             {input === 'snooze' && <label>{w(locale, 'days')}<input type="number" min={1} max={30} step="1" required value={extra} onChange={event => setExtra(event.target.value)} /></label>}
             {(input === 'code' || input === 'zone') && <label>{w(locale, input === 'code' ? 'code' : 'tz')}<input required maxLength={150} placeholder={input === 'zone' ? 'America/New_York' : undefined} value={value} onChange={event => setValue(event.target.value)} /></label>}
             {input === 'filter' && <label>{w(locale, 'filter')}<select value={value} onChange={event => setValue(event.target.value)}><option value="">{w(locale, 'all')}</option><option value="week">{w(locale, 'due')}</option><option value="expired">{w(locale, 'expired')}</option>{['produce', 'dairy', 'meat', 'seafood', 'bakery', 'pantry', 'frozen', 'beverage', 'other'].map(category => <option key={category} value={category}>{w(locale, category === 'pantry' ? 'pantryCategory' : category as WorkspaceKey)}</option>)}</select></label>}
             {input === 'invite' && <label>{w(locale, 'mode')}<select value={value} onChange={event => setValue(event.target.value)}><option value="">{w(locale, 'single')}</option><option value="family">{w(locale, 'family')}</option></select></label>}
-            {input === 'language' && <label>{w(locale, 'lang')}<select required value={value} onChange={event => setValue(event.target.value)}><option value="">—</option>{Object.entries({ en: 'English', zh: '中文', fr: 'Français', es: 'Español' }).map(([code, name]) => <option key={code} value={code}>{name}</option>)}</select></label>}
-            {input === 'provider' && <label>{w(locale, 'llm')}<select required value={value} onChange={event => setValue(event.target.value)}><option value="">—</option>{data?.availableProviders.map(provider => <option key={provider}>{provider}</option>)}</select></label>}
+            {input === 'language' && <label>{w(locale, 'lang')}<select required value={value} onChange={event => setValue(event.target.value)}><option value="">{w(locale, 'choose')}</option>{Object.entries(languageNames).map(([code, name]) => <option key={code} value={code}>{name}</option>)}</select></label>}
+            {input === 'provider' && <label>{w(locale, 'llm')}<select required value={value} onChange={event => setValue(event.target.value)}><option value="">{w(locale, 'choose')}</option>{data?.availableProviders.map(provider => <option key={provider} value={provider}>{provider === 'openai' ? 'OpenAI' : provider === 'deepseek' ? 'DeepSeek' : provider[0].toUpperCase() + provider.slice(1)}</option>)}</select></label>}
+            </div>
             {confirmation && <div className="workspace-confirm" role="alert"><strong>{w(locale, 'confirm')}</strong><p>{w(locale, 'confirmHint')}</p><p>{w(locale, feature.command)} {value} {extra}</p><button type="button" className="button secondary" onClick={() => setConfirmation(false)}>{w(locale, 'cancel')}</button></div>}
-            <button className="button primary" type="submit">{w(locale, busy ? 'loading' : confirmation ? 'confirm' : 'run')}</button>
+            <button className="button primary workspace-submit" type="submit">{w(locale, !state ? 'connecting' : busy ? 'working' : confirmation ? 'confirmAction' : 'run')}</button>
           </fieldset>
         </form>
       </section>
@@ -197,7 +226,7 @@ export function WorkspaceView({ data, locale, entry, onAccountChanged }: { data:
         {error && <p className="workspace-error" role="alert">{error}</p>}
         {state?.error && <p className="workspace-error" role="alert">{state.error}</p>}
         <div role="status">{busy && <p>{w(locale, 'loading')}</p>}{state?.notices.map((notice, index) => <p className="workspace-notice" key={index}>{notice}</p>)}</div>
-        {!state?.cards.length && <p className="workspace-empty">{w(locale, 'empty')}</p>}
+        {!state?.cards.length && !busy && <div className="workspace-empty"><strong>{w(locale, state ? 'ready' : 'connecting')}</strong><p>{w(locale, 'empty')}</p></div>}
         {state?.cards.slice().reverse().map(card => <Card key={card.id} card={card} locale={locale} busy={busy} act={body => void act(body)} />)}
       </section>
     </div>

@@ -11,6 +11,222 @@ DEFAULT_LANG = "en"
 # Catalog. English is mandatory for every key; other languages are optional and
 # fall back to English. Keys are added incrementally by later tasks.
 MESSAGES: dict[str, dict[str, str]] = {
+    "miniapp.capacity": {
+        "en": "workspace capacity reached",
+        "zh": "厨房服务已满，请稍后重试。",
+        "fr": "Le service est complet. Réessayez plus tard.",
+        "es": "El servicio está lleno. Inténtalo más tarde.",
+    },
+    "miniapp.request_id": {
+        "en": "request ID required",
+        "zh": "请求标识缺失，请刷新后重试。",
+        "fr": "Identifiant de requête manquant. Actualisez et réessayez.",
+        "es": "Falta el identificador de solicitud. Actualiza e inténtalo de nuevo.",
+    },
+    "miniapp.expired": {
+        "en": "workspace expired; reload before trying again",
+        "zh": "厨房会话已过期，请刷新后重试。",
+        "fr": "La session a expiré. Actualisez avant de réessayer.",
+        "es": "La sesión ha caducado. Actualiza antes de reintentar.",
+    },
+    "miniapp.busy": {
+        "en": "wait for the current action to finish",
+        "zh": "请等待当前操作完成。",
+        "fr": "Attendez la fin de l’action en cours.",
+        "es": "Espera a que termine la acción actual.",
+    },
+    "miniapp.invalid_kind": {
+        "en": "invalid request kind",
+        "zh": "请求类型无效，请重新选择功能。",
+        "fr": "Type de requête non valide. Choisissez à nouveau une fonction.",
+        "es": "Tipo de solicitud no válido. Vuelve a elegir una función.",
+    },
+    "miniapp.text_length": {
+        "en": "text must be at most 4000 characters",
+        "zh": "文本不能超过 4000 个字符。",
+        "fr": "Le texte ne doit pas dépasser 4 000 caractères.",
+        "es": "El texto no puede superar los 4000 caracteres.",
+    },
+    "miniapp.invalid_card": {
+        "en": "invalid card ID",
+        "zh": "结果标识无效，请刷新。",
+        "fr": "Identifiant de résultat non valide. Actualisez.",
+        "es": "Identificador de resultado no válido. Actualiza.",
+    },
+    "miniapp.card_expired": {
+        "en": "card expired; open the feature again",
+        "zh": "此结果已过期，请重新打开功能。",
+        "fr": "Ce résultat a expiré. Ouvrez à nouveau la fonction.",
+        "es": "Este resultado ha caducado. Vuelve a abrir la función.",
+    },
+    "miniapp.card_changed": {
+        "en": "card changed; refresh before trying again",
+        "zh": "此结果已更新，请刷新后重试。",
+        "fr": "Ce résultat a changé. Actualisez avant de réessayer.",
+        "es": "Este resultado ha cambiado. Actualiza antes de reintentar.",
+    },
+    "miniapp.invalid_action": {
+        "en": "invalid action",
+        "zh": "此操作无效，请刷新后重试。",
+        "fr": "Action non valide. Actualisez et réessayez.",
+        "es": "Acción no válida. Actualiza e inténtalo de nuevo.",
+    },
+    "miniapp.no_reply": {
+        "en": "this card does not accept replies",
+        "zh": "此结果不接受回复。",
+        "fr": "Ce résultat n’accepte pas de réponse.",
+        "es": "Este resultado no acepta respuestas.",
+    },
+    "miniapp.unknown_command": {
+        "en": "unknown command",
+        "zh": "此功能不存在，请重新选择。",
+        "fr": "Fonction inconnue. Choisissez à nouveau.",
+        "es": "Función desconocida. Vuelve a elegir.",
+    },
+    "miniapp.receipt_required": {
+        "en": "receipt image required",
+        "zh": "请选择购物小票照片。",
+        "fr": "Choisissez une photo du ticket.",
+        "es": "Elige una foto del recibo.",
+    },
+    "miniapp.invalid_request": {
+        "en": "invalid request",
+        "zh": "请求无效，请检查信息后重试。",
+        "fr": "Requête non valide. Vérifiez les informations et réessayez.",
+        "es": "Solicitud no válida. Comprueba los datos e inténtalo de nuevo.",
+    },
+    "miniapp.limit": {
+        "en": "workspace action limit reached; reopen in one hour",
+        "zh": "已达到本次厨房会话操作上限，请一小时后重新打开。",
+        "fr": "Limite d’actions atteinte. Rouvrez la cuisine dans une heure.",
+        "es": "Límite de acciones alcanzado. Abre la cocina de nuevo en una hora.",
+    },
+    "miniapp.binding_unavailable": {
+        "en": "group binding is unavailable",
+        "zh": "暂时无法关联群组。",
+        "fr": "La connexion au groupe est indisponible.",
+        "es": "La conexión al grupo no está disponible.",
+    },
+    "miniapp.group_admin": {
+        "en": "Only a verified Telegram group administrator can connect this group.",
+        "zh": "只有经过验证的 Telegram 群组管理员才能关联此群组。",
+        "fr": "Seul un administrateur vérifié du groupe Telegram peut connecter ce groupe.",
+        "es": "Solo un administrador verificado del grupo de Telegram puede conectar este grupo.",
+    },
+    "miniapp.assistant_unavailable": {
+        "en": "Natural-language assistance is unavailable. Choose a feature below.",
+        "zh": "自然语言助手暂不可用，请选择一项功能。",
+        "fr": "L’assistant en langage naturel est indisponible. Choisissez une fonction.",
+        "es": "El asistente de lenguaje natural no está disponible. Elige una función.",
+    },
+    "miniapp.failed": {
+        "en": "The action could not finish. Check the result before trying again.",
+        "zh": "操作未能完成，请检查结果后再重试。",
+        "fr": "L’action n’a pas pu se terminer. Vérifiez le résultat avant de réessayer.",
+        "es": "La acción no pudo terminar. Comprueba el resultado antes de reintentar.",
+    },
+    "miniapp.invalid_json": {
+        "en": "invalid JSON",
+        "zh": "请求格式无效，请刷新后重试。",
+        "fr": "Format de requête non valide. Actualisez et réessayez.",
+        "es": "Formato de solicitud no válido. Actualiza e inténtalo de nuevo.",
+    },
+    "miniapp.object_required": {
+        "en": "JSON object required",
+        "zh": "请求内容无效，请刷新后重试。",
+        "fr": "Contenu de requête non valide. Actualisez et réessayez.",
+        "es": "Contenido de solicitud no válido. Actualiza e inténtalo de nuevo.",
+    },
+    "miniapp.receipt_format": {
+        "en": "upload a JPEG or PNG receipt, up to 10 MB",
+        "zh": "请上传 JPEG 或 PNG 小票照片，最大 10 MB。",
+        "fr": "Envoyez une photo du ticket au format JPEG ou PNG, 10 Mo maximum.",
+        "es": "Sube una foto del recibo en JPEG o PNG, de hasta 10 MB.",
+    },
+    "pantry.marked.ate": {
+        "en": "#{id} marked ate",
+        "zh": "#{id} 已标记为已吃",
+        "fr": "#{id} marqué comme consommé",
+        "es": "#{id} marcado como consumido",
+    },
+    "pantry.marked.toss": {
+        "en": "#{id} marked toss",
+        "zh": "#{id} 已标记为已丢弃",
+        "fr": "#{id} marqué comme jeté",
+        "es": "#{id} marcado como desechado",
+    },
+    "pantry.marked.delete": {
+        "en": "#{id} marked delete",
+        "zh": "#{id} 已移除",
+        "fr": "#{id} retiré",
+        "es": "#{id} eliminado",
+    },
+    "pantry.already_inactive": {
+        "en": "#{id} was already non-active",
+        "zh": "#{id} 已不在库存中",
+        "fr": "#{id} n’était déjà plus actif",
+        "es": "#{id} ya no estaba activo",
+    },
+    "pantry.snoozed": {
+        "en": "#{id} snoozed for {days}d",
+        "zh": "#{id} 已推迟提醒 {days} 天",
+        "fr": "Rappel de #{id} reporté de {days} j",
+        "es": "Aviso de #{id} pospuesto {days} d",
+    },
+    "pantry.not_active": {
+        "en": "#{id} is not active",
+        "zh": "#{id} 不在库存中",
+        "fr": "#{id} n’est plus actif",
+        "es": "#{id} ya no está activo",
+    },
+    "correct.no_changes": {
+        "en": "no changes detected",
+        "zh": "未检测到更改",
+        "fr": "Aucune modification détectée",
+        "es": "No se detectaron cambios",
+    },
+    "correct.parse_failed": {
+        "en": "couldn't parse that correction - try simpler wording",
+        "zh": "无法理解此修改，请尝试更简单的描述",
+        "fr": "Impossible de comprendre la correction. Essayez une formulation plus simple.",
+        "es": "No se pudo interpretar la corrección. Prueba con palabras más sencillas.",
+    },
+    "correct.reply_required": {
+        "en": "reply with the correction text",
+        "zh": "请回复需要修改的信息",
+        "fr": "Répondez avec le texte de la correction",
+        "es": "Responde con el texto de la corrección",
+    },
+    "correct.inactive": {
+        "en": "#{id} is {status}; cannot correct",
+        "zh": "#{id} 已{status}，无法修改",
+        "fr": "#{id} est {status} ; impossible de le corriger",
+        "es": "#{id} está {status}; no se puede corregir",
+    },
+    "item_status.active": {
+        "en": "active",
+        "zh": "在库",
+        "fr": "actif",
+        "es": "activo",
+    },
+    "item_status.eaten": {
+        "en": "eaten",
+        "zh": "吃完",
+        "fr": "consommé",
+        "es": "consumido",
+    },
+    "item_status.tossed": {
+        "en": "tossed",
+        "zh": "丢弃",
+        "fr": "jeté",
+        "es": "desechado",
+    },
+    "item_status.removed": {
+        "en": "removed",
+        "zh": "移除",
+        "fr": "retiré",
+        "es": "eliminado",
+    },
     "hosted_only": {
         "en": "This feature is available on the hosted Food Manager bot: https://t.me/foodie_manager_bot",
         "zh": "此功能可在托管版 Food Manager 机器人中使用：https://t.me/foodie_manager_bot",
@@ -103,7 +319,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "quota.degraded.cook": {
         "en": "AI quota used up. Your saved recipes still work: /favorites",
-        "zh": "AI 配额已用完。已保存的食谱仍可使用：/favorites",
+        "zh": "AI 配额已用完。收藏食谱仍可使用：/favorites",
         "fr": "Quota IA épuisé. Vos recettes enregistrées restent disponibles : /favorites",
         "es": "Cuota de IA agotada. Tus recetas guardadas siguen disponibles: /favorites",
     },
@@ -206,9 +422,9 @@ MESSAGES: dict[str, dict[str, str]] = {
     "item.tail.expired": {"en": "{n}d overdue", "zh": "已过期 {n}天",
                           "fr": "en retard de {n}j", "es": "vencido hace {n}d"},
     "item.tail.days": {"en": "({n}d)", "zh": "({n}天)", "fr": "({n}j)", "es": "({n}d)"},
-    "list.empty": {"en": "no items match this filter"},
+    "list.empty": {"en": "no items match this filter", "zh": "没有符合此筛选条件的食材", "fr": "Aucun aliment ne correspond à ce filtre", "es": "Ningún alimento coincide con este filtro"},
     "digest.title": {"en": "🥬 Pantry · {weekday}, {date}",
-                     "zh": "🥬 食品储藏 · {weekday}，{date}",
+                     "zh": "🥬 食材库存 · {weekday}，{date}",
                      "fr": "🥬 Garde-manger · {weekday} {date}",
                      "es": "🥬 Despensa · {weekday}, {date}"},
     "item.detail.quantity": {"en": "Quantity · {value}", "zh": "数量 · {value}", "fr": "Quantité · {value}", "es": "Cantidad · {value}"},
@@ -333,14 +549,14 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "favorites.empty": {
         "en": "No saved recipes yet. Tap ★ Save on a /cook result.",
-        "zh": "还没有保存的食谱。在 /cook 结果中点击 ★ Save。",
+        "zh": "还没有收藏食谱。在 /cook 结果中点击 ★ 收藏。",
         "fr": "Aucune recette sauvegardée. Appuyez sur ★ Save dans un résultat /cook.",
         "es": "Aún no hay recetas guardadas. Toca ★ Save en un resultado de /cook.",
     },
     "favorites.title": {
         "en": "★ Saved recipes · {n}",
-        "zh": "★ 已保存的食谱 · {n}",
-        "fr": "★ Recettes sauvegardées · {n}",
+        "zh": "★ 收藏食谱 · {n}",
+        "fr": "★ Recettes favorites · {n}",
         "es": "★ Recetas guardadas · {n}",
     },
     # -----------------------------------------------------------------------
@@ -432,7 +648,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "plan.not_enough": {
         "en": "Not enough pantry items to plan — /add a few things first.",
-        "zh": "食品储藏不足，无法规划 —— 请先 /add 一些食品。",
+        "zh": "食材库存不足，无法规划 —— 请先 /add 一些食材。",
         "fr": "Pas assez d'articles pour planifier — /add quelques articles d'abord.",
         "es": "No hay suficientes artículos para planificar — /add algunas cosas primero.",
     },
@@ -444,7 +660,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "plan.no_swap": {
         "en": "No other recipe found for that day — try again later.",
-        "zh": "找不到该天的其他菜谱 —— 请稍后再试。",
+        "zh": "找不到该天的其他食谱 —— 请稍后再试。",
         "fr": "Aucune autre recette trouvée pour ce jour — réessayez plus tard.",
         "es": "No se encontró otra receta para ese día — inténtalo más tarde.",
     },
@@ -487,7 +703,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "btn.plan.shop": {"en": "➕ Shopping list", "zh": "➕ 购物清单", "fr": "➕ Liste de courses", "es": "➕ Lista de compras"},
     "btn.plan.cancel": {"en": "❌ Cancel plan", "zh": "❌ 取消计划", "fr": "❌ Annuler le plan", "es": "❌ Cancelar plan"},
-    "btn.open_recipe": {"en": "🔗 Open recipe", "zh": "🔗 查看菜谱", "fr": "🔗 Ouvrir la recette", "es": "🔗 Abrir receta"},
+    "btn.open_recipe": {"en": "🔗 Open recipe", "zh": "🔗 查看食谱", "fr": "🔗 Ouvrir la recette", "es": "🔗 Abrir receta"},
     "meal.dinner": {"en": "Dinner", "zh": "晚餐", "fr": "Dîner", "es": "Cena"},
     "meal.lunch": {"en": "Lunch", "zh": "午餐", "fr": "Déjeuner", "es": "Almuerzo"},
     "meal.breakfast": {"en": "Breakfast", "zh": "早餐", "fr": "Petit-déjeuner", "es": "Desayuno"},
@@ -531,7 +747,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     "btn.more_recipes": {"en": "🔄 More", "zh": "🔄 更多", "fr": "🔄 Plus", "es": "🔄 Más"},
     "btn.adjust": {"en": "🎛 Adjust", "zh": "🎛 调整", "fr": "🎛 Ajuster", "es": "🎛 Ajustar"},
     "btn.more_cuisines": {"en": "More cuisines »", "zh": "更多菜系 »", "fr": "Plus de cuisines »", "es": "Más cocinas »"},
-    "cook.no_more": {"en": "No more recipes for these filters — try 🎛 Adjust.", "zh": "这些筛选没有更多菜谱了 —— 试试 🎛 调整。", "fr": "Plus de recettes pour ces filtres — essayez 🎛 Ajuster.", "es": "No hay más recetas para estos filtros — prueba 🎛 Ajustar."},
+    "cook.no_more": {"en": "No more recipes for these filters — try 🎛 Adjust.", "zh": "这些筛选没有更多食谱了 —— 试试 🎛 调整。", "fr": "Plus de recettes pour ces filtres — essayez 🎛 Ajuster.", "es": "No hay más recetas para estos filtros — prueba 🎛 Ajustar."},
     "btn.correct": {"en": "✏️ Correct", "zh": "✏️ 更正", "fr": "✏️ Corriger", "es": "✏️ Corregir"},
     "btn.remove": {"en": "❌ Remove", "zh": "❌ 移除", "fr": "❌ Retirer", "es": "❌ Quitar"},
     "btn.back_to_list": {"en": "⬅ Back to list", "zh": "⬅ 返回列表", "fr": "⬅ Retour à la liste", "es": "⬅ Volver a la lista"},
@@ -544,7 +760,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     "btn.correct_other": {"en": "💬 Something else…", "zh": "💬 其他…", "fr": "💬 Autre chose…", "es": "💬 Otra cosa…"},
     "btn.liked": {"en": "👍 Liked", "zh": "👍 喜欢", "fr": "👍 Aimé", "es": "👍 Me gusta"},
     "btn.disliked": {"en": "👎 Not for me", "zh": "👎 不喜欢", "fr": "👎 Pas pour moi", "es": "👎 No es para mí"},
-    "btn.save": {"en": "★ Save", "zh": "★ 保存", "fr": "★ Sauvegarder", "es": "★ Guardar"},
+    "btn.save": {"en": "★ Save", "zh": "★ 收藏", "fr": "★ Sauvegarder", "es": "★ Guardar"},
     "btn.shopping": {"en": "➕ Shopping list", "zh": "➕ 购物清单", "fr": "➕ Liste de courses", "es": "➕ Lista de compras"},
     "btn.cooked.meal": {
         "en": "✅ I cooked this",
@@ -998,8 +1214,8 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /tz <IANA> - 设置时区\n"
             "  /lang [en|zh|fr|es] - 设置语言\n"
             "  /digest_at <0..23> - 设置每日摘要时间\n"
-            "  /list [category|week|expired] - 显示食品储藏\n"
-            "  /pantry [receipt|category|expires|digest|<id>] - 交互式食品储藏管理\n"
+            "  /list [category|week|expired] - 显示食材库存\n"
+            "  /pantry [receipt|category|expires|digest|<id>] - 交互式食材库存管理\n"
             "  /add <自然语言> - 以自然语言提议添加食品。\n"
             "      每项显示差异；点击应用或取消。\n"
             "      提议10分钟后过期。\n"
@@ -1166,9 +1382,9 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /stats - last 30 days"
         ),
         "zh": (
-            "🥕 食品储藏命令：\n"
-            "  /list [category|week|expired] - 显示食品储藏\n"
-            "  /pantry [receipt|category|expires|digest|<id>] - 交互式食品储藏管理\n"
+            "🥕 食材库存命令：\n"
+            "  /list [category|week|expired] - 显示食材库存\n"
+            "  /pantry [receipt|category|expires|digest|<id>] - 交互式食材库存管理\n"
             "  /add <自然语言> - 以自然语言提议添加食品\n"
             "  /ate <id> - 标记为已食用\n"
             "  /toss <id> - 标记为已丢弃\n"
@@ -1212,10 +1428,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         ),
         "zh": (
             "🍳 做菜命令：\n"
-            "  /cook - 根据食品储藏获取菜谱\n"
+            "  /cook - 根据食材库存获取食谱\n"
             "  /plan [3-7] - 规划本周晚餐（默认5天）\n"
             "  /shopping - 查看待购清单；购买后点击\n"
-            "  /favorites - 查看已保存菜谱；点击可重新做菜"
+            "  /favorites - 查看收藏食谱；点击可重新做菜"
         ),
         "fr": (
             "🍳 Commandes cuisine :\n"
@@ -1328,7 +1544,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  “吃完了酸奶”\n"
             "  “三文鱼能放多久？”\n\n"
             "🌅 我每天早上会发送一份即将过期的摘要。\n"
-            "常用命令：/pantry（你有什么）· /cook（根据你的食品储藏推荐菜谱）· /help（其他所有命令）"
+            "常用命令：/pantry（你有什么）· /cook（根据你的食材库存推荐食谱）· /help（其他所有命令）"
         ),
         "fr": (
             "Voici comment m'utiliser :\n\n"
@@ -1360,7 +1576,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "Type /help to see all commands."
         ),
         "zh": (
-            "食品储藏机器人已就绪。\n"
+            "食材库存机器人已就绪。\n"
             "时区：{tz}（使用 /tz <IANA> 更改）\n"
             "每日摘要时间：{digest_hour}:00（使用 /digest_at <0..23> 更改）\n"
             "输入 /help 查看所有命令。"
@@ -1391,13 +1607,13 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "digest.pantry_clear": {
         "en": "Pantry is clear for the next 7 days.",
-        "zh": "未来7天食品储藏无到期提醒。",
+        "zh": "未来7天食材库存无到期提醒。",
         "fr": "Le garde-manger est vide pour les 7 prochains jours.",
         "es": "La despensa está despejada para los próximos 7 días.",
     },
     "pantry.all_clear": {
         "en": "Your pantry is clear.",
-        "zh": "您的食品储藏室已清空。",
+        "zh": "您的食材库存已清空。",
         "fr": "Votre garde-manger est vide.",
         "es": "Tu despensa está vacía.",
     },
@@ -1433,7 +1649,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "邀请已创建 - 一次性使用，24小时后过期。\n\n"
             "点击加入：{link}\n"
             "或将此发送给 /join：{code}\n\n"
-            "加入者将共享此家庭的食品储藏、购物清单和偏好设置。"
+            "加入者将共享此家庭的食材库存、购物清单和偏好设置。"
         ),
         "fr": (
             "Invitation créée - usage unique, expire dans 24 h.\n\n"
@@ -1450,7 +1666,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "join.success": {
         "en": "You've joined the household. You now share its pantry, shopping list, and preferences. Type /help to get started.",
-        "zh": "您已加入家庭。现在您将共享其食品储藏、购物清单和偏好设置。输入 /help 开始使用。",
+        "zh": "您已加入家庭。现在您将共享其食材库存、购物清单和偏好设置。输入 /help 开始使用。",
         "fr": "Vous avez rejoint le foyer. Vous partagez désormais son garde-manger, sa liste de courses et ses préférences. Tapez /help pour commencer.",
         "es": "Te has unido al hogar. Ahora compartes su despensa, lista de compras y preferencias. Escribe /help para empezar.",
     },
@@ -1552,7 +1768,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "可重复使用的邀请已创建 - 24小时内任何人都可加入。\n\n"
             "点击加入：{link}\n"
             "或将此发送给 /join：{code}\n\n"
-            "每位加入者都将共享此家庭的食品储藏、购物清单和偏好设置。"
+            "每位加入者都将共享此家庭的食材库存、购物清单和偏好设置。"
         ),
         "fr": (
             "Invitation réutilisable créée - tout le monde peut rejoindre avant son expiration dans 24 h.\n\n"
@@ -1842,7 +2058,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "cook.fetch_more_failed": {
         "en": "Couldn't fetch more recipes right now - try again.",
-        "zh": "暂时无法获取更多菜谱 - 请重试。",
+        "zh": "暂时无法获取更多食谱 - 请重试。",
         "fr": "Impossible de récupérer plus de recettes pour le moment - réessayez.",
         "es": "No se pudieron obtener más recetas ahora - inténtalo de nuevo.",
     },
@@ -1866,7 +2082,7 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     "cook.build_failed": {
         "en": "Couldn't build a recipe right now - try /cook again.",
-        "zh": "暂时无法生成菜谱 - 请重试 /cook。",
+        "zh": "暂时无法生成食谱 - 请重试 /cook。",
         "fr": "Impossible de créer une recette pour le moment - réessayez /cook.",
         "es": "No se pudo generar una receta ahora - intenta /cook de nuevo.",
     },

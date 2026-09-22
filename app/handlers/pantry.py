@@ -402,7 +402,7 @@ async def _terminal_cmd(
                 today=today,
             )
         except NotOwnerOrMissing:
-            await msg.answer(f"no item #{item_id}")
+            await msg.answer(t("pantry.no_item", user.lang, id=item_id))
             return
         if result.applied:
             log.info(
@@ -413,9 +413,9 @@ async def _terminal_cmd(
                     "action": action_word,
                 },
             )
-            await msg.answer(f"#{item_id} marked {action_word}")
+            await msg.answer(t(f"pantry.marked.{action_word}", user.lang, id=item_id))
         elif result.was_already:
-            await msg.answer(f"#{item_id} was already non-active")
+            await msg.answer(t("pantry.already_inactive", user.lang, id=item_id))
 
 
 async def handle_ate(
@@ -500,7 +500,7 @@ async def handle_snooze(
                 days=days,
             )
         except NotOwnerOrMissing:
-            await msg.answer(f"no item #{item_id}")
+            await msg.answer(t("pantry.no_item", user.lang, id=item_id))
             return
         except ValueError as exc:
             await msg.answer(str(exc))
@@ -514,9 +514,9 @@ async def handle_snooze(
                     "action": "snooze",
                 },
             )
-            await msg.answer(f"#{item_id} snoozed for {days}d")
+            await msg.answer(t("pantry.snoozed", user.lang, id=item_id, days=days))
         else:
-            await msg.answer(f"#{item_id} is not active")
+            await msg.answer(t("pantry.not_active", user.lang, id=item_id))
 
 
 async def _propose_and_send_correction(
@@ -547,7 +547,7 @@ async def _propose_and_send_correction(
         )
         return
     except NullDiff:
-        await msg.answer("no changes detected")
+        await msg.answer(t("correct.no_changes", user.lang))
         return
     except ProposeCorrectError as exc:
         await msg.answer(str(exc))
@@ -561,7 +561,7 @@ async def _propose_and_send_correction(
                 "error_class": type(exc).__name__,
             },
         )
-        await msg.answer("couldn't parse that correction - try simpler wording")
+        await msg.answer(t("correct.parse_failed", user.lang))
         return
 
     pending = create_pending(
@@ -627,10 +627,10 @@ async def handle_correct(
             return
         item = session.get(PantryItem, item_id)
         if item is None or item.household_id != user.household_id:
-            await msg.answer(f"no item #{item_id}")
+            await msg.answer(t("pantry.no_item", user.lang, id=item_id))
             return
         if item.status != "active":
-            await msg.answer(f"#{item_id} is {item.status}; cannot correct")
+            await msg.answer(t("correct.inactive", user.lang, id=item_id, status=t(f"item_status.{item.status}", user.lang)))
             return
         now = now_provider(user.tz)
         decision = admit(
@@ -688,14 +688,14 @@ async def handle_correct_reply(
         session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         item = session.get(PantryItem, item_id)
         if item is None or item.household_id != user.household_id:
-            await msg.answer(f"no item #{item_id}")
+            await msg.answer(t("pantry.no_item", user.lang, id=item_id))
             return
         if item.status != "active":
-            await msg.answer(f"#{item_id} is {item.status}; cannot correct")
+            await msg.answer(t("correct.inactive", user.lang, id=item_id, status=t(f"item_status.{item.status}", user.lang)))
             return
         user_text = (msg.text or "").strip()
         if not user_text:
-            await msg.answer("reply with the correction text")
+            await msg.answer(t("correct.reply_required", user.lang))
             return
         now = now_provider(user.tz)
         decision = admit(

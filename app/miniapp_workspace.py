@@ -30,6 +30,7 @@ from app.commands import parse_callback_request
 from app.handlers.meta import handle_nl_message, handle_photo
 from app.handlers.pantry import handle_correct_reply
 from app.handlers.plan import handle_plan_current
+from app.i18n import t
 
 log = logging.getLogger(__name__)
 COMMANDS = {name: (handler, deps) for name, handler, deps in _MESSAGE_COMMANDS}
@@ -40,6 +41,7 @@ MAX_IMAGE_BYTES = 10 * 1024 * 1024
 class Workspace:
     user_id: int
     household_id: int | None
+    lang: str = "en"
     id: str = field(default_factory=lambda: secrets.token_urlsafe(24))
     cards: dict[int, Any] = field(default_factory=dict)
     task: asyncio.Task | None = None
@@ -202,7 +204,7 @@ class WorkspaceRuntime:
             "hosted_features_enabled": hosted_features_enabled,
         }
 
-    def get(self, user_id, household_id):
+    def get(self, user_id, household_id, lang="en"):
         now = time.monotonic()
         for key, old in list(self.workspaces.items()):
             if not old.busy and now - old.touched > 3600:
@@ -217,9 +219,10 @@ class WorkspaceRuntime:
             workspace.household_id = household_id
         if workspace is None:
             if len(self.workspaces) >= 1000:
-                raise web.HTTPServiceUnavailable(text="workspace capacity reached")
+                raise web.HTTPServiceUnavailable(text=t("miniapp.capacity", lang))
             workspace = Workspace(user_id, household_id)
             self.workspaces[user_id] = workspace
+        workspace.lang = lang
         workspace.touched = now
         return workspace
 
@@ -236,33 +239,33 @@ class WorkspaceRuntime:
     def submit(self, workspace, body, *, image=None):
         request_id = body.get("requestId")
         if not isinstance(request_id, str) or not 1 <= len(request_id) <= 100:
-            raise web.HTTPBadRequest(text="request ID required")
+            raise web.HTTPBadRequest(text=t("miniapp.request_id", workspace.lang))
         if body.get("workspaceId") != workspace.id:
-            raise web.HTTPConflict(text="workspace expired; reload before trying again")
+            raise web.HTTPConflict(text=t("miniapp.expired", workspace.lang))
         if request_id in workspace.requests:
             return
         if workspace.busy:
-            raise web.HTTPConflict(text="wait for the current action to finish")
+            raise web.HTTPConflict(text=t("miniapp.busy", workspace.lang))
         kind = body.get("kind")
         if not isinstance(kind, str):
-            raise web.HTTPBadRequest(text="invalid request kind")
+            raise web.HTTPBadRequest(text=t("miniapp.invalid_kind", workspace.lang))
         text = body.get("text", "")
         if not isinstance(text, str) or len(text) > 4000:
-            raise web.HTTPBadRequest(text="text must be at most 4000 characters")
+            raise web.HTTPBadRequest(text=t("miniapp.text_length", workspace.lang))
         message = None
         callback_data = None
         if kind in {"callback", "reply"}:
             if type(body.get("cardId")) is not int:
-                raise web.HTTPBadRequest(text="invalid card ID")
+                raise web.HTTPBadRequest(text=t("miniapp.invalid_card", workspace.lang))
             message = workspace.cards.get(body.get("cardId"))
             if message is None:
-                raise web.HTTPConflict(text="card expired; open the feature again")
+                raise web.HTTPConflict(text=t("miniapp.card_expired", workspace.lang))
             if kind == "callback":
                 try:
                     revision, raw_row, raw_col = body["action"].split(":")
                     if revision != message.revision:
                         raise web.HTTPConflict(
-                            text="card changed; refresh before trying again"
+                            text=t("miniapp.card_changed", workspace.lang)
                         )
                     row, col = int(raw_row), int(raw_col)
                     if row < 0 or col < 0:
@@ -279,24 +282,24 @@ class WorkspaceRuntime:
                     TypeError,
                     ValueError,
                 ) as exc:
-                    raise web.HTTPBadRequest(text="invalid action") from exc
+                    raise web.HTTPBadRequest(text=t("miniapp.invalid_action", workspace.lang)) from exc
             elif not getattr(message.reply_markup, "force_reply", False):
-                raise web.HTTPBadRequest(text="this card does not accept replies")
+                raise web.HTTPBadRequest(text=t("miniapp.no_reply", workspace.lang))
         elif kind == "command":
             if not isinstance(body.get("command"), str) or body["command"] not in {
                 *COMMANDS,
                 "plan_current",
             }:
-                raise web.HTTPBadRequest(text="unknown command")
+                raise web.HTTPBadRequest(text=t("miniapp.unknown_command", workspace.lang))
         elif kind == "photo":
             if image is None:
-                raise web.HTTPBadRequest(text="receipt image required")
+                raise web.HTTPBadRequest(text=t("miniapp.receipt_required", workspace.lang))
         elif kind != "text" or not text.strip():
-            raise web.HTTPBadRequest(text="invalid request")
+            raise web.HTTPBadRequest(text=t("miniapp.invalid_request", workspace.lang))
         # Retain retry IDs for the lifetime of this workspace, with a hard bound.
         if len(workspace.requests) >= 2000:
             raise web.HTTPConflict(
-                text="workspace action limit reached; reopen in one hour"
+                text=t("miniapp.limit", workspace.lang)
             )
         workspace.requests.add(request_id)
         workspace.notices = []
@@ -347,7 +350,7 @@ class WorkspaceRuntime:
                 if command == "bind":
                     if not self.deps["hosted_features_enabled"] or self.bot is None:
                         raise web.HTTPServiceUnavailable(
-                            text="group binding is unavailable"
+                            text=t("miniapp.binding_unavailable", workspace.lang)
                         )
                     group_id = int(body.get("text", ""))
                     chat = await self.bot.get_chat(group_id)
@@ -357,7 +360,7 @@ class WorkspaceRuntime:
                         "supergroup",
                     } or member.status not in {"creator", "administrator"}:
                         raise web.HTTPForbidden(
-                            text="Only a verified Telegram group administrator can connect this group."
+                            text=t("miniapp.group_admin", workspace.lang)
                         )
                     event.chat = SimpleNamespace(id=group_id, type=chat.type)
                 if command == "plan_current":
@@ -434,7 +437,7 @@ class WorkspaceRuntime:
                 )
             else:
                 await event.answer(
-                    "Natural-language assistance is unavailable. Choose a feature below."
+                    t("miniapp.assistant_unavailable", workspace.lang)
                 )
             # Receipt refinement and cook generation can spawn further work.
             index = 0
@@ -445,9 +448,7 @@ class WorkspaceRuntime:
             workspace.error = exc.text
         except Exception:
             log.exception("mini_app_action_failed", extra={"kind": body.get("kind")})
-            workspace.error = (
-                "The action could not finish. Check the result before trying again."
-            )
+            workspace.error = t("miniapp.failed", workspace.lang)
         finally:
             for child in children:
                 if not child.done():

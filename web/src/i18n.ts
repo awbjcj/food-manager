@@ -111,7 +111,7 @@ const english = {
 
 export type MessageKey = keyof typeof english
 
-const messages: Record<Locale, Record<MessageKey, string>> = {
+export const messages: Record<Locale, Record<MessageKey, string>> = {
   en: english,
   zh: {
     'brand.name': 'Food Manager',
@@ -148,13 +148,13 @@ const messages: Record<Locale, Record<MessageKey, string>> = {
     'home.myHousehold': '我的家庭',
     'home.manage': '管理',
     'home.quickAccess': '快捷入口',
-    'shortcut.pantry': '食品储藏',
+    'shortcut.pantry': '食材库存',
     'shortcut.cook': '用储藏食材做菜',
     'shortcut.plan': '用餐计划',
     'shortcut.shopping': '购物清单',
-    'shortcut.favorites': '已保存的菜谱',
+    'shortcut.favorites': '收藏食谱',
     'shortcut.preferences': '饮食偏好',
-    'shortcut.stats': '储藏统计',
+    'shortcut.stats': '库存统计',
     'count.receipt.one': '{count} 张收据',
     'count.receipt.many': '{count} 张收据',
     'count.action.one': '{count} 次 AI 操作',
@@ -191,7 +191,7 @@ const messages: Record<Locale, Record<MessageKey, string>> = {
     'account.timeZone': '时区',
     'account.preferences': '偏好设置',
     'account.language': '语言',
-    'account.provider': 'AI 提供商',
+    'account.provider': 'AI 服务商',
     'account.save': '保存更改',
     'account.openChat': '打开机器人聊天',
     'account.subscription': '订阅',
@@ -243,7 +243,7 @@ const messages: Record<Locale, Record<MessageKey, string>> = {
     'shortcut.cook': 'Cuisiner avec le garde-manger',
     'shortcut.plan': 'Plan de repas',
     'shortcut.shopping': 'Liste de courses',
-    'shortcut.favorites': 'Recettes sauvegardées',
+    'shortcut.favorites': 'Recettes favorites',
     'shortcut.preferences': 'Préférences alimentaires',
     'shortcut.stats': 'Statistiques du garde-manger',
     'count.receipt.one': '{count} ticket',
@@ -335,7 +335,7 @@ const messages: Record<Locale, Record<MessageKey, string>> = {
     'shortcut.plan': 'Plan de comidas',
     'shortcut.shopping': 'Lista de compras',
     'shortcut.favorites': 'Recetas guardadas',
-    'shortcut.preferences': 'Preferencias de comida',
+    'shortcut.preferences': 'Preferencias alimentarias',
     'shortcut.stats': 'Estadísticas de la despensa',
     'count.receipt.one': '{count} recibo',
     'count.receipt.many': '{count} recibos',

@@ -22,6 +22,7 @@ from app.cook.models import (
     RecipeCandidates,
     SelectedItems,
 )
+from app.i18n import t
 from app.llm import CorrectionDiff, LLMResult, ParsedItem, ParseResult, ProposedAddItem
 from app.miniapp_workspace import COMMANDS, MAX_IMAGE_BYTES, WorkspaceRuntime
 from app.models import (
@@ -170,6 +171,61 @@ async def state(client, user=42):
     )
     assert response.status == 200, await response.text()
     return await response.json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lang", ["zh", "fr", "es"])
+async def test_workspace_validation_uses_saved_language(kitchen, lang):
+    with kitchen.sessions() as session:
+        user = session.get(User, 42)
+        user.lang = lang
+        session.add(user)
+        session.commit()
+    async with TestClient(TestServer(kitchen.app)) as client:
+        current = await state(client)
+        for payload, status, key in [
+            ({"workspaceId": "old", "kind": "command", "command": "pantry"}, 409, "miniapp.expired"),
+            ({"kind": "command", "command": "missing"}, 400, "miniapp.unknown_command"),
+            ({"kind": "callback", "cardId": -1, "action": "old:0:0"}, 409, "miniapp.card_expired"),
+        ]:
+            response = await client.post(
+                "/api/workspace/actions", headers={"Authorization": _auth(42)},
+                json={"workspaceId": current["id"], "requestId": str(uuid.uuid4()), **payload},
+            )
+            assert response.status == status
+            assert (await response.json())["error"] == t(key, lang) != t(key, "en")
+        response = await client.post(
+            "/api/workspace/photo", headers={"Authorization": _auth(42)}, data=b"not a photo",
+        )
+        assert response.status == 400
+        assert (await response.json())["error"] == t("miniapp.receipt_format", lang)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lang", ["zh", "fr", "es"])
+@pytest.mark.parametrize("command", ["ate", "toss", "delete", "snooze"])
+async def test_pantry_action_results_are_translated(kitchen, lang, command):
+    with kitchen.sessions() as session:
+        user = session.get(User, 42)
+        user.lang = lang
+        session.add(user)
+        item = session.exec(select(PantryItem).where(PantryItem.household_id == 1)).first()
+        item_id = item.id
+        session.commit()
+    async with TestClient(TestServer(kitchen.app)) as client:
+        result = await action(client, kind="command", command=command, text=f"{item_id} 2" if command == "snooze" else str(item_id))
+        key = "pantry.snoozed" if command == "snooze" else f"pantry.marked.{command}"
+        assert result["cards"][-1]["text"] == t(key, lang, id=item_id, days=2)
+        missing = await action(client, kind="command", command=command, text="9999 2" if command == "snooze" else "9999")
+        assert missing["cards"][-1]["text"] == t("pantry.no_item", lang, id=9999)
+
+
+@pytest.mark.asyncio
+async def test_workspace_language_changes_without_reopening(kitchen):
+    async with TestClient(TestServer(kitchen.app)) as client:
+        await action(client, kind="command", command="lang", text="fr")
+        result = await action(client, kind="text", text="hello")
+        assert result["cards"][-1]["text"] == t("miniapp.assistant_unavailable", "fr")
 
 
 async def finished(client, user=42):

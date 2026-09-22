@@ -3,6 +3,7 @@ from datetime import date as _date
 from types import SimpleNamespace
 
 from app.correction_service import AddPayload, CorrectPayload
+from app.i18n import t
 from app.ingest_service import IngestSummary
 from app.pantry_service import Stats, UndoResult
 from app.profile_service import FoodProfile
@@ -229,7 +230,8 @@ def test_shopping_empty_zh():
 
 def test_favorites_empty_zh():
     out = render_favorites([], lang="zh")
-    assert "保存的食谱" in out
+    assert "收藏食谱" in out
+    assert t("btn.save", "zh") in out
 
 
 # ---------------------------------------------------------------------------

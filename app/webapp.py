@@ -16,7 +16,7 @@ from app.billing.meter import snapshot
 from app.billing.plans import SKUS, TIERS, sku_for
 from app.client_set import EMPTY_CLIENTS
 from app.handler_support import resolve_authorization
-from app.i18n import LANGS
+from app.i18n import LANGS, t
 from app.miniapp_workspace import COMMANDS, MAX_IMAGE_BYTES, WorkspaceRuntime
 from app.models import Household, Subscription, User
 from app.webapp_auth import MiniAppAuthError, MiniAppIdentity, validate_init_data
@@ -155,7 +155,8 @@ class MiniAppApi:
             ):
                 raise MiniAppAuthError("user is not authorized")
             household_id = user.household_id if user else None
-        return self.workspace.get(identity.telegram_id, household_id)
+            lang = user.lang if user else (identity.language_code or "en").split("-")[0]
+        return self.workspace.get(identity.telegram_id, household_id, lang=lang)
 
     async def workspace_state(self, request):
         workspace = self.workspace_identity(request)
@@ -174,9 +175,9 @@ class MiniAppApi:
         try:
             body = await request.json()
         except (ValueError, UnicodeError) as exc:
-            raise web.HTTPBadRequest(text="invalid JSON") from exc
+            raise web.HTTPBadRequest(text=t("miniapp.invalid_json", workspace.lang)) from exc
         if not isinstance(body, dict):
-            raise web.HTTPBadRequest(text="JSON object required")
+            raise web.HTTPBadRequest(text=t("miniapp.object_required", workspace.lang))
         if workspace.household_id is None and (
             body.get("kind") != "command"
             or not isinstance(body.get("command"), str)
@@ -196,7 +197,7 @@ class MiniAppApi:
         jpeg = image.startswith(b"\xff\xd8\xff")
         png = image.startswith(b"\x89PNG\r\n\x1a\n")
         if not image or len(image) > MAX_IMAGE_BYTES or not (jpeg or png):
-            raise web.HTTPBadRequest(text="upload a JPEG or PNG receipt, up to 10 MB")
+            raise web.HTTPBadRequest(text=t("miniapp.receipt_format", workspace.lang))
         self.workspace.submit(
             workspace,
             {

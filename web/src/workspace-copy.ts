@@ -1,6 +1,6 @@
-import type { Locale } from './i18n'
+import { t, type Locale, type MessageKey } from './i18n.ts'
 
-const copy = {
+export const workspaceCopy = {
   kitchen: ['Kitchen', '厨房', 'Cuisine', 'Cocina'],
   subtitle: ['Manage your food, from receipt to dinner.', '从购物小票到晚餐，在这里管理食物。', 'Gérez vos aliments, du ticket au dîner.', 'Gestiona tus alimentos, del recibo a la cena.'],
   pantryGroup: ['Pantry', '食材库存', 'Garde-manger', 'Despensa'],
@@ -42,8 +42,23 @@ const copy = {
   start: ['Welcome & setup', '欢迎与初始化', 'Accueil et configuration', 'Bienvenida y configuración'],
   text: ['Ask your kitchen assistant', '询问厨房助手', 'Demander à votre assistant', 'Preguntar al asistente'],
   run: ['Continue', '继续', 'Continuer', 'Continuar'],
+  working: ['Working…', '处理中…', 'En cours…', 'En curso…'],
+  connecting: ['Loading your kitchen…', '正在加载厨房…', 'Chargement de votre cuisine…', 'Cargando tu cocina…'],
+  categories: ['Kitchen categories', '厨房功能分类', 'Catégories de la cuisine', 'Categorías de la cocina'],
+  choose: ['Choose an option', '请选择', 'Choisissez une option', 'Elige una opción'],
+  choosePhoto: ['Choose a photo', '选择照片', 'Choisir une photo', 'Elegir una foto'],
+  noPhoto: ['No photo selected', '尚未选择照片', 'Aucune photo sélectionnée', 'Ninguna foto seleccionada'],
+  pantryHint: ['Track your food, update details, and reduce waste.', '管理食材、更新信息，减少浪费。', 'Suivez vos aliments, modifiez leurs détails et réduisez le gaspillage.', 'Controla tus alimentos, actualiza sus datos y reduce el desperdicio.'],
+  mealsHint: ['Find recipes and plan meals around what you have.', '利用现有食材查找食谱、安排餐食。', 'Trouvez des recettes et planifiez vos repas avec vos aliments.', 'Encuentra recetas y planifica comidas con lo que tienes.'],
+  householdHint: ['Manage the people who share your kitchen.', '管理共享厨房的家庭成员。', 'Gérez les personnes qui partagent votre cuisine.', 'Gestiona las personas que comparten tu cocina.'],
+  settingsHint: ['Personalize your kitchen and find help.', '个性化设置厨房并获取帮助。', 'Personnalisez votre cuisine et trouvez de l’aide.', 'Personaliza tu cocina y encuentra ayuda.'],
+  ready: ['Ready when you are', '准备就绪', 'Tout est prêt', 'Todo listo'],
+  confirmAction: ['Confirm change', '确认更改', 'Confirmer', 'Confirmar cambio'],
+  invalidRequest: ['Check the details and try again.', '请检查填写的信息后重试。', 'Vérifiez les informations et réessayez.', 'Comprueba los datos y vuelve a intentarlo.'],
+  conflict: ['Refresh the results before trying again. This action may have already completed.', '请先刷新结果再重试，此操作可能已完成。', 'Actualisez les résultats avant de réessayer. Cette action est peut-être déjà terminée.', 'Actualiza los resultados antes de reintentar. Puede que esta acción ya haya terminado.'],
+  unavailable: ['This feature is temporarily unavailable. Try again later.', '此功能暂时不可用，请稍后重试。', 'Cette fonction est temporairement indisponible. Réessayez plus tard.', 'Esta función no está disponible temporalmente. Inténtalo más tarde.'],
   loading: ['Working… You can keep this page open.', '处理中，请稍候…', 'En cours… Gardez cette page ouverte.', 'En curso… Puedes mantener esta página abierta.'],
-  refresh: ['Refresh results', '刷新结果', 'Actualiser les résultats', 'Actualizar resultados'],
+  refresh: ['Refresh', '刷新', 'Actualiser', 'Actualizar'],
   empty: ['Choose a feature to get started. Results and next steps appear here.', '选择一项功能开始。结果和下一步操作将显示在这里。', 'Choisissez une fonction. Les résultats et les étapes suivantes apparaîtront ici.', 'Elige una función. Los resultados y próximos pasos aparecerán aquí.'],
   results: ['Your activity', '操作结果', 'Votre activité', 'Tu actividad'],
   details: ['Details', '详细信息', 'Détails', 'Detalles'],
@@ -81,9 +96,18 @@ const copy = {
   error: ['Could not connect. Refresh to check whether your action completed before trying again.', '无法连接。重试前请刷新，确认操作是否已完成。', 'Connexion impossible. Actualisez pour vérifier le résultat avant de réessayer.', 'No se pudo conectar. Actualiza para comprobar el resultado antes de reintentar.'],
   access: ['Access could not be verified. Reopen the app from Telegram and check your household membership.', '无法验证访问权限。请从 Telegram 重新打开应用，并确认家庭成员身份。', 'Accès non vérifié. Rouvrez l’application depuis Telegram et vérifiez votre adhésion au foyer.', 'No se pudo verificar el acceso. Abre la aplicación desde Telegram y comprueba tu membresía.'],
   onboarding: ['Start your kitchen or join with an invitation.', '创建厨房，或使用邀请码加入家庭。', 'Créez votre cuisine ou rejoignez un foyer avec une invitation.', 'Crea tu cocina o únete con una invitación.'],
-} as const
+} as const satisfies Record<string, readonly [string, string, string, string]>
 
-export type WorkspaceKey = keyof typeof copy
+export type WorkspaceKey = keyof typeof workspaceCopy
+// Shared nouns always use the account/home catalog so the glossary cannot drift.
+const shared: Partial<Record<WorkspaceKey, MessageKey>> = {
+  pantryGroup: 'shortcut.pantry', householdGroup: 'account.household',
+  cook: 'shortcut.cook', shopping: 'shortcut.shopping', favorites: 'shortcut.favorites',
+  prefs: 'shortcut.preferences', stats: 'shortcut.stats', tz: 'account.timeZone',
+  lang: 'account.language', llm: 'account.provider',
+}
 export function w(locale: Locale, key: WorkspaceKey): string {
-  return copy[key][(['en', 'zh', 'fr', 'es'] as const).indexOf(locale)]
+  const sharedKey = shared[key]
+  if (sharedKey) return t(locale, sharedKey)
+  return workspaceCopy[key][(['en', 'zh', 'fr', 'es'] as const).indexOf(locale)]
 }

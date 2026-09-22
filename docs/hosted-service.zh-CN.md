@@ -30,6 +30,8 @@ Food Manager 能把购物小票转换成家庭共享的智能食品库，在食�
 
 Mini App 托管于 [food-manager-production.up.railway.app](https://food-manager-production.up.railway.app)。请从机器人菜单中的**打开应用**按钮进入，以便 Telegram 安全验证你的账户。
 
+本源码版本中的厨房工作区详见 [Mini App 操作指南](mini-app.zh-CN.md)。托管服务需要部署此版本后才能使用这些功能。
+
 ## 可直接分享的推广文案
 
 > 少浪费食物，更轻松地决定吃什么。Food Manager 能把 Telegram 中的购物小票照片转换成家庭共享食品库，发送临期提醒，并利用已有食材生成菜谱和每周晚餐计划。免费试用：https://t.me/foodie_manager_bot

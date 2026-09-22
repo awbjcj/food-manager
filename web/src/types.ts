@@ -1,4 +1,22 @@
-export type Tab = 'home' | 'plans' | 'account'
+export type Tab = 'home' | 'kitchen' | 'plans' | 'account'
+
+export interface WorkspaceCard {
+  id: number
+  text: string
+  buttons: { text: string; url: string | null; action: string | null }[][]
+  reply: boolean
+  document: { name: string; data: string } | null
+}
+
+export interface WorkspaceState {
+  id: string
+  busy: boolean
+  cards: WorkspaceCard[]
+  notices: string[]
+  error: string | null
+  registered?: boolean
+  hostedFeaturesEnabled?: boolean
+}
 
 export interface PlanOption {
   code: string

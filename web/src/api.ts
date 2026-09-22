@@ -1,4 +1,4 @@
-import type { AccountData } from './types'
+import type { AccountData, WorkspaceState } from './types'
 
 const demoMode = import.meta.env.VITE_DEMO_MODE === 'true'
 
@@ -41,11 +41,32 @@ function headers(): HeadersInit {
   }
 }
 
+export class ApiError extends Error {
+  constructor(message: string, public status: number) { super(message) }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { ...init, headers: { ...headers(), ...init?.headers } })
   const body = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(body.error || 'Something went wrong')
+  if (!response.ok) throw new ApiError(body.error || 'Something went wrong', response.status)
   return body as T
+}
+
+export async function loadWorkspace(): Promise<WorkspaceState> {
+  return request('/api/workspace')
+}
+
+export async function workspaceAction(workspaceId: string, action: object): Promise<WorkspaceState> {
+  return request('/api/workspace/actions', {
+    method: 'POST', body: JSON.stringify({ ...action, workspaceId, requestId: crypto.randomUUID() }),
+  })
+}
+
+export async function uploadReceipt(workspaceId: string, file: File): Promise<WorkspaceState> {
+  return request('/api/workspace/photo', {
+    method: 'POST', body: file,
+    headers: { 'Content-Type': file.type, 'X-Workspace-Id': workspaceId, 'X-Request-Id': crypto.randomUUID() },
+  })
 }
 
 export async function loadAccount(): Promise<AccountData> {

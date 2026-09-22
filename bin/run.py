@@ -597,6 +597,13 @@ async def _amain(settings: Settings) -> None:
             hosted_features_enabled=settings.hosted_features_enabled,
             allowed_telegram_user_id=settings.allowed_telegram_user_id,
             reschedule=reschedule,
+            clients=clients,
+            bot=bot,
+            unschedule=unschedule,
+            translation_llm=translation_llm,
+            recipe_sources=recipe_sources,
+            intent_agent=intent_agent,
+            composer=composer,
         )
     )
     await web_runner.setup()

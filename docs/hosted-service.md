@@ -45,6 +45,10 @@ The Mini App is hosted at
 Open it from the bot's **Open app** menu button so Telegram can authenticate
 your account securely.
 
+For the Kitchen workspace available in this source version, see the
+[Mini App workflow guide](mini-app.md). Availability on the hosted service depends
+on deploying this version.
+
 ## Share-ready promotional copy
 
 > Waste less food and decide what to cook with less effort. Food Manager turns

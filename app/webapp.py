@@ -1,4 +1,4 @@
-"""Telegram Mini App HTTP surface for account and subscription management."""
+"""Authenticated Telegram Mini App account, billing, and workspace HTTP surface."""
 
 from __future__ import annotations
 
@@ -14,8 +14,10 @@ from sqlmodel import Session, func, select
 from app.billing.entitlement import effective_tier, get_or_create_subscription
 from app.billing.meter import snapshot
 from app.billing.plans import SKUS, TIERS, sku_for
+from app.client_set import EMPTY_CLIENTS
 from app.handler_support import resolve_authorization
 from app.i18n import LANGS
+from app.miniapp_workspace import COMMANDS, MAX_IMAGE_BYTES, WorkspaceRuntime
 from app.models import Household, Subscription, User
 from app.webapp_auth import MiniAppAuthError, MiniAppIdentity, validate_init_data
 
@@ -128,6 +130,7 @@ class MiniAppApi:
         hosted_features_enabled: bool,
         allowed_telegram_user_id: int | None,
         reschedule: Callable[[User], None] | None,
+        workspace: WorkspaceRuntime,
     ) -> None:
         self.session_factory = session_factory
         self.bot_token = bot_token
@@ -138,6 +141,72 @@ class MiniAppApi:
         self.hosted_features_enabled = hosted_features_enabled
         self.allowed_telegram_user_id = allowed_telegram_user_id
         self.reschedule = reschedule
+        self.workspace = workspace
+
+    def workspace_identity(self, request):
+        identity = self.identity(request)
+        with self.session_factory() as session:
+            user = session.get(User, identity.telegram_id)
+            if user is not None:
+                user = self.authorized_user(session, identity)
+            elif (
+                not self.hosted_features_enabled
+                and identity.telegram_id != self.allowed_telegram_user_id
+            ):
+                raise MiniAppAuthError("user is not authorized")
+            household_id = user.household_id if user else None
+        return self.workspace.get(identity.telegram_id, household_id)
+
+    async def workspace_state(self, request):
+        workspace = self.workspace_identity(request)
+        return web.json_response(
+            {
+                **workspace.snapshot(),
+                "commands": list(COMMANDS),
+                "registered": workspace.household_id is not None,
+                "hostedFeaturesEnabled": self.hosted_features_enabled,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def workspace_action(self, request):
+        workspace = self.workspace_identity(request)
+        try:
+            body = await request.json()
+        except (ValueError, UnicodeError) as exc:
+            raise web.HTTPBadRequest(text="invalid JSON") from exc
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="JSON object required")
+        if workspace.household_id is None and (
+            body.get("kind") != "command"
+            or not isinstance(body.get("command"), str)
+            or body.get("command") not in {"start", "join"}
+        ):
+            raise MiniAppAuthError("start or join a household first")
+        self.workspace.submit(workspace, body)
+        return web.json_response(workspace.snapshot(), status=202)
+
+    async def workspace_photo(self, request):
+        workspace = self.workspace_identity(request)
+        if workspace.household_id is None:
+            raise MiniAppAuthError("start or join a household first")
+        image = await request.read()
+        # Restrict uploads to formats supported by every image provider. Signature
+        # checks also prevent accepting an arbitrary file with a forged MIME type.
+        jpeg = image.startswith(b"\xff\xd8\xff")
+        png = image.startswith(b"\x89PNG\r\n\x1a\n")
+        if not image or len(image) > MAX_IMAGE_BYTES or not (jpeg or png):
+            raise web.HTTPBadRequest(text="upload a JPEG or PNG receipt, up to 10 MB")
+        self.workspace.submit(
+            workspace,
+            {
+                "kind": "photo",
+                "requestId": request.headers.get("X-Request-Id"),
+                "workspaceId": request.headers.get("X-Workspace-Id"),
+            },
+            image=image,
+        )
+        return web.json_response(workspace.snapshot(), status=202)
 
     def identity(self, request: web.Request) -> MiniAppIdentity:
         header = request.headers.get("Authorization", "")
@@ -321,7 +390,27 @@ def build_web_app(
     hosted_features_enabled: bool = True,
     allowed_telegram_user_id: int | None = None,
     reschedule: Callable[[User], None] | None = None,
+    clients=None,
+    bot=None,
+    unschedule=None,
+    translation_llm=None,
+    recipe_sources=(),
+    intent_agent=None,
+    composer=None,
 ) -> web.Application:
+    workspace = WorkspaceRuntime(
+        session_factory=session_factory,
+        clients=clients or EMPTY_CLIENTS,
+        bot=bot,
+        reschedule=reschedule,
+        unschedule=unschedule,
+        translation_llm=translation_llm,
+        recipe_sources=recipe_sources,
+        intent_agent=intent_agent,
+        composer=composer,
+        payments=payments if hosted_features_enabled and billing_enabled else None,
+        hosted_features_enabled=hosted_features_enabled,
+    )
     api = MiniAppApi(
         session_factory=session_factory,
         bot_token=bot_token,
@@ -332,14 +421,21 @@ def build_web_app(
         hosted_features_enabled=hosted_features_enabled,
         allowed_telegram_user_id=allowed_telegram_user_id,
         reschedule=reschedule,
+        workspace=workspace,
     )
-    app = web.Application(middlewares=[error_middleware])
+    app = web.Application(
+        middlewares=[error_middleware], client_max_size=MAX_IMAGE_BYTES + 1
+    )
+    app.on_cleanup.append(workspace.close)
 
     async def health(_request: web.Request) -> web.Response:
         return web.json_response({"ok": True})
 
     app.router.add_get("/healthz", health)
     app.router.add_get("/api/account", api.account)
+    app.router.add_get("/api/workspace", api.workspace_state)
+    app.router.add_post("/api/workspace/actions", api.workspace_action)
+    app.router.add_post("/api/workspace/photo", api.workspace_photo)
     app.router.add_patch("/api/account", api.update_account)
     app.router.add_post("/api/checkout", api.checkout)
     app.router.add_post("/api/subscription/cancel", api.cancel_subscription)

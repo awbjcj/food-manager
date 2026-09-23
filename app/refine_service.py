@@ -169,12 +169,13 @@ class AnthropicSearchClient(ShelfLifeSearchClient):
         from app.llm import (  # local import avoids cycle
             _PRICE_MICROS_PER_TOKEN_BY_MODEL,
             _anthropic_search_cost_micros,
+            _reasoning_max_tokens,
         )
         prompt = f"Item: {name}" + (f" (category: {category})" if category else "")
         try:
             msg = await self._sdk.messages.create(
                 model=self._model,
-                max_tokens=512,
+                max_tokens=_reasoning_max_tokens(self._model, 512),
                 system=SEARCH_SYSTEM_PROMPT,
                 tools=[{"type": "web_search_20250305", "name": "web_search",
                         "max_uses": self._max_uses}],

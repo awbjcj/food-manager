@@ -15,6 +15,7 @@ from app.llm import (
     _extract_json_text,
     _extract_openai_parsed,
     _openai_search_cost_micros,
+    _reasoning_max_tokens,
 )
 from app.llm_transport import is_retryable_transport_error, with_transport_retry
 
@@ -77,7 +78,7 @@ class _AnthropicJSONClient:
         return await with_transport_retry(
             lambda: self._sdk.messages.create(
                 model=self._model,
-                max_tokens=2048,
+                max_tokens=_reasoning_max_tokens(self._model, 2048),
                 system=system,
                 tools=tools,
                 messages=[{"role": "user", "content": user_content}],
@@ -184,7 +185,7 @@ class _OpenAIJSONClient:
             "tools": tools,
             "reasoning": _OPENAI_REASONING,
             "text_format": model_cls,
-            "max_output_tokens": 2048,
+            "max_output_tokens": _reasoning_max_tokens(self._model, 2048),
         }
         if self._web_search and self._max_tool_calls is not None:
             kwargs["max_tool_calls"] = self._max_tool_calls

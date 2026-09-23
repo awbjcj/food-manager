@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.llm import (
+    AnthropicLLMClient,
     AnthropicTextLLMClient,
     CorrectionDiff,
     OpenAILLMClient,
@@ -196,8 +197,31 @@ def test_cost_micros_prices_openai_models():
     assert _cost_micros(usage, "gpt-5.4") == 5500
     # gpt-5.4-mini: 1000*0.75 + 200*4.5 = 1650
     assert _cost_micros(usage, "gpt-5.4-mini") == 1650
+    assert _cost_micros(usage, "gpt-6-sol") == 4000
+    assert _cost_micros(usage, "gpt-6-luna") == 200
+    assert _cost_micros(usage, "claude-opus-5-5") == 8000
+    assert _cost_micros(usage, "claude-sonnet-5") == 4000
+    assert _cost_micros(usage, "gpt-5.6-terra") == 4400
+    assert _cost_micros(usage, "gpt-5.6-luna") == 440
     # unknown model still yields None
     assert _cost_micros(usage, "gpt-unknown") is None
+
+
+@pytest.mark.asyncio
+async def test_new_reasoning_models_leave_room_for_visible_output():
+    anthropic_sdk = MagicMock()
+    anthropic_sdk.messages.create = AsyncMock(return_value=MagicMock())
+    await AnthropicLLMClient(anthropic_sdk, "claude-opus-5-5")._create_message("receipt")
+    assert anthropic_sdk.messages.create.call_args.kwargs["max_tokens"] == 8192
+
+    openai_sdk = MagicMock()
+    openai_sdk.responses.parse = AsyncMock(return_value=MagicMock())
+    await OpenAILLMClient(openai_sdk, "gpt-6-sol")._create_response("receipt")
+    assert openai_sdk.responses.parse.call_args.kwargs["max_output_tokens"] == 8192
+    await OpenAITextLLMClient(openai_sdk, "gpt-6-luna")._create_response(
+        "system", "message", CorrectionDiff
+    )
+    assert openai_sdk.responses.parse.call_args.kwargs["max_output_tokens"] == 8192
 
 
 def test_openai_search_cost_micros_counts_web_search_call_items():

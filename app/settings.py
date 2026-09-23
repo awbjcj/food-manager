@@ -32,16 +32,16 @@ class Settings(BaseSettings):
     allowed_telegram_user_id: int = Field(alias="ALLOWED_TELEGRAM_USER_ID")
     llm_provider: LLMProvider = Field(default="anthropic", alias="LLM_PROVIDER")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
-    anthropic_model: str = Field(default="claude-sonnet-5", alias="ANTHROPIC_MODEL")
+    anthropic_model: str = Field(default="claude-opus-5-5", alias="ANTHROPIC_MODEL")
     anthropic_text_model: str = Field(
         default="claude-haiku-4-5-20251001",
         alias="ANTHROPIC_TEXT_MODEL",
     )
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
-    openai_model: str = Field(default="gpt-5.6-terra", alias="OPENAI_MODEL")
-    openai_text_model: str = Field(default="gpt-5.6-luna", alias="OPENAI_TEXT_MODEL")
+    openai_model: str = Field(default="gpt-6-sol", alias="OPENAI_MODEL")
+    openai_text_model: str = Field(default="gpt-6-luna", alias="OPENAI_TEXT_MODEL")
     anthropic_search_model: str = Field(
-        default="claude-sonnet-5", alias="ANTHROPIC_SEARCH_MODEL"
+        default="claude-opus-5-5", alias="ANTHROPIC_SEARCH_MODEL"
     )
     gemini_api_key: str | None = Field(default=None, alias="GEMINI_API_KEY")
     gemini_model: str = Field(default="gemini-3.8-flash", alias="GEMINI_MODEL")

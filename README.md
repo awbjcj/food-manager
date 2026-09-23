@@ -187,12 +187,12 @@ reverted.
 | `OPERATOR_BOT_TOKEN`       | No                   | —                           | Token for the optional, separate operator bot                                                                                                                                                |
 | `LLM_PROVIDER`             | No                   | `anthropic`                 | Default provider: `anthropic`, `openai`, `gemini`, or `deepseek`. Each user can override with `/llm`. `deepseek` is text-only, so at least one image-capable provider's key must also be set |
 | `ANTHROPIC_API_KEY`        | When using anthropic | —                           | Anthropic API key                                                                                                                                                                            |
-| `ANTHROPIC_MODEL`          | No                   | `claude-sonnet-5`           | Claude model to use for receipt parsing                                                                                                                                                      |
+| `ANTHROPIC_MODEL`          | No                   | `claude-opus-5-5`           | Claude model to use for receipt parsing                                                                                                                                                      |
 | `ANTHROPIC_TEXT_MODEL`     | No                   | `claude-haiku-4-5-20251001` | Claude model to use for `/correct` and `/add` proposals                                                                                                                                      |
-| `ANTHROPIC_SEARCH_MODEL`   | No                   | `claude-sonnet-5`           | Claude model used for shelf-life web search — **requires web search enabled on the Anthropic workspace**                                                                                     |
+| `ANTHROPIC_SEARCH_MODEL`   | No                   | `claude-opus-5-5`           | Claude model used for shelf-life web search — **requires web search enabled on the Anthropic workspace**                                                                                     |
 | `OPENAI_API_KEY`           | When using openai    | —                           | OpenAI API key                                                                                                                                                                               |
-| `OPENAI_MODEL`             | No                   | `gpt-5.6-terra`             | OpenAI model to use for receipt parsing                                                                                                                                                      |
-| `OPENAI_TEXT_MODEL`        | No                   | `gpt-5.6-luna`              | OpenAI model to use for `/correct` and `/add` proposals                                                                                                                                      |
+| `OPENAI_MODEL`             | No                   | `gpt-6-sol`                 | OpenAI model to use for receipt parsing                                                                                                                                                      |
+| `OPENAI_TEXT_MODEL`        | No                   | `gpt-6-luna`                | OpenAI model to use for `/correct` and `/add` proposals                                                                                                                                      |
 | `GEMINI_API_KEY`           | When using gemini    | —                           | Google Gemini API key (native `google-genai` SDK)                                                                                                                                            |
 | `GEMINI_MODEL`             | No                   | `gemini-3.8-flash`          | Gemini model to use for receipt parsing                                                                                                                                                      |
 | `GEMINI_TEXT_MODEL`        | No                   | `gemini-3.8-flash`          | Gemini model to use for `/correct` and `/add` proposals                                                                                                                                      |
@@ -210,6 +210,24 @@ reverted.
 | `DATABASE_PATH`            | No                   | `./food.db`                 | Path to the SQLite database file                                                                                                                                                             |
 | `LOG_LEVEL`                | No                   | `INFO`                      | Logging level                                                                                                                                                                                |
 | `ENV`                      | No                   | `dev`                       | Set to `prod` for JSON-structured logs                                                                                                                                                       |
+
+The current model defaults and first-party Standard API token prices (USD per
+million tokens, checked September 22, 2026) are:
+
+| Model | Use | Input | Output |
+| --- | --- | ---: | ---: |
+| `claude-opus-5-5` | Claude receipt, cook, and search | $4.00 | $20.00 |
+| `claude-haiku-4-5-20251001` | Claude text tasks | $1.00 | $5.00 |
+| `gpt-6-sol` | OpenAI receipt, cook, and search | $2.00 | $10.00 |
+| `gpt-6-luna` | OpenAI text tasks | $0.10 | $0.50 |
+| `gemini-3.8-flash` | Gemini receipt, cook, search, and text | $0.75 | $3.75 |
+
+These are ordinary input and output rates. GPT-6 rates above apply up to 272K
+input tokens; longer prompts have higher rates. Gemini 3.8 Flash has introductory
+rates through December 31, 2026. Cache and search charges are separate. See
+[OpenAI pricing](https://developers.openai.com/api/docs/pricing),
+[Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing), and
+[Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing).
 
 Stars subscriptions renew every 30 days. Household owners can cancel renewal
 from the Mini App; top-ups expire at the end of the current quota period.

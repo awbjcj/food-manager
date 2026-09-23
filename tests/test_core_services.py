@@ -61,10 +61,11 @@ def test_settings_load_from_env(monkeypatch):
     assert settings.telegram_bot_token == "test-token"
     assert settings.allowed_telegram_user_id == 12345
     assert settings.llm_provider == "anthropic"
-    assert settings.anthropic_model == "claude-sonnet-5"
+    assert settings.anthropic_model == "claude-opus-5-5"
     assert settings.anthropic_text_model == "claude-haiku-4-5-20251001"
-    assert settings.openai_model == "gpt-5.6-terra"
-    assert settings.openai_text_model == "gpt-5.6-luna"
+    assert settings.anthropic_search_model == "claude-opus-5-5"
+    assert settings.openai_model == "gpt-6-sol"
+    assert settings.openai_text_model == "gpt-6-luna"
     assert settings.gemini_model == "gemini-3.8-flash"
     assert settings.gemini_text_model == "gemini-3.8-flash"
     assert settings.deepseek_model == "deepseek-v4-pro"
@@ -78,8 +79,8 @@ def test_settings_load_openai_provider_from_env(monkeypatch):
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.llm_provider == "openai"
     assert settings.openai_api_key == "test-openai-key"
-    assert settings.openai_model == "gpt-5.6-terra"
-    assert settings.openai_text_model == "gpt-5.6-luna"
+    assert settings.openai_model == "gpt-6-sol"
+    assert settings.openai_text_model == "gpt-6-luna"
 
 
 def test_recipe_api_keys_optional(monkeypatch):

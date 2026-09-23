@@ -10,6 +10,7 @@ from app.llm import (
     _cost_micros,
     _extract_json_text,
     _extract_openai_parsed,
+    _reasoning_max_tokens,
 )
 from app.providers import ProviderSelector
 
@@ -53,7 +54,7 @@ class AnthropicTranslationLLMClient:
     async def translate(self, *, texts: list[str], lang: str) -> tuple[list[str], int | None]:
         message = await self._sdk.messages.create(
             model=self._model,
-            max_tokens=1024,
+            max_tokens=_reasoning_max_tokens(self._model, 1024),
             system=_TRANSLATE_SYSTEM_PROMPT + _ANTHROPIC_TRANSLATE_SUFFIX,
             messages=[{"role": "user", "content": _user_msg(texts, lang)}],
         )
@@ -76,7 +77,7 @@ class OpenAITranslationLLMClient:
                 {"role": "user", "content": [{"type": "input_text", "text": _user_msg(texts, lang)}]},
             ],
             text_format=TranslationList,
-            max_output_tokens=1024,
+            max_output_tokens=_reasoning_max_tokens(self._model, 1024),
         )
         parsed = TranslationList.model_validate(_extract_openai_parsed(response))
         return [str(x) for x in parsed.items], _cost_micros(response, self._model)

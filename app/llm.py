@@ -185,26 +185,28 @@ _PARSE_RECEIPT_TOOL = {
 
 _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "claude-sonnet-4-6": {"input": 3, "output": 15},
-    # claude-sonnet-5 standard rate; an intro $2/$10 promo runs through
-    # 2026-08-31, but the durable standard rate is used here so the estimate
-    # stays correct after the promo ends.
-    "claude-sonnet-5": {"input": 3, "output": 15},
+    "claude-sonnet-5": {"input": 2, "output": 10},
+    "claude-opus-5-5": {"input": 4, "output": 20},
     "claude-haiku-4-5-20251001": {"input": 1, "output": 5},
     "gpt-5.4": {"input": 2.5, "output": 15},
     "gpt-5.4-mini": {"input": 0.75, "output": 4.5},
-    "gpt-5.6-terra": {"input": 2.5, "output": 15},
-    "gpt-5.6-luna": {"input": 1.0, "output": 6.0},
+    "gpt-5.6-terra": {"input": 2, "output": 12},
+    "gpt-5.6-luna": {"input": 0.2, "output": 1.2},
+    "gpt-6-sol": {"input": 2, "output": 10},
+    "gpt-6-luna": {"input": 0.1, "output": 0.5},
     # Approximate public per-token (micro-USD) rates; cost stays best-effort and
-    # is reported as unknown for any model absent from this table. Gemini 3.x has
-    # a prompt-size tier (a higher rate above 200k input tokens); receipts and
-    # text prompts here stay far under that, so the <=200k standard rate is used.
+    # is reported as unknown for any model absent from this table. Some models
+    # (for example Gemini 3.1 Pro Preview) charge more above 200k input tokens;
+    # the bot's receipt and text prompts stay far below that threshold.
     "gemini-2.5-flash": {"input": 0.3, "output": 2.5},
     # Introductory Standard-tier pricing through 2026-12-31. Gemini bills
     # generated thinking tokens at the output rate; _gemini_cost adds the
     # SDK's separate thoughts_token_count to candidates_token_count.
     "gemini-3.8-flash": {"input": 0.75, "output": 3.75},
     "gemini-3.7-flash": {"input": 0.75, "output": 3.75},
+    "gemini-3.6-flash": {"input": 0.75, "output": 3.75},
     "gemini-3.5-flash": {"input": 1.5, "output": 9.0},
+    "gemini-3.5-flash-lite": {"input": 0.3, "output": 2.5},
     "gemini-3.1-pro-preview": {"input": 2.0, "output": 12.0},
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.5},
     # Conservative peak-hour, cache-miss rates. The v4-pro route serves
@@ -218,6 +220,13 @@ _OPENAI_WEB_SEARCH_TOOL = {
     "search_context_size": "low",
 }
 _OPENAI_REASONING = {"effort": "low"}
+
+
+def _reasoning_max_tokens(model: str, regular_limit: int) -> int:
+    """Leave room for new reasoning models to think and return visible output."""
+    return max(regular_limit, 8192) if model in {
+        "claude-opus-5-5", "gpt-6-sol", "gpt-6-luna"
+    } else regular_limit
 
 
 def _extract_tool_input(message) -> dict:
@@ -434,7 +443,7 @@ class AnthropicLLMClient(LLMClient):
         return await with_transport_retry(
             lambda: self._sdk.messages.create(
                 model=self._model,
-                max_tokens=2048,
+                max_tokens=_reasoning_max_tokens(self._model, 2048),
                 system=SYSTEM_PROMPT,
                 tools=[_PARSE_RECEIPT_TOOL],
                 tool_choice={"type": "tool", "name": "parse_receipt"},
@@ -498,7 +507,7 @@ class OpenAILLMClient(LLMClient):
                 tools=[_OPENAI_WEB_SEARCH_TOOL],
                 reasoning=_OPENAI_REASONING,
                 text_format=ParseResult,
-                max_output_tokens=2048,
+                max_output_tokens=_reasoning_max_tokens(self._model, 2048),
             ),
             log_event="llm_transport_failed",
             sleep=self._sleep,
@@ -690,7 +699,7 @@ class AnthropicTextLLMClient(TextLLMClient):
         return await with_transport_retry(
             lambda: self._sdk.messages.create(
                 model=self._model,
-                max_tokens=1024,
+                max_tokens=_reasoning_max_tokens(self._model, 1024),
                 system=system,
                 messages=[{"role": "user", "content": user_content}],
             ),
@@ -798,7 +807,7 @@ class OpenAITextLLMClient(TextLLMClient):
                 tools=[_OPENAI_WEB_SEARCH_TOOL],
                 reasoning=_OPENAI_REASONING,
                 text_format=text_format,
-                max_output_tokens=1024,
+                max_output_tokens=_reasoning_max_tokens(self._model, 1024),
             ),
             log_event="text_llm_transport_failed",
             sleep=self._sleep,

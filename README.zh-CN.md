@@ -151,17 +151,17 @@ uv run pytest tests/test_core_services.py::test_shelf_life_defaults
 | `OPERATOR_BOT_TOKEN` | 否 | — | 可选的独立运营机器人令牌 |
 | `LLM_PROVIDER` | 否 | `anthropic` | 默认提供商：`anthropic`、`openai`、`gemini` 或 `deepseek`。每位用户可以通过 `/llm` 覆盖。`deepseek` 仅支持文本，因此还必须配置至少一个支持图像的提供商密钥 |
 | `ANTHROPIC_API_KEY` | 使用 Anthropic 时 | — | Anthropic API 密钥 |
-| `ANTHROPIC_MODEL` | 否 | `claude-sonnet-5` | 用于解析收据的 Claude 模型 |
+| `ANTHROPIC_MODEL` | 否 | `claude-opus-5-5` | 用于解析收据的 Claude 模型 |
 | `ANTHROPIC_TEXT_MODEL` | 否 | `claude-haiku-4-5-20251001` | 用于 `/correct` 和 `/add` 提案的 Claude 模型 |
-| `ANTHROPIC_SEARCH_MODEL` | 否 | `claude-sonnet-5` | 用于保存期网络搜索的 Claude 模型——**需要在 Anthropic 工作区启用网络搜索** |
+| `ANTHROPIC_SEARCH_MODEL` | 否 | `claude-opus-5-5` | 用于保存期网络搜索的 Claude 模型——**需要在 Anthropic 工作区启用网络搜索** |
 | `OPENAI_API_KEY` | 使用 OpenAI 时 | — | OpenAI API 密钥 |
-| `OPENAI_MODEL` | 否 | `gpt-5.6-terra` | 用于解析收据的 OpenAI 模型 |
-| `OPENAI_TEXT_MODEL` | 否 | `gpt-5.6-luna` | 用于 `/correct` 和 `/add` 提案的 OpenAI 模型 |
+| `OPENAI_MODEL` | 否 | `gpt-6-sol` | 用于解析收据的 OpenAI 模型 |
+| `OPENAI_TEXT_MODEL` | 否 | `gpt-6-luna` | 用于 `/correct` 和 `/add` 提案的 OpenAI 模型 |
 | `GEMINI_API_KEY` | 使用 Gemini 时 | — | Google Gemini API 密钥（原生 `google-genai` SDK） |
-| `GEMINI_MODEL` | 否 | `gemini-3.1-pro-preview` | 用于解析收据的 Gemini 模型 |
-| `GEMINI_TEXT_MODEL` | 否 | `gemini-3.5-flash` | 用于 `/correct` 和 `/add` 提案的 Gemini 模型 |
+| `GEMINI_MODEL` | 否 | `gemini-3.8-flash` | 用于解析收据的 Gemini 模型 |
+| `GEMINI_TEXT_MODEL` | 否 | `gemini-3.8-flash` | 用于 `/correct` 和 `/add` 提案的 Gemini 模型 |
 | `DEEPSEEK_API_KEY` | 使用 DeepSeek 时 | — | DeepSeek API 密钥。DeepSeek 仍无法读取小票照片，但现在支持原生网络搜索 |
-| `DEEPSEEK_MODEL` | 否 | `deepseek-v4-flash` | 用于文本和搜索任务的 DeepSeek 模型 |
+| `DEEPSEEK_MODEL` | 否 | `deepseek-v4-pro` | 用于文本和搜索任务的 DeepSeek 模型 |
 | `DEEPSEEK_BASE_URL` | 否 | `https://api.deepseek.com` | DeepSeek API 根 URL（兼容 OpenAI） |
 | `SUB2API_BASE_URL` | 否 | — | 共享 Sub2API 网关根地址；除 `ENV=dev` 中的回环 HTTP 外，必须使用 HTTPS |
 | `SUB2API_ANTHROPIC_TOKEN` | 否 | — | Anthropic 订阅路由令牌；设置后 Anthropic 默认使用订阅模式 |
@@ -174,6 +174,22 @@ uv run pytest tests/test_core_services.py::test_shelf_life_defaults
 | `DATABASE_PATH` | 否 | `./food.db` | SQLite 数据库文件路径 |
 | `LOG_LEVEL` | 否 | `INFO` | 日志级别 |
 | `ENV` | 否 | `dev` | 设置为 `prod` 时使用 JSON 结构化日志 |
+
+当前默认模型及供应商标准 API 价格（美元／百万 token，核对于 2026 年 9 月 22 日）：
+
+| 模型 | 用途 | 输入 | 输出 |
+| --- | --- | ---: | ---: |
+| `claude-opus-5-5` | Claude 收据、菜谱及搜索 | $4.00 | $20.00 |
+| `claude-haiku-4-5-20251001` | Claude 文本任务 | $1.00 | $5.00 |
+| `gpt-6-sol` | OpenAI 收据、菜谱及搜索 | $2.00 | $10.00 |
+| `gpt-6-luna` | OpenAI 文本任务 | $0.10 | $0.50 |
+| `gemini-3.8-flash` | Gemini 收据、菜谱、搜索及文本 | $0.75 | $3.75 |
+
+以上是普通输入和输出价格。GPT-6 的价格适用于不超过 272K 输入 token
+的请求，更长的输入价格更高。Gemini 3.8 Flash 优惠价截至 2026 年 12 月
+31 日；缓存和搜索费用另计。来源：[OpenAI 价格](https://developers.openai.com/api/docs/pricing)、
+[Claude 价格](https://platform.claude.com/docs/en/about-claude/pricing)、
+[Gemini 价格](https://ai.google.dev/gemini-api/docs/pricing)。
 
 Stars 订阅每 30 天续费一次。家庭所有者可以在 Mini App 中取消续费；加量包会在当前额度周期结束时失效。完整的购买、验证、加量和取消流程请参阅 [`docs/telegram-subscriptions.zh-CN.md`](docs/telegram-subscriptions.zh-CN.md)。
 

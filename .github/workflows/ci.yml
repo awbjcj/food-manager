@@ -5,6 +5,9 @@ on:
     branches: [master]
   push:
     branches: [master]
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read

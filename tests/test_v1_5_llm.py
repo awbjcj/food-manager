@@ -201,6 +201,7 @@ def test_cost_micros_prices_openai_models():
     assert _cost_micros(usage, "gpt-6-luna") == 200
     assert _cost_micros(usage, "claude-opus-5-5") == 8000
     assert _cost_micros(usage, "claude-sonnet-5") == 4000
+    assert _cost_micros(usage, "claude-sonnet-5-5") == 4000
     assert _cost_micros(usage, "gpt-5.6-terra") == 4400
     assert _cost_micros(usage, "gpt-5.6-luna") == 440
     # unknown model still yields None
@@ -213,6 +214,9 @@ async def test_new_reasoning_models_leave_room_for_visible_output():
     anthropic_sdk.messages.create = AsyncMock(return_value=MagicMock())
     await AnthropicLLMClient(anthropic_sdk, "claude-opus-5-5")._create_message("receipt")
     assert anthropic_sdk.messages.create.call_args.kwargs["max_tokens"] == 8192
+    await AnthropicLLMClient(anthropic_sdk, "claude-sonnet-5-5")._create_message("receipt")
+    assert anthropic_sdk.messages.create.call_args.kwargs["max_tokens"] == 8192
+    assert anthropic_sdk.messages.create.call_args.kwargs["tool_choice"] == {"type": "auto"}
 
     openai_sdk = MagicMock()
     openai_sdk.responses.parse = AsyncMock(return_value=MagicMock())
@@ -222,6 +226,20 @@ async def test_new_reasoning_models_leave_room_for_visible_output():
         "system", "message", CorrectionDiff
     )
     assert openai_sdk.responses.parse.call_args.kwargs["max_output_tokens"] == 8192
+
+
+@pytest.mark.asyncio
+async def test_sonnet_5_5_receipt_parser_accepts_json_text_when_auto_tool_is_skipped():
+    sdk = MagicMock()
+    sdk.messages.create = AsyncMock(return_value=_TextResponse(json.dumps({"items": []})))
+
+    result = await AnthropicLLMClient(sdk, "claude-sonnet-5-5").extract_items_from_image(
+        b"receipt"
+    )
+
+    assert result.parse.items == []
+    assert result.cost_micros_usd == 1000
+    assert sdk.messages.create.call_args.kwargs["tool_choice"] == {"type": "auto"}
 
 
 def test_openai_search_cost_micros_counts_web_search_call_items():

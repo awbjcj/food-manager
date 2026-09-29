@@ -186,6 +186,7 @@ _PARSE_RECEIPT_TOOL = {
 _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "claude-sonnet-4-6": {"input": 3, "output": 15},
     "claude-sonnet-5": {"input": 2, "output": 10},
+    "claude-sonnet-5-5": {"input": 2, "output": 10},
     "claude-opus-5-5": {"input": 4, "output": 20},
     "claude-haiku-4-5-20251001": {"input": 1, "output": 5},
     "gpt-5.4": {"input": 2.5, "output": 15},
@@ -225,7 +226,7 @@ _OPENAI_REASONING = {"effort": "low"}
 def _reasoning_max_tokens(model: str, regular_limit: int) -> int:
     """Leave room for new reasoning models to think and return visible output."""
     return max(regular_limit, 8192) if model in {
-        "claude-opus-5-5", "gpt-6-sol", "gpt-6-luna"
+        "claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-sol", "gpt-6-luna"
     } else regular_limit
 
 
@@ -440,13 +441,23 @@ class AnthropicLLMClient(LLMClient):
         self._sleep = sleep
 
     async def _create_message(self, user_content):
+        sonnet_5_5 = self._model == "claude-sonnet-5-5"
         return await with_transport_retry(
             lambda: self._sdk.messages.create(
                 model=self._model,
                 max_tokens=_reasoning_max_tokens(self._model, 2048),
-                system=SYSTEM_PROMPT,
+                system=(
+                    SYSTEM_PROMPT + "\nCall the parse_receipt tool with the result."
+                    if sonnet_5_5
+                    else SYSTEM_PROMPT
+                ),
                 tools=[_PARSE_RECEIPT_TOOL],
-                tool_choice={"type": "tool", "name": "parse_receipt"},
+                # Sonnet 5.5 rejects forced tool choice; auto lets it call the tool.
+                tool_choice=(
+                    {"type": "auto"}
+                    if sonnet_5_5
+                    else {"type": "tool", "name": "parse_receipt"}
+                ),
                 messages=[{"role": "user", "content": user_content}],
             ),
             log_event="llm_transport_failed",
@@ -476,7 +487,13 @@ class AnthropicLLMClient(LLMClient):
         cost = _cost_micros(message, self._model)
 
         try:
-            parsed = ParseResult.model_validate(_extract_tool_input(message))
+            if self._model == "claude-sonnet-5-5" and not any(
+                getattr(block, "type", None) == "tool_use" for block in message.content
+            ):
+                # Auto tool choice can return JSON text instead of a tool call.
+                parsed = ParseResult.model_validate_json(_extract_json_text(message))
+            else:
+                parsed = ParseResult.model_validate(_extract_tool_input(message))
         except Exception as exc:
             log.warning(
                 "llm_json_validation_failed_final",

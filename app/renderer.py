@@ -10,6 +10,7 @@ from app.i18n import format_date, t, weekday_abbr
 from app.ingest_service import IngestSummary
 from app.models import SavedRecipe, ShoppingList
 from app.pantry_service import ALLOWED_CATEGORIES, PantrySort, Stats
+from app.preference_service import PreferenceProfile
 from app.profile_service import FoodProfile
 from app.storage_state import next_storage_options
 
@@ -942,4 +943,23 @@ def render_profile(profile: FoodProfile, lang: str = "en") -> str:
         t("profile.notes", lang, note=note),
         t("profile.update_hint", lang),
     ]
+    return "\n".join(lines)
+
+
+def render_learned_preferences(
+    personal: PreferenceProfile, household: PreferenceProfile, *,
+    lang: str = "en", names: Mapping[str, str] | None = None,
+) -> str:
+    names = names or {}
+    lines = [t("preferences.explanation", lang)]
+    for key, profile in (("personal", personal), ("household", household)):
+        lines.extend(["", t(f"preferences.{key}", lang)])
+        if not profile.history_count:
+            lines.append(t("preferences.empty", lang))
+            continue
+        lines.append(t("preferences.history", lang, count=profile.history_count))
+        for label, foods in (("liked", profile.liked), ("disliked", profile.disliked)):
+            listed = ", ".join(names.get(food.name, food.name) for food in foods[:5])
+            lines.append(t(f"preferences.{label}", lang,
+                           foods=listed or t("profile.none_value", lang)))
     return "\n".join(lines)

@@ -164,7 +164,7 @@ reverted.
 | `/lang [en\|zh\|fr\|es]`                     | Show or set your language                                                         |
 | `/stats`                                     | Show pantry statistics                                                            |
 | `/llm [anthropic\|openai\|gemini\|deepseek]` | Show or switch the LLM provider                                                   |
-| `/prefs [sentence]`                          | Show or update your household's food profile                                      |
+| `/prefs [sentence]`                          | Show learned personal/household food preferences or update household dietary settings |
 | `/cook`                                      | Get a recipe built from your pantry                                               |
 | `/history`                                   | Show meals your household cooked                                                  |
 | `/plan [3-7]`                                | Create a 3–7 day dinner plan (default 5 days)                                     |
@@ -181,6 +181,29 @@ reverted.
 | `/buy`                                       | Buy the Family plan or a quota top-up with Telegram Stars                         |
 | `/billing`                                   | Show the current subscription status                                              |
 | `/help`                                      | Show all commands                                                                 |
+
+### Learned food preferences
+
+`/prefs` (also available in the Mini App) shows your personal food preferences
+and the household's pooled preferences alongside the explicit dietary profile.
+Personal history uses the member who marks an item eaten or tossed; it does not
+infer who physically ate it. Individual actions, batch updates, and cooked-meal
+confirmations all contribute automatically.
+
+Food eaten strictly before expiry gets a positive signal equal to the fraction
+of its shelf life remaining: eating with 80% remaining is a stronger like than
+eating with 20% remaining. Tossing strictly before expiry contributes -1.
+Actions on or after expiry, removals, and invalid date ranges are neutral.
+Fridge/frozen items use the date they entered their current storage state.
+Each food's score is the sum of signals divided by the number of non-neutral
+signals plus two neutral prior observations, so repeated history strengthens
+the evidence while mixed likes/dislikes offset each other.
+
+Household preferences softly influence `/cook` and `/plan` ranking and recipe
+prompts; they never become dietary exclusions. Profiles rebuild from persistent
+outcome snapshots, preserving the expiry known when the action happened. Older
+eaten/tossed records have no action date or actor and remain unscored rather than
+inventing those facts. The new history starts after migration `0023_pantry_outcome`.
 
 ## Environment variables
 

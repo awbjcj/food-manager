@@ -11,6 +11,18 @@ DEFAULT_LANG = "en"
 # Catalog. English is mandatory for every key; other languages are optional and
 # fall back to English. Keys are added incrementally by later tasks.
 MESSAGES: dict[str, dict[str, str]] = {
+    "preferences.explanation": {
+        "en": "Learned taste: eating earlier before expiry is a stronger like; tossing before expiry is a dislike. Actions on or after expiry are neutral. Likes and dislikes guide recipes without changing dietary restrictions.",
+        "zh": "学习到的口味：越早在到期前吃掉，越表示喜欢；到期前丢弃表示不喜欢。到期当天或之后的操作不影响口味评分。口味用于推荐食谱，不会改变饮食限制。",
+        "fr": "Goûts appris : consommer plus tôt avant expiration indique une préférence plus forte ; jeter avant expiration indique une aversion. À partir de la date d’expiration, les actions sont neutres. Ces goûts orientent les recettes sans modifier les restrictions alimentaires.",
+        "es": "Gustos aprendidos: consumir antes del vencimiento indica mayor preferencia cuanto más pronto se haga; desechar antes indica desagrado. Las acciones desde la fecha de vencimiento son neutras. Los gustos orientan las recetas sin cambiar las restricciones alimentarias.",
+    },
+    "preferences.personal": {"en": "Your food preferences · based on your actions", "zh": "你的食物偏好 · 根据你的操作", "fr": "Vos préférences alimentaires · selon vos actions", "es": "Tus preferencias alimentarias · según tus acciones"},
+    "preferences.household": {"en": "Household food preferences · all members", "zh": "家庭食物偏好 · 所有成员", "fr": "Préférences alimentaires du foyer · tous les membres", "es": "Preferencias alimentarias del hogar · todos los miembros"},
+    "preferences.empty": {"en": "No dated food history yet. Mark items eaten or tossed to build this profile.", "zh": "暂无带日期的食物历史。将食材标记为已吃或已丢弃以建立偏好。", "fr": "Aucun historique alimentaire daté. Marquez les aliments consommés ou jetés pour créer ce profil.", "es": "Aún no hay historial alimentario con fecha. Marca alimentos consumidos o desechados para crear este perfil."},
+    "preferences.history": {"en": "Recorded food outcomes: {count}", "zh": "已记录的食物处理次数：{count}", "fr": "Actions alimentaires enregistrées : {count}", "es": "Acciones alimentarias registradas: {count}"},
+    "preferences.liked": {"en": "Liked foods (strongest first): {foods}", "zh": "喜欢的食物（最喜欢的在前）：{foods}", "fr": "Aliments appréciés (préférés en premier) : {foods}", "es": "Alimentos que gustan (favoritos primero): {foods}"},
+    "preferences.disliked": {"en": "Disliked foods: {foods}", "zh": "不喜欢的食物：{foods}", "fr": "Aliments peu appréciés : {foods}", "es": "Alimentos que desagradan: {foods}"},
     "pantry.store": {"en": "Store · {name}", "zh": "商店 · {name}", "fr": "Magasin · {name}", "es": "Tienda · {name}"},
     "pantry.unknown_store": {"en": "Unknown store", "zh": "未知商店", "fr": "Magasin inconnu", "es": "Tienda desconocida"},
     "btn.sort_store": {"en": "🏪 Store", "zh": "🏪 商店", "fr": "🏪 Magasin", "es": "🏪 Tienda"},

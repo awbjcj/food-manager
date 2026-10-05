@@ -281,6 +281,7 @@ def confirm(
     today: date,
     now: datetime,
     consume: bool = True,
+    user_id: int | None = None,
 ) -> ConfirmResult | None:
     """Eat the checked rows and finalize the record.
 
@@ -303,7 +304,8 @@ def confirm(
         _candidate_ids, selected_ids = _selection_state(row.selection_json)
         for item_id in sorted(selected_ids):
             result = mark_eaten(
-                session, household_id=household_id, item_id=item_id, today=today
+                session, household_id=household_id, item_id=item_id, today=today,
+                user_id=user_id,
             )
             if result.applied:
                 # applied implies the row was active, so it is in `by_id`

@@ -23,6 +23,7 @@ from app.models import (
     MealPlan,
     MealPlanEntry,
     PantryItem,
+    PantryOutcome,
     User,
 )
 
@@ -290,3 +291,6 @@ async def test_confirm_message_shows_canonical_english_names_even_for_non_englis
     text = confirm_cb.message.edit_text.await_args.args[0]
     assert text == t("cooked.done", "es", names="Chicken Thighs")
     assert "Chicken Thighs" in text
+    with session_factory() as db:
+        outcome = db.exec(select(PantryOutcome)).one()
+        assert (outcome.user_id, outcome.occurred_on, outcome.status) == (1, TODAY, "eaten")

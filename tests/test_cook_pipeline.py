@@ -42,6 +42,7 @@ from app.cook.service import (
     run_cook,
 )
 from app.models import CookSession, Household, PantryItem, User
+from app.pantry_service import mark_eaten, mark_tossed
 from app.profile_service import FoodProfile
 from tests.fakes import FakeNutritionLLM, FakeRecipeLLM, FakeSelectionLLM
 
@@ -157,6 +158,37 @@ def _item_ids(db):
         for row in db.exec(__import__("sqlmodel").select(PantryItem)).all()
         if row.id is not None
     ]
+
+
+def test_cook_and_more_use_food_history_for_ranking_and_prompt_steering():
+    db, origin = _db_with_items(5, 10)
+    today = origin + timedelta(days=1)
+    ids = _item_ids(db)
+    mark_eaten(db, household_id=1, item_id=ids[0], today=today, user_id=1)
+    mark_tossed(db, household_id=1, item_id=ids[1], today=today, user_id=1)
+    cook = _cook_row(db)
+    selection = FakeSelectionLLM(canned=(SelectedItems(item_ids=ids[2:]), 0))
+    # Identical base scores: the food history alone must break the tie.
+    pages = [
+        ([_sourced("Disliked", ingredients=["item1"], external_id=f"bad-{page}"),
+          _sourced("Liked", ingredients=["item0"], external_id=f"good-{page}"),
+          _sourced("Unsafe", ingredients=["peanut"], external_id=f"unsafe-{page}", health=100)], 0)
+        for page in (1, 2)
+    ]
+    source = FakeRecipeSource(*pages)
+    profile = FoodProfile(exclusions=["peanut"])
+    first = asyncio.run(run_cook(db, cook=cook, profile=profile, selection_llm=selection,
+                                source=source, today=today))
+    more = asyncio.run(cook_service.run_cook_more(db, cook=cook, profile=profile,
+                                                source=source, today=today))
+    for results in (first, more):
+        assert [card.recipe.title for card in results] == ["Liked", "Disliked"]
+        assert results[0].final_score > results[1].final_score > 0
+    for call in source.calls:
+        assert "likes item0" in call.criteria.steering
+        assert "dislikes item1" in call.criteria.steering
+        assert call.criteria.exclude_ingredients == ["peanut"]
+    db.close()
 
 
 def test_run_cook_guards_thin_pantry():

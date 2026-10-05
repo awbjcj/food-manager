@@ -310,6 +310,7 @@ async def handle_callback(
                     household_id=user.household_id,
                     item_id=item_id,
                     today=today,
+                    user_id=user.telegram_id,
                 )
             elif action.verb == "toss":
                 result = mark_tossed(
@@ -317,6 +318,7 @@ async def handle_callback(
                     household_id=user.household_id,
                     item_id=item_id,
                     today=today,
+                    user_id=user.telegram_id,
                 )
             elif action.verb == "snooze2":
                 result = snooze_item(

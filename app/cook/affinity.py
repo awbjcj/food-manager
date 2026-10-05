@@ -1,11 +1,11 @@
-"""Affinity (v5.3): the household's 👍/👎 history as a deterministic taste score.
+"""The household's recipe feedback and food outcomes as a taste score.
 
 `affinity` maps a candidate recipe against the recent feedback signals to a
 [0, 1] term consumed by `blended_score`. It is pure and source-agnostic — a
 Spoonacular result and an LLM result are taste-ranked identically. Dislikes
 push the score down but can never hard-exclude a dish (exclusions are diet and
-safety; dislikes are preference). With no signals the term is a constant 0.5,
-so ranking is provably unchanged until feedback exists.
+safety; dislikes are preference). With no recipe feedback or food history the
+term is a constant 0.5, so ranking is unchanged until evidence exists.
 
 `steering_summary` turns the same signals into a short deterministic sentence
 injected into the LLM-tail prompt only (the only source whose output can be
@@ -21,6 +21,11 @@ from sqlmodel import Session, select
 from app.cook.feedback import VALID_FEEDBACK, FeedbackSignal, feedback_signal
 from app.models import CookSession
 from app.normalization import normalize
+from app.preference_service import (
+    PreferenceProfile,
+    ingredient_preference,
+    preference_summary,
+)
 
 #: How many recent feedback signals shape the household's taste.
 SIGNAL_WINDOW = 50
@@ -61,10 +66,9 @@ def affinity(
     cuisine: str | None,
     ingredient_names: Sequence[str],
     signals: Sequence[FeedbackSignal],
+    preferences: PreferenceProfile | None = None,
 ) -> float:
-    """Taste score in [0, 1]; 0.5 = neutral (and the empty-signal constant)."""
-    if not signals:
-        return 0.5
+    """Taste score in [0, 1]; 0.5 = neutral when neither history has evidence."""
     recipe_cuisine = normalize(cuisine or "")
     recipe_ings = {normalize(n) for n in ingredient_names}
     total = 0.0
@@ -73,18 +77,21 @@ def affinity(
             cuisine=recipe_cuisine, ingredients=recipe_ings, signal=signal
         )
         total += sim if signal.verdict == "liked" else -sim
-    mean = total / len(signals)  # in [-1, 1]
+    mean = total / len(signals) if signals else 0.0
+    history = ingredient_preference(ingredient_names, preferences) if preferences else 0.0
     # Clamp away from the extremes: a perfect-similarity dislike would otherwise
     # land exactly at 0.0, hard-excluding the dish rather than merely
     # suppressing it (dislikes are preference, not a safety exclusion).
-    return max(0.05, min(1.0, (mean + 1.0) / 2.0))
+    return max(0.05, min(1.0, (mean + history + 1.0) / 2.0))
 
 
 def steering_summary(
-    signals: Sequence[FeedbackSignal], *, max_chars: int = 200
+    signals: Sequence[FeedbackSignal], *, max_chars: int = 200,
+    preferences: PreferenceProfile | None = None,
 ) -> str:
     """Deterministic taste one-liner for LLM prompts; '' when no signals exist."""
-    if not signals:
+    history = preference_summary(preferences) if preferences else ""
+    if not signals and not history:
         return ""
 
     def top3(counter: Counter) -> list[str]:
@@ -111,7 +118,8 @@ def steering_summary(
         parts.append(
             "dislikes " + ", ".join(top3(disliked_cuisines) + top3(disliked_ings))
         )
-    text = "Household taste: " + "; ".join(parts) + "."
+    text = "Household taste: " + "; ".join(parts) + "." if parts else ""
+    text = " ".join(part for part in (text, history) if part)
     if len(text) <= max_chars:
         return text
     cut = text[:max_chars].rsplit(" ", 1)[0]

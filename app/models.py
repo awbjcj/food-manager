@@ -147,6 +147,25 @@ class PantryItem(SQLModel, table=True):
     created_at: datetime
 
 
+class PantryOutcome(SQLModel, table=True):
+    """One immutable outcome per item, captured with the expiry known at the time."""
+
+    __table_args__ = (
+        Index("ix_outcome_household_user", "household_id", "user_id"),
+    )
+
+    item_id: int = Field(foreign_key="pantryitem.id", primary_key=True)
+    household_id: int = Field(foreign_key="household.id")
+    # Deliberately no User FK: leaving a household deletes the membership row,
+    # but must preserve that household's food history.
+    user_id: int | None = None
+    normalized_name: str
+    status: str  # eaten | tossed
+    occurred_on: date
+    origin_on: date
+    expires_on: date
+
+
 class ShelfLifeCache(SQLModel, table=True):
     household_id: int = Field(foreign_key="household.id", primary_key=True)
     normalized_name: str = Field(primary_key=True)

@@ -143,6 +143,7 @@ async def handle_cooked_callback(
             today=today,
             now=now,
             consume=action.verb == "cooked_confirm",
+            user_id=user.telegram_id,
         )
         if result is None:
             await edit_or_resend(cb, t("plan.expired", user.lang))

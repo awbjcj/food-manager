@@ -20,6 +20,7 @@ from app.cook.recipe_source import RecipeSource, build_criteria
 from app.cook.session_service import accrue_cost
 from app.models import CookSession, PantryItem
 from app.pantry_service import ListFilter, list_active
+from app.preference_service import build_preference_profile
 from app.profile_service import FoodProfile
 
 log = logging.getLogger(__name__)
@@ -88,7 +89,8 @@ def _shown_external_ids(cook: CookSession) -> set[str]:
 
 
 def _score_sourced(
-    sourced: list, *, selected_items: list[PantryItem], today: date, signals, cooks
+    sourced: list, *, selected_items: list[PantryItem], today: date, signals, cooks,
+    preferences=None,
 ) -> list[ScoredCandidate]:
     urgent_names = [
         item.normalized_name
@@ -119,6 +121,7 @@ def _score_sourced(
                             cuisine=sourced_recipe.recipe.cuisine,
                             ingredient_names=ingredient_names,
                             signals=signals,
+                            preferences=preferences,
                         ),
                         novelty_0_1=novelty(recipe_key(candidate), cooks, today),
                     )
@@ -192,6 +195,7 @@ async def run_cook(
 
     selected_items = [item_by_id[item_id] for item_id in selected_ids]
     signals = list_recent_signals(session, household_id=cook.household_id)
+    preferences = build_preference_profile(session, household_id=cook.household_id)
     criteria = build_criteria(
         include_ingredients=[item.normalized_name for item in selected_items],
         meal_type=cook.meal_type,
@@ -199,7 +203,7 @@ async def run_cook(
         purpose=_purpose_of(cook),
         profile=profile,
         offset=cook.search_offset or 0,
-        steering=steering_summary(signals) or None,
+        steering=steering_summary(signals, preferences=preferences) or None,
     )
     sourced, source_cost = await source.search(
         criteria, remaining_cost_micros=_remaining_cost_budget(cook)
@@ -219,7 +223,8 @@ async def run_cook(
     pantry_normalized = [item.normalized_name for item in active_items]
     cooks = list_recent_cooks(session, household_id=cook.household_id, today=today)
     scored = _score_sourced(
-        safe, selected_items=selected_items, today=today, signals=signals, cooks=cooks
+        safe, selected_items=selected_items, today=today, signals=signals, cooks=cooks,
+        preferences=preferences,
     )
     _assign_shopping_list(scored, pantry_normalized=pantry_normalized)
 
@@ -258,6 +263,7 @@ async def run_cook_more(
 
     cook.search_offset = (cook.search_offset or 0) + 6
     signals = list_recent_signals(session, household_id=cook.household_id)
+    preferences = build_preference_profile(session, household_id=cook.household_id)
     criteria = build_criteria(
         include_ingredients=[item.normalized_name for item in selected_items],
         meal_type=cook.meal_type,
@@ -265,7 +271,7 @@ async def run_cook_more(
         purpose=_purpose_of(cook),
         profile=profile,
         offset=cook.search_offset,
-        steering=steering_summary(signals) or None,
+        steering=steering_summary(signals, preferences=preferences) or None,
     )
     sourced, cost = await source.search(
         criteria, remaining_cost_micros=_remaining_cost_budget(cook)
@@ -293,7 +299,8 @@ async def run_cook_more(
     pantry_normalized = [item.normalized_name for item in active_items]
     cooks = list_recent_cooks(session, household_id=cook.household_id, today=today)
     scored = _score_sourced(
-        fresh, selected_items=selected_items, today=today, signals=signals, cooks=cooks
+        fresh, selected_items=selected_items, today=today, signals=signals, cooks=cooks,
+        preferences=preferences,
     )
     _assign_shopping_list(scored, pantry_normalized=pantry_normalized)
 

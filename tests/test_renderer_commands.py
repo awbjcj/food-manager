@@ -295,7 +295,10 @@ def test_digest_keyboard_can_return_to_full_pantry():
         "item:list:all", "item:list:all:category", "item:list:all:expires",
     ]
     assert rows[0][0].text.startswith("✓ ")
-    assert rows[1][0].callback_data == "item:open:5:all"
+    assert [button.callback_data for button in rows[1]] == [
+        "item:list:all:store", "batch:start:receipt",
+    ]
+    assert rows[2][0].callback_data == "item:open:5:all"
 
 
 def test_full_pantry_keyboard_preserves_the_selected_sort():
@@ -305,7 +308,8 @@ def test_full_pantry_keyboard_preserves_the_selected_sort():
     )
 
     assert rows[0][1].text.startswith("✓ ")
-    assert rows[1][0].callback_data == "item:open:5:all:category"
+    assert rows[1][1].callback_data == "batch:start:category"
+    assert rows[2][0].callback_data == "item:open:5:all:category"
 
 
 def test_digest_keyboard_show_all_when_more():

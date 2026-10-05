@@ -444,7 +444,7 @@ ItemRoute = Literal[
     "item_rm",
     "item_rmok",
 ]
-type CallbackRoute = Verb | ItemRoute | Literal["help"]
+type CallbackRoute = Verb | ItemRoute | Literal["help", "batch"]
 
 
 @dataclass(frozen=True)
@@ -471,8 +471,44 @@ class HelpCallbackRequest:
     route: Literal["help"] = "help"
 
 
+@dataclass(frozen=True)
+class BatchCallbackRequest:
+    action: str
+    batch_id: int | None = None
+    version: int = 0
+    value: str | None = None
+    route: Literal["batch"] = "batch"
+
+
+def parse_batch_callback(data: str) -> BatchCallbackRequest:
+    parts = data.split(":")
+    if len(data.encode("utf-8")) > 64 or parts[0] != "batch":
+        raise CommandError("bad batch action")
+    if len(parts) == 3 and parts[1] == "start" and parts[2] in PANTRY_SORTS:
+        return BatchCallbackRequest(action="start", value=parts[2])
+    if len(parts) not in (4, 5):
+        raise CommandError("bad batch action")
+    try:
+        batch_id, version = int(parts[1]), int(parts[2])
+    except ValueError as exc:
+        raise CommandError("bad batch action") from exc
+    if not 0 < batch_id < 2**63 or not 0 <= version < 2**63:
+        raise CommandError("bad batch action")
+    action = parts[3]
+    value = parts[4] if len(parts) == 5 else None
+    if action in {"toggle", "page"}:
+        if value is None or not value.isascii() or not value.isdigit() or int(value) >= 2**63:
+            raise CommandError("bad batch action")
+    elif action == "confirm":
+        if value not in {"eaten", "tossed", "removed"}:
+            raise CommandError("bad batch status")
+    elif action not in {"select_page", "clear", "edit", "apply", "cancel"} or value is not None:
+        raise CommandError("bad batch action")
+    return BatchCallbackRequest(action=action, batch_id=batch_id, version=version, value=value)
+
+
 type CallbackRequest = (
-    ActionCallbackRequest | ItemCallbackRequest | HelpCallbackRequest
+    ActionCallbackRequest | ItemCallbackRequest | HelpCallbackRequest | BatchCallbackRequest
 )
 
 
@@ -482,17 +518,21 @@ def parse_callback_request(data: str) -> CallbackRequest:
         return HelpCallbackRequest(topic=data.partition(":")[2])
     if data.startswith("item:"):
         return ItemCallbackRequest(action=parse_item_callback(data))
+    if data.startswith("batch:"):
+        return parse_batch_callback(data)
     return ActionCallbackRequest(action=parse_callback(data))
 
 
-def parse_pantry_arg(args: Sequence[str]) -> Literal["all", "digest"] | PantrySort | int:
+def parse_pantry_arg(args: Sequence[str]) -> Literal["all", "digest", "batch"] | PantrySort | int:
     if not args:
         return "all"
     if len(args) > 1:
-        raise CommandError("usage: /pantry [receipt|category|expires|digest|<item_id>]")
+        raise CommandError("usage: /pantry [receipt|store|category|expires|batch|digest|<item_id>]")
     token = args[0].strip().lower()
     if token == "digest":
         return "digest"
+    if token == "batch":
+        return "batch"
     if token in PANTRY_SORTS:
         return cast(PantrySort, token)
     if token in {"expiry", "expiration"}:
@@ -501,7 +541,7 @@ def parse_pantry_arg(args: Sequence[str]) -> Literal["all", "digest"] | PantrySo
         return parse_item_id_arg(token)
     except CommandError as exc:
         raise CommandError(
-            "usage: /pantry [receipt|category|expires|digest|<item_id>]"
+            "usage: /pantry [receipt|store|category|expires|batch|digest|<item_id>]"
         ) from exc
 
 

@@ -76,6 +76,7 @@ class IngestSummary:
     purchase_date_assumed: bool = False
     cost_micros_usd: int | None = None
     shopping_checked_names: list[str] = field(default_factory=list)
+    store_name: str | None = None
 
 
 async def ingest_photo(
@@ -98,7 +99,7 @@ async def ingest_photo(
     if existing is not None:
         raise DuplicateReceipt(f"Receipt already logged (id={existing.id})")
 
-    llm_result = await llm.extract_items_from_image(image_bytes)
+    llm_result = await llm.extract_items_from_image(image_bytes, today=today)
     parsed_receipt = llm_result.parse
     if (
         parsed_receipt.purchase_date is not None
@@ -118,6 +119,7 @@ async def ingest_photo(
         purchase_date=purchase_date,
         purchase_date_assumed=purchase_date_assumed,
         cost_micros_usd=llm_result.cost_micros_usd,
+        store_name=parsed_receipt.store_name,
     )
 
     to_insert: list[tuple[ParsedItem, bool]] = []
@@ -146,6 +148,7 @@ async def ingest_photo(
             purchase_date_source=purchase_date_source,
             scanned_at=scanned_at,
             llm_cost_micros_usd=llm_result.cost_micros_usd,
+            store_name=parsed_receipt.store_name,
         )
         session.add(receipt)
         session.flush()

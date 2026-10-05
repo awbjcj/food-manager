@@ -91,6 +91,27 @@ class Receipt(SQLModel, table=True):
     purchase_date_source: str
     scanned_at: datetime
     llm_cost_micros_usd: int | None = None
+    store_name: str | None = None
+
+
+class PantryBatch(SQLModel, table=True):
+    """A user's receipt-independent selection, persisted across bot restarts."""
+    __table_args__ = {"sqlite_autoincrement": True}
+
+    id: int | None = Field(default=None, primary_key=True)
+    household_id: int = Field(foreign_key="household.id", index=True)
+    user_id: int = Field(index=True)
+    candidate_ids_json: str
+    selected_ids_json: str = "[]"
+    sort_by: str = "receipt"
+    page: int = 0
+    status: str = "selecting"
+    target_status: str | None = None
+    applied_count: int = 0
+    skipped_count: int = 0
+    version: int = 0
+    created_at: datetime
+    expires_at: datetime
 
 
 class PantryItem(SQLModel, table=True):

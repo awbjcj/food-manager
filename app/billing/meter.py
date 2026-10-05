@@ -180,6 +180,7 @@ UNMETERED = frozenset(
     {
         "apply",
         "ate",
+        "batch",
         "billing",
         "bind",
         "buy",

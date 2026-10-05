@@ -7,7 +7,7 @@ import logging
 from datetime import date
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.llm_transport import with_transport_retry
 from app.profile_service import FoodProfile
@@ -48,9 +48,18 @@ class ParsedItem(BaseModel):
 
 
 class ParseResult(BaseModel):
+    store_name: str | None = None
     purchase_date: date | None = None
     purchase_date_confidence: float = Field(ge=0.0, le=1.0, default=0.0)
     items: list[ParsedItem]
+
+    @field_validator("store_name")
+    @classmethod
+    def clean_store_name(cls, value: str | None) -> str | None:
+        # Keep receipt headers on one bounded line, including malformed output.
+        if value is None:
+            return None
+        return " ".join(value.split())[:120] or None
 
 
 class LLMResult(BaseModel):
@@ -105,6 +114,7 @@ class LLMClient(Protocol):
         image_bytes: bytes,
         *,
         image_media_type: str | None = None,
+        today: date | None = None,
     ) -> LLMResult: ...
 
 
@@ -143,8 +153,19 @@ SYSTEM_PROMPT = """You parse grocery receipt photos.
 Return ONLY valid JSON matching the schema. No prose.
 
 Receipt-level fields:
+  - store_name: the retailer/store brand printed in the header or logo (e.g.
+    Kroger, Costco, Trader Joe's), or null if not identifiable. Use the usual
+    brand spelling, without branch numbers, addresses, slogans, or legal entity
+    suffixes. Do not infer the retailer from a product brand, payment provider,
+    or the user's location. Store identity is separate from purchased items.
   - purchase_date: YYYY-MM-DD date shown on the receipt, or null if unreadable
   - purchase_date_confidence: 0.0-1.0 how sure you are about purchase_date
+
+Read every digit of the printed purchase date, including the year. A printed
+two-digit year 26 means 2026; 24 means 2024. Do not invent or substitute a year.
+If the year is missing or unreadable, return purchase_date=null and
+purchase_date_confidence=0. The scan date is context only; a clearly printed
+older purchase date must be preserved.
 
 Return all recognizable purchased line items, excluding store metadata,
 subtotals, totals, taxes, discounts, coupons, and payment lines. For each
@@ -176,6 +197,17 @@ returned line item:
 
 TODO(user): tune the example shelf-life values above to your kitchen.
 """
+
+
+def receipt_user_prompt(today: date | None = None) -> str:
+    if today is None:
+        return "Parse this receipt."
+    return (
+        f"Parse this receipt. Scan date in the user's local timezone: {today.isoformat()}. "
+        "Read the printed purchase date and year carefully; use the scan date only "
+        "as context, never as a replacement for the printed date."
+    )
+
 
 _PARSE_RECEIPT_TOOL = {
     "name": "parse_receipt",
@@ -367,10 +399,12 @@ class LLMProviderSelector(ProviderSelector[LLMClient], LLMClient):
         image_bytes: bytes,
         *,
         image_media_type: str | None = None,
+        today: date | None = None,
     ) -> LLMResult:
         return await self.for_provider(self._default_provider).extract_items_from_image(
             image_bytes,
             image_media_type=image_media_type,
+            today=today,
         )
 
 
@@ -469,6 +503,7 @@ class AnthropicLLMClient(LLMClient):
         image_bytes: bytes,
         *,
         image_media_type: str | None = None,
+        today: date | None = None,
     ) -> LLMResult:
         encoded = base64.b64encode(image_bytes).decode()
         user_content = [
@@ -480,7 +515,7 @@ class AnthropicLLMClient(LLMClient):
                     "data": encoded,
                 },
             },
-            {"type": "text", "text": "Parse this receipt."},
+            {"type": "text", "text": receipt_user_prompt(today)},
         ]
 
         message = await self._create_message(user_content)
@@ -535,11 +570,12 @@ class OpenAILLMClient(LLMClient):
         image_bytes: bytes,
         *,
         image_media_type: str | None = None,
+        today: date | None = None,
     ) -> LLMResult:
         media_type = image_media_type or _detect_media_type(image_bytes)
         encoded = base64.b64encode(image_bytes).decode()
         user_content = [
-            {"type": "input_text", "text": "Parse this receipt."},
+            {"type": "input_text", "text": receipt_user_prompt(today)},
             {
                 "type": "input_image",
                 "image_url": f"data:{media_type};base64,{encoded}",

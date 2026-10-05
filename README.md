@@ -26,9 +26,20 @@ share-ready promotional copy and onboarding instructions.
 
 ## How it works
 
-1. **Receipt photo → pantry items**: Send a photo to the bot. The configured LLM parses the receipt, extracts food items with estimated shelf lives, and stores them in a local SQLite database.
+1. **Receipt photo → pantry items**: Send a photo to the bot. The configured LLM recognizes the store brand separately from food items, extracts estimated shelf lives, and stores the receipt and items in SQLite.
 2. **Daily digest**: Each morning at your configured hour, you receive a message listing everything expiring within 7 days, with one-tap buttons to mark items as eaten, tossed, snoozed, or moved to the fridge/freezer.
-3. **Interactive pantry browsing**: `/pantry` opens the same digest, your full active list, or a single item card — with the same action buttons — outside the daily schedule.
+3. **Interactive pantry browsing**: `/pantry` opens the full active list or a single item card. Choose Receipt, Store, Category, or Expiry to organize it. Select several items to mark them eaten, tossed, or removed together, with a confirmation screen.
+
+   Store recognition uses the receipt header or logo; include it in the photo.
+   `/pantry store` groups purchases from the same store across receipts. Older
+   receipts without store metadata and manually added food appear under
+   **Unknown store**. The Mini App's **Open pantry** offers the same controls.
+   Choose **Select items**, tap individual foods or **Select this page**, then
+   choose **Ate**, **Tossed**, or **Remove** and confirm. Selections support up to
+   100 items across pages and expire after 30 minutes. Items already updated by
+   another action are skipped; unselected foods remain active.
+   `/pantry batch` opens the selection screen directly, including for large
+   inventories that exceed Telegram's message length limit.
 4. **Storage-aware shelf life**: Moving an item to the fridge or freezer resets its shelf-life clock from the date it was stored (one-way: default → fridge → frozen), using a curated USDA table with web-search and cache fallback.
 5. **Shelf life learning**: When you apply a `/correct` proposal, that correction can teach future imports of the same item.
 6. **Manual add**: Use `/add` for items you didn't receive a receipt for. The bot proposes parsed items before inserting them.
@@ -145,7 +156,7 @@ reverted.
 | `/list dairy`                                | Filter by category                                                                |
 | `/list week`                                 | Show items expiring within 7 days                                                 |
 | `/list expired`                              | Show already-expired items                                                        |
-| `/pantry [digest\|<id>]`                     | Interactive pantry view — digest, full list, or one item card with action buttons |
+| `/pantry [receipt\|store\|category\|expires\|batch\|digest\|<id>]` | Interactive pantry with store grouping and batch status controls |
 | `/correct <id> <free text>`                  | Propose a natural-language correction                                             |
 | `/delete <id>`                               | Remove a wrongly imported item (does not teach future imports)                    |
 | `/digest_at 7`                               | Set your daily digest hour (0–23, in your timezone)                               |

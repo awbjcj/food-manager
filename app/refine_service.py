@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
 from sqlmodel import Session
 
@@ -22,6 +22,7 @@ from app.shelf_life_search import (  # noqa: F401
     ShelfLifeSearchResult,
     resolve_search_days,
 )
+from app.storage_state import DEFAULT, compute_expiry
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,7 @@ async def refine_receipt_items(
         item = session.get(PantryItem, item_id)
         if item is None or item.household_id != household_id or not is_untouched(item):
             continue
-        if item.storage == "frozen":
+        if item.storage != DEFAULT:
             continue
         snapshots.append((item_id, item.raw_name, item.category))
 
@@ -86,11 +87,13 @@ async def refine_receipt_items(
         if item is None:
             continue
         session.refresh(item)            # pick up any change committed during the await
-        if not is_untouched(item):       # user acted on it mid-search -> don't clobber
+        # A storage move keeps the item active, but invalidates the fresh-food
+        # search result and gives it a new shelf-life origin and duration.
+        if item.storage != DEFAULT or not is_untouched(item):
             continue
         item.shelf_life_days = days
         item.shelf_life_source = "websearch"
-        item.expires_on = item.purchased_on + timedelta(days=days)
+        item.expires_on = compute_expiry(item)
         session.add(item)
         put_cached(
             session, household_id, item.normalized_name,

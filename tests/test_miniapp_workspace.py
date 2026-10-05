@@ -30,6 +30,7 @@ from app.models import (
     GroupBinding,
     Household,
     PantryItem,
+    PantryOutcome,
     PendingCorrection,
     Receipt,
     User,
@@ -469,6 +470,13 @@ async def test_pantry_mutations_persist(kitchen, command, text, field, expected)
         await action(client, kind="command", command=command, text=text)
         with kitchen.sessions() as session:
             assert getattr(session.get(PantryItem, 1), field) == expected
+            if command in {"ate", "toss"}:
+                outcome = session.get(PantryOutcome, 1)
+                assert outcome is not None
+                assert outcome.user_id == 42 and outcome.status == expected
+                assert outcome.occurred_on == datetime.now(ZoneInfo("America/New_York")).date()
+            else:
+                assert session.get(PantryOutcome, 1) is None
 
 
 @pytest.mark.asyncio

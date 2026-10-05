@@ -4,14 +4,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy import case
+from sqlalchemy import case, update
 from sqlmodel import Session, col, select
 
 from app.cache import write_user_correction
 from app.frozen_shelf_life import resolve_storage_days, storage_cache_key
-from app.models import PantryItem, PendingCorrection, Receipt
+from app.models import PantryItem, PantryOutcome, PendingCorrection, Receipt, User
 from app.pending_service import expire_for_item
-from app.storage_state import can_move_to, compute_expiry
+from app.storage_state import can_move_to, compute_expiry, shelf_life_origin
 
 if TYPE_CHECKING:
     from app.shelf_life_search import ShelfLifeSearchClient
@@ -155,37 +155,83 @@ def _load_owned(session: Session, *, household_id: int, item_id: int) -> PantryI
     return pantry_item
 
 
-def _set_terminal(session: Session, pantry_item: PantryItem, status: str) -> MutationResult:
-    if pantry_item.status != "active":
-        return MutationResult(applied=False, was_already=True)
-    pantry_item.status = status
-    pantry_item.snoozed_until = None
+def set_terminal(
+    session: Session, pantry_item: PantryItem, status: str, *, today: date,
+    user_id: int | None = None,
+) -> MutationResult:
+    """Claim an active item and record its outcome in the caller's transaction."""
+    if status not in {"eaten", "tossed", "removed"}:
+        raise ValueError("invalid terminal status")
+    if user_id is not None:
+        user = session.get(User, user_id)
+        if user is None or user.household_id != pantry_item.household_id:
+            raise NotOwnerOrMissing("outcome user")
     assert pantry_item.id is not None
+    claimed = session.connection().execute(
+        update(PantryItem)
+        .where(
+            col(PantryItem.id) == pantry_item.id,
+            col(PantryItem.household_id) == pantry_item.household_id,
+            col(PantryItem.status) == "active",
+        )
+        .values(status=status, snoozed_until=None)
+    )
+    session.refresh(pantry_item)
+    if claimed.rowcount != 1:
+        return MutationResult(applied=False, was_already=True)
     expire_for_item(session, household_id=pantry_item.household_id, item_id=pantry_item.id)
-    session.add(pantry_item)
-    session.commit()
+    if status in {"eaten", "tossed"}:
+        session.add(PantryOutcome(
+            item_id=pantry_item.id,
+            household_id=pantry_item.household_id,
+            user_id=user_id,
+            normalized_name=pantry_item.normalized_name,
+            status=status,
+            occurred_on=today,
+            origin_on=shelf_life_origin(pantry_item),
+            expires_on=pantry_item.expires_on,
+        ))
     return MutationResult(applied=True, was_already=False)
 
 
-def mark_eaten(session: Session, *, household_id: int, item_id: int, today: date) -> MutationResult:
-    return _set_terminal(session, _load_owned(session, household_id=household_id, item_id=item_id), "eaten")
+def _set_terminal(
+    session: Session, *, household_id: int, item_id: int, status: str,
+    today: date, user_id: int | None,
+) -> MutationResult:
+    try:
+        result = set_terminal(
+            session, _load_owned(session, household_id=household_id, item_id=item_id),
+            status, today=today, user_id=user_id,
+        )
+        session.commit()
+        return result
+    except Exception:
+        session.rollback()
+        raise
 
 
-def mark_tossed(session: Session, *, household_id: int, item_id: int, today: date) -> MutationResult:
-    return _set_terminal(session, _load_owned(session, household_id=household_id, item_id=item_id), "tossed")
+def mark_eaten(
+    session: Session, *, household_id: int, item_id: int, today: date,
+    user_id: int | None = None,
+) -> MutationResult:
+    return _set_terminal(session, household_id=household_id, item_id=item_id,
+                         status="eaten", today=today, user_id=user_id)
 
 
-def mark_removed(session: Session, *, household_id: int, item_id: int, today: date) -> MutationResult:
-    pantry_item = _load_owned(session, household_id=household_id, item_id=item_id)
-    if pantry_item.status == "removed":
-        return MutationResult(applied=False, was_already=True)
-    pantry_item.status = "removed"
-    pantry_item.snoozed_until = None
-    assert pantry_item.id is not None
-    expire_for_item(session, household_id=pantry_item.household_id, item_id=pantry_item.id)
-    session.add(pantry_item)
-    session.commit()
-    return MutationResult(applied=True, was_already=False)
+def mark_tossed(
+    session: Session, *, household_id: int, item_id: int, today: date,
+    user_id: int | None = None,
+) -> MutationResult:
+    return _set_terminal(session, household_id=household_id, item_id=item_id,
+                         status="tossed", today=today, user_id=user_id)
+
+
+def mark_removed(
+    session: Session, *, household_id: int, item_id: int, today: date,
+    user_id: int | None = None,
+) -> MutationResult:
+    return _set_terminal(session, household_id=household_id, item_id=item_id,
+                         status="removed", today=today, user_id=user_id)
 
 
 SNOOZE_DAYS_DEFAULT = 2

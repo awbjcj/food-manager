@@ -110,3 +110,58 @@ def test_store_batch_upgrade_preserves_existing_receipt_and_downgrades(tmp_path,
             "old-receipt", "2026-09-22")
         assert "store_name" not in {row[1] for row in con.execute("PRAGMA table_info('receipt')")}
     migrate("upgrade", "head")
+
+
+def test_preference_migration_preserves_undated_history_and_reverses(tmp_path, monkeypatch):
+    import sys
+    from datetime import UTC, date, datetime
+
+    from sqlmodel import Session, select
+
+    from app.db import make_engine
+    from app.models import Household, PantryItem, PantryOutcome, User
+    from app.pantry_service import mark_eaten
+
+    db_path = tmp_path / "preferences-migration.db"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+    def migrate(direction, revision):
+        result = subprocess.run([sys.executable, "-m", "alembic", direction, revision],
+                                capture_output=True, text=True, check=False)
+        assert result.returncode == 0, result.stderr
+
+    migrate("upgrade", "0022_receipt_store_batch")
+    engine = make_engine(str(db_path))
+    with Session(engine) as db:
+        now = datetime(2026, 10, 1, tzinfo=UTC)
+        db.add(Household(id=1, created_at=now))
+        db.commit()
+        db.add(User(telegram_id=1, chat_id=1, household_id=1, created_at=now))
+        for item_id, status in ((1, "eaten"), (2, "tossed"), (3, "active")):
+            db.add(PantryItem(
+                id=item_id, household_id=1, raw_name="apple", normalized_name="apple",
+                purchased_on=date(2026, 10, 1), shelf_life_days=10,
+                shelf_life_source="llm", ingest_shelf_life_source="llm",
+                expires_on=date(2026, 10, 11), status=status,
+                created_via="manual", created_at=now,
+            ))
+        db.commit()
+    migrate("upgrade", "head")
+    with Session(engine) as db:
+        assert db.exec(select(PantryOutcome)).all() == []
+        items = [db.get(PantryItem, n) for n in (1, 2, 3)]
+        assert all(item is not None for item in items)
+        assert [item.status for item in items if item is not None] == ["eaten", "tossed", "active"]
+        mark_eaten(db, household_id=1, item_id=3, today=date(2026, 10, 2), user_id=1)
+        outcome = db.get(PantryOutcome, 3)
+        assert outcome is not None and outcome.user_id == 1
+    migrate("downgrade", "0022_receipt_store_batch")
+    with sqlite3.connect(db_path) as con:
+        assert "pantryoutcome" not in {row[0] for row in con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        assert con.execute("SELECT status FROM pantryitem ORDER BY id").fetchall() == [
+            ("eaten",), ("tossed",), ("eaten",)]
+    migrate("upgrade", "head")
+    with Session(engine) as db:
+        assert db.exec(select(PantryOutcome)).all() == []
+    engine.dispose()

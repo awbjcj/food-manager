@@ -30,6 +30,7 @@ from app.cook.service import MIN_USABLE_ITEMS, URGENT_DAYS
 from app.models import MealPlan, MealPlanEntry
 from app.normalization import normalize
 from app.pantry_service import ListFilter, list_active
+from app.preference_service import build_preference_profile
 from app.week_composer import DaySpec, heuristic_compose
 
 log = logging.getLogger(__name__)
@@ -83,7 +84,9 @@ def aggregate_shopping(entries: Sequence[MealPlanEntry]) -> list[str]:
     return out
 
 
-def _score(sourced, *, urgent_names: list[str], signals, cooks, today: date) -> ScoredCandidate:
+def _score(
+    sourced, *, urgent_names: list[str], signals, cooks, today: date, preferences=None,
+) -> ScoredCandidate:
     names = [i.name for i in sourced.recipe.ingredients]
     expiry_use = expiry_utilization(recipe_names=names, urgent_names=urgent_names)
     candidate = ScoredCandidate(
@@ -100,7 +103,8 @@ def _score(sourced, *, urgent_names: list[str], signals, cooks, today: date) -> 
                 expiry_use=expiry_use,
                 deliciousness=sourced.recipe.deliciousness,
                 affinity_0_1=affinity(
-                    cuisine=sourced.recipe.cuisine, ingredient_names=names, signals=signals
+                    cuisine=sourced.recipe.cuisine, ingredient_names=names, signals=signals,
+                    preferences=preferences,
                 ),
                 novelty_0_1=novelty(recipe_key(candidate), cooks, today),
             )
@@ -117,6 +121,7 @@ def _pick(
     signals,
     cooks,
     today: date,
+    preferences=None,
 ) -> ScoredCandidate | None:
     safe = [
         s
@@ -128,7 +133,8 @@ def _pick(
     ]
     scored = sorted(
         (
-            _score(s, urgent_names=urgent_names, signals=signals, cooks=cooks, today=today)
+            _score(s, urgent_names=urgent_names, signals=signals, cooks=cooks, today=today,
+                   preferences=preferences)
             for s in safe
         ),
         key=lambda c: c.final_score,
@@ -233,6 +239,7 @@ async def build_plan(
     taken_ids: set[str] = set()
     entries: list[MealPlanEntry] = []
     signals = list_recent_signals(session, household_id=household_id)
+    preferences = build_preference_profile(session, household_id=household_id)
     cooks = list_recent_cooks(session, household_id=household_id, today=today)
     for spec in specs[:days]:
         pool_names = [name for name, _ in pool]
@@ -247,7 +254,7 @@ async def build_plan(
             profile=profile,
             offset=0,
             remaining_cost_micros=remaining,
-            steering=steering_summary(signals) or None,
+            steering=steering_summary(signals, preferences=preferences) or None,
         )
         cost += day_cost or 0
         urgent = [n for n, d in pool if d <= URGENT_DAYS]
@@ -259,6 +266,7 @@ async def build_plan(
             signals=signals,
             cooks=cooks,
             today=today,
+            preferences=preferences,
         )
         if candidate is None:
             if cost > cost_ceiling_micros:
@@ -334,6 +342,7 @@ async def swap_day(
     include = [f for f in spec.feature_items if normalize(f) in {n for n, _ in pantry}]
     remaining = max(0, cost_ceiling_micros - (plan.cost_micros_usd or 0))
     signals = list_recent_signals(session, household_id=plan.household_id)
+    preferences = build_preference_profile(session, household_id=plan.household_id)
     cooks = list_recent_cooks(session, household_id=plan.household_id, today=today)
     sourced, cost = await _search_day(
         source,
@@ -342,7 +351,7 @@ async def swap_day(
         profile=profile,
         offset=entry.search_offset,
         remaining_cost_micros=remaining,
-        steering=steering_summary(signals) or None,
+        steering=steering_summary(signals, preferences=preferences) or None,
     )
     plan.cost_micros_usd = (plan.cost_micros_usd or 0) + (cost or 0)
     urgent = [n for n, d in pantry if d <= URGENT_DAYS]
@@ -354,6 +363,7 @@ async def swap_day(
         signals=signals,
         cooks=cooks,
         today=today,
+        preferences=preferences,
     )
     session.add(plan)
     if candidate is None:

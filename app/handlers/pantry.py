@@ -410,6 +410,7 @@ async def _terminal_cmd(
                 household_id=user.household_id,
                 item_id=item_id,
                 today=today,
+                user_id=user.telegram_id,
             )
         except NotOwnerOrMissing:
             await msg.answer(t("pantry.no_item", user.lang, id=item_id))

@@ -10,8 +10,8 @@ from sqlalchemy import update
 from sqlmodel import Session, col, select
 
 from app.models import PantryBatch, PantryItem
-from app.pantry_service import ListFilter, PantrySort, list_active
-from app.pending_service import expire_for_item, utc_naive
+from app.pantry_service import ListFilter, PantrySort, list_active, set_terminal
+from app.pending_service import utc_naive
 
 PAGE_SIZE = 12
 MAX_SELECTED = 100
@@ -157,14 +157,11 @@ def change_selection(
             for item in rows:
                 if item.status != "active":
                     continue
-                item.status = cast(str, batch.target_status)
-                item.snoozed_until = None
-                assert item.id is not None
-                expire_for_item(
-                    session, household_id=batch.household_id, item_id=item.id
+                result = set_terminal(
+                    session, item, cast(str, batch.target_status),
+                    today=now.date(), user_id=batch.user_id,
                 )
-                session.add(item)
-                changed += 1
+                changed += int(result.applied)
             batch.status = "applied"
             batch.applied_count, batch.skipped_count = changed, len(selected) - changed
         elif batch.status == "selecting":

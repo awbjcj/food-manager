@@ -34,6 +34,7 @@ from app.pantry_service import (
     snooze_item,
 )
 from app.plan_service import tonight_entry
+from app.preference_service import build_preference_profile
 from app.profile_service import profile_from_household, update_profile_from_sentence
 from app.progress import clear_progress, finish_progress, start_progress
 from app.refine_service import run_receipt_refine
@@ -44,6 +45,7 @@ from app.renderer import (
     build_shopping_keyboard,
     build_undo_keyboard,
     render_ingest_reply,
+    render_learned_preferences,
     render_profile,
 )
 from app.shelf_life_defaults import lookup_default
@@ -54,6 +56,7 @@ from app.shopping_service import (
     list_pending,
 )
 from app.telegram_ui import to_aiogram_keyboard
+from app.translation_service import cached_name_translations, translate_texts
 
 log = logging.getLogger(__name__)
 HELP_TOPICS = ("pantry", "cook", "household", "settings")
@@ -174,11 +177,13 @@ async def handle_nl_message(
 async def _apply_mark(session, *, user, item_id, action, today, clients):
     if action == "ate":
         return mark_eaten(
-            session, household_id=user.household_id, item_id=item_id, today=today
+            session, household_id=user.household_id, item_id=item_id, today=today,
+            user_id=user.telegram_id,
         )
     if action == "tossed":
         return mark_tossed(
-            session, household_id=user.household_id, item_id=item_id, today=today
+            session, household_id=user.household_id, item_id=item_id, today=today,
+            user_id=user.telegram_id,
         )
     if action == "snooze":
         return snooze_item(
@@ -517,6 +522,22 @@ async def handle_llm(
         await msg.answer(f"LLM provider set to {provider}")
 
 
+async def _render_preferences(session, user, profile, *, translation_llm):
+    personal = build_preference_profile(
+        session, household_id=user.household_id, user_id=user.telegram_id,
+    )
+    household = build_preference_profile(session, household_id=user.household_id)
+    texts = [food.name for taste in (personal, household)
+             for food in (*taste.liked[:5], *taste.disliked[:5])]
+    if translation_llm is None:
+        names = cached_name_translations(session, texts, lang=user.lang)
+    else:
+        names = await translate_texts(session, texts, lang=user.lang, llm=translation_llm)
+    return render_profile(profile, lang=user.lang) + "\n\n" + render_learned_preferences(
+        personal, household, lang=user.lang, names=names,
+    )
+
+
 async def handle_prefs(
     msg,
     *,
@@ -540,7 +561,8 @@ async def handle_prefs(
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2 or not parts[1].strip():
             await msg.answer(
-                render_profile(profile_from_household(household), lang=user.lang)
+                await _render_preferences(session, user, profile_from_household(household),
+                                          translation_llm=clients.translation)
             )
             return
         now = now_provider(user.tz) if now_provider is not None else datetime.now(UTC)
@@ -553,7 +575,8 @@ async def handle_prefs(
         )
         if not decision.allowed:
             await msg.answer(
-                render_profile(profile_from_household(household), lang=user.lang)
+                await _render_preferences(session, user, profile_from_household(household),
+                                          translation_llm=clients.translation)
                 + "\n\n"
                 + t("quota.degraded.profile", user.lang)
             )
@@ -592,7 +615,8 @@ async def handle_prefs(
         await msg.answer(
             t("prefs.updated", user.lang)
             + "\n\n"
-            + render_profile(profile, lang=user.lang)
+            + await _render_preferences(session, user, profile,
+                                        translation_llm=clients.translation)
         )
 
 

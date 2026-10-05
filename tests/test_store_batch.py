@@ -24,11 +24,12 @@ from app.models import (
     Household,
     PantryBatch,
     PantryItem,
+    PantryOutcome,
     PendingCorrection,
     Receipt,
     User,
 )
-from app.pantry_service import ListFilter, list_active, mark_eaten
+from app.pantry_service import ListFilter, PantrySort, list_active, mark_eaten
 from app.pending_service import create_pending
 from app.renderer import build_digest_keyboard, render_ingest_reply
 from tests.fakes import FakeLLMClient
@@ -88,7 +89,7 @@ def sessions(tmp_path, monkeypatch):
     engine.dispose()
 
 
-def start(session, sort="receipt"):
+def start(session, sort: PantrySort = "receipt"):
     return create_batch(
         session, household_id=1, user_id=1, sort_by=sort, today=TODAY, now=NOW
     )
@@ -259,6 +260,7 @@ def test_batch_applies_once_after_restart_and_invalidates_pending(sessions, targ
         act(session, batch, "select_page")
         act(session, batch, "confirm", target)
         batch_id, version = batch.id, batch.version
+        assert batch_id is not None
         assert session.get(PantryItem, 1).status == "active"
     with sessions() as session:
         batch = load_batch(
@@ -286,6 +288,7 @@ def test_batch_applies_once_after_restart_and_invalidates_pending(sessions, targ
 def test_batch_owner_ttl_foreign_ids_and_empty_selection(sessions):
     with sessions() as session:
         batch = start(session)
+        assert batch.id is not None
         for household, user in [(1, 2), (2, 1), (2, 3)]:
             with pytest.raises(BatchError, match="expired"):
                 load_batch(
@@ -341,6 +344,7 @@ def test_concurrent_stale_confirmation_and_changed_items_do_not_overwrite(sessio
         act(session, batch, "select_page")
         act(session, batch, "confirm", "tossed")
         batch_id = batch.id
+        assert batch_id is not None
     with sessions() as first, sessions() as second:
         batch1 = load_batch(
             first, batch_id=batch_id, household_id=1, user_id=1, now=NOW
@@ -367,13 +371,14 @@ def test_concurrent_stale_confirmation_and_changed_items_do_not_overwrite(sessio
         assert session.get(PantryItem, 1).status == "eaten"
 
 
-def test_batch_atomic_rollback_and_missing_selected_row(sessions, monkeypatch):
-    import app.batch_service as service
+@pytest.mark.parametrize("target", ["eaten", "tossed", "removed"])
+def test_batch_atomic_rollback_and_missing_selected_row(sessions, monkeypatch, target):
+    import app.pantry_service as service
 
     with sessions() as session:
         batch = start(session)
         act(session, batch, "select_page")
-        act(session, batch, "confirm", "removed")
+        act(session, batch, "confirm", target)
         version = batch.version
         calls = 0
         original_expire = service.expire_for_item
@@ -391,6 +396,7 @@ def test_batch_atomic_rollback_and_missing_selected_row(sessions, monkeypatch):
                 act(session, batch, "apply")
         assert session.get(PantryItem, 1).status == "active"
         assert session.get(PantryItem, 2).status == "active"
+        assert session.exec(select(PantryOutcome)).all() == []
         assert batch.status == "confirming" and batch.version == version
         session.delete(session.get(PantryItem, 2))
         session.commit()
@@ -403,6 +409,7 @@ def test_expired_selection_ids_are_never_reused(sessions):
     with sessions() as session:
         first = start(session)
         old_id = first.id
+        assert old_id is not None
         second = create_batch(
             session,
             household_id=1,
@@ -411,7 +418,7 @@ def test_expired_selection_ids_are_never_reused(sessions):
             today=TODAY,
             now=NOW + TTL,
         )
-        assert second.id > old_id
+        assert second.id is not None and second.id > old_id
         assert session.get(PantryBatch, old_id) is None
 
 

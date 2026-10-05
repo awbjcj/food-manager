@@ -13,6 +13,7 @@ from app.cook.models import (
     SourcedRecipe,
 )
 from app.models import Household, MealPlan, MealPlanEntry, PantryItem, User
+from app.pantry_service import mark_eaten, mark_tossed
 from app.profile_service import FoodProfile
 from app.week_composer import DaySpec
 
@@ -139,6 +140,39 @@ def seeded_pantry(session_factory):
             ))
         db.commit()
     return session_factory
+
+
+@pytest.mark.asyncio
+async def test_plan_and_swap_use_learned_food_preferences(seeded_pantry):
+    from sqlmodel import select
+
+    from app.plan_service import build_plan, swap_day
+
+    today = date(2026, 7, 9)
+    with seeded_pantry() as db:
+        by_name = {item.normalized_name: item for item in db.exec(select(PantryItem)).all()}
+        rice_id, pasta_id = by_name["rice"].id, by_name["pasta"].id
+        assert rice_id is not None and pasta_id is not None
+        mark_eaten(db, household_id=1, item_id=rice_id, today=today, user_id=1)
+        mark_tossed(db, household_id=1, item_id=pasta_id, today=today, user_id=1)
+        pages = [
+            [_sourced("Disliked", ingredients=["pasta"], external_id=f"bad-{n}"),
+             _sourced("Liked", ingredients=["rice"], external_id=f"good-{n}")]
+            for n in (1, 2)
+        ]
+        source = FakeRecipeSource(pages)
+        composer = FakeComposer(specs=[DaySpec(day_index=0, feature_items=["yogurt"])])
+        plan, entries = await build_plan(
+            db, household_id=1, days=1, profile=_profile(), composer=composer, source=source,
+            today=today, chat_id=1, cost_ceiling_micros=1_000_000, created_at=datetime.now(UTC),
+        )
+        assert ScoredCandidate.model_validate_json(entries[0].recipe_json).recipe.title == "Liked"
+        swapped = await swap_day(db, plan=plan, entry=entries[0], profile=_profile(), source=source,
+                                 today=today, cost_ceiling_micros=1_000_000)
+        assert swapped is not None
+        assert ScoredCandidate.model_validate_json(swapped.recipe_json).recipe.title == "Liked"
+        assert all("likes rice" in criteria.steering and "dislikes pasta" in criteria.steering
+                   for criteria in source.calls)
 
 
 @pytest.mark.asyncio

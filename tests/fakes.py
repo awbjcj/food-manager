@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 from app.billing.payment import LedgerRow
@@ -23,6 +24,7 @@ class FakeLLMClient(LLMClient):
         image_bytes: bytes,
         *,
         image_media_type: str | None = None,
+        today: date | None = None,
     ) -> LLMResult:
         self.calls.append(image_bytes)
         if self._raises < self.raise_n_times:

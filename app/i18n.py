@@ -11,6 +11,29 @@ DEFAULT_LANG = "en"
 # Catalog. English is mandatory for every key; other languages are optional and
 # fall back to English. Keys are added incrementally by later tasks.
 MESSAGES: dict[str, dict[str, str]] = {
+    "pantry.store": {"en": "Store · {name}", "zh": "商店 · {name}", "fr": "Magasin · {name}", "es": "Tienda · {name}"},
+    "pantry.unknown_store": {"en": "Unknown store", "zh": "未知商店", "fr": "Magasin inconnu", "es": "Tienda desconocida"},
+    "btn.sort_store": {"en": "🏪 Store", "zh": "🏪 商店", "fr": "🏪 Magasin", "es": "🏪 Tienda"},
+    "batch.select": {"en": "☑ Select items", "zh": "☑ 批量选择", "fr": "☑ Sélectionner", "es": "☑ Seleccionar"},
+    "batch.heading": {"en": "Select items to change status · {n} selected (max {limit}).", "zh": "选择食材以批量更改状态 · 已选 {n} 件（最多 {limit} 件）。", "fr": "Sélectionnez les aliments · {n} sélectionnés (max. {limit}).", "es": "Selecciona alimentos para cambiar su estado · {n} seleccionados (máx. {limit})."},
+    "batch.confirm": {"en": "Mark {n} selected items as {status}? Review the selection, then confirm.", "zh": "将所选 {n} 件食材标记为{status}？请检查后确认。", "fr": "Marquer {n} aliments comme {status} ? Vérifiez la sélection, puis confirmez.", "es": "¿Marcar {n} alimentos como {status}? Revisa la selección y confirma."},
+    "batch.page": {"en": "Page {page} of {pages}", "zh": "第 {page} 页，共 {pages} 页", "fr": "Page {page} sur {pages}", "es": "Página {page} de {pages}"},
+    "batch.select_page": {"en": "Select this page", "zh": "选择本页", "fr": "Sélectionner cette page", "es": "Seleccionar esta página"},
+    "batch.clear": {"en": "Clear selection", "zh": "清空选择", "fr": "Effacer la sélection", "es": "Borrar selección"},
+    "batch.apply": {"en": "Confirm status change", "zh": "确认更改状态", "fr": "Confirmer le changement", "es": "Confirmar cambio de estado"},
+    "batch.edit": {"en": "Edit selection", "zh": "修改选择", "fr": "Modifier la sélection", "es": "Editar selección"},
+    "batch.done": {"en": "Updated {n} items to {status}. Skipped {skipped} items already updated.", "zh": "已将 {n} 件食材标记为{status}。跳过 {skipped} 件已更新的食材。", "fr": "{n} aliments marqués comme {status}. {skipped} aliments déjà modifiés ignorés.", "es": "{n} alimentos marcados como {status}. Se omitieron {skipped} ya actualizados."},
+    "batch.cancelled": {"en": "Batch cancelled. No items changed.", "zh": "已取消批量操作，未更改食材。", "fr": "Opération annulée. Aucun aliment modifié.", "es": "Operación cancelada. No se cambió ningún alimento."},
+    "batch.expired": {"en": "This selection has expired or is unavailable. Open the pantry and select items again.", "zh": "此选择已过期或不可用，请打开库存重新选择。", "fr": "Cette sélection a expiré ou est indisponible. Ouvrez le garde-manger et recommencez.", "es": "La selección caducó o no está disponible. Abre la despensa y selecciona de nuevo."},
+    "batch.closed": {"en": "This batch is already finished.", "zh": "此批量操作已结束。", "fr": "Cette opération est déjà terminée.", "es": "Esta operación ya terminó."},
+    "batch.stale": {"en": "The selection changed. Review the current selection below before continuing.", "zh": "选择已更改，请检查下方当前选择后继续。", "fr": "La sélection a changé. Vérifiez la sélection actuelle avant de continuer.", "es": "La selección cambió. Revisa la selección actual antes de continuar."},
+    "batch.invalid": {"en": "This action is no longer available. Edit the selection or start again.", "zh": "此操作已不可用，请修改选择或重新开始。", "fr": "Cette action n’est plus disponible. Modifiez la sélection ou recommencez.", "es": "Esta acción ya no está disponible. Edita la selección o empieza de nuevo."},
+    "batch.empty": {"en": "Select at least one item first.", "zh": "请先选择至少一件食材。", "fr": "Sélectionnez d’abord au moins un aliment.", "es": "Selecciona al menos un alimento."},
+    "batch.limit": {"en": "Select up to 100 items per batch.", "zh": "每次最多选择 100 件食材。", "fr": "Sélectionnez au maximum 100 aliments par opération.", "es": "Selecciona hasta 100 alimentos por operación."},
+    "batch.status.active": {"en": "active", "zh": "在库", "fr": "en stock", "es": "en despensa"},
+    "batch.status.eaten": {"en": "eaten", "zh": "已吃", "fr": "consommés", "es": "consumidos"},
+    "batch.status.tossed": {"en": "tossed", "zh": "已丢弃", "fr": "jetés", "es": "desechados"},
+    "batch.status.removed": {"en": "removed", "zh": "已移除", "fr": "retirés", "es": "eliminados"},
     "miniapp.capacity": {
         "en": "workspace capacity reached",
         "zh": "厨房服务已满，请稍后重试。",
@@ -1176,7 +1199,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - set your language\n"
             "  /digest_at <0..23> - set digest hour\n"
             "  /list [category|week|expired] - show pantry\n"
-            "  /pantry [receipt|category|expires|digest|<id>] - interactive pantry controls\n"
+            "  /pantry [receipt|store|category|expires|batch|digest|<id>] - interactive pantry controls\n"
             "  /add <free text> - propose new items in natural language.\n"
             "      Replies with a diff per item; tap Apply or Cancel.\n"
             "      Proposals expire after 10 min.\n"
@@ -1215,7 +1238,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - 设置语言\n"
             "  /digest_at <0..23> - 设置每日摘要时间\n"
             "  /list [category|week|expired] - 显示食材库存\n"
-            "  /pantry [receipt|category|expires|digest|<id>] - 交互式食材库存管理\n"
+            "  /pantry [receipt|store|category|expires|batch|digest|<id>] - 交互式食材库存管理\n"
             "  /add <自然语言> - 以自然语言提议添加食品。\n"
             "      每项显示差异；点击应用或取消。\n"
             "      提议10分钟后过期。\n"
@@ -1254,7 +1277,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - définir votre langue\n"
             "  /digest_at <0..23> - heure du résumé quotidien\n"
             "  /list [category|week|expired] - afficher le garde-manger\n"
-            "  /pantry [receipt|category|expires|digest|<id>] - contrôles interactifs du garde-manger\n"
+            "  /pantry [receipt|store|category|expires|batch|digest|<id>] - contrôles interactifs du garde-manger\n"
             "  /add <texte libre> - proposer de nouveaux articles en langage naturel.\n"
             "      Répond avec un diff par article ; appuyez sur Appliquer ou Annuler.\n"
             "      Les propositions expirent après 10 min.\n"
@@ -1293,7 +1316,7 @@ MESSAGES: dict[str, dict[str, str]] = {
             "  /lang [en|zh|fr|es] - establecer tu idioma\n"
             "  /digest_at <0..23> - hora del resumen diario\n"
             "  /list [category|week|expired] - mostrar despensa\n"
-            "  /pantry [receipt|category|expires|digest|<id>] - controles interactivos de despensa\n"
+            "  /pantry [receipt|store|category|expires|batch|digest|<id>] - controles interactivos de despensa\n"
             "  /add <texto libre> - proponer nuevos artículos en lenguaje natural.\n"
             "      Responde con un diff por artículo; toca Aplicar o Cancelar.\n"
             "      Las propuestas expiran después de 10 min.\n"
@@ -1372,7 +1395,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "en": (
             "🥕 Pantry commands:\n"
             "  /list [category|week|expired] - show pantry\n"
-            "  /pantry [receipt|category|expires|digest|<id>] - interactive pantry controls\n"
+            "  /pantry [receipt|store|category|expires|batch|digest|<id>] - interactive pantry controls\n"
             "  /add <free text> - propose new items in natural language\n"
             "  /ate <id> - mark eaten\n"
             "  /toss <id> - mark tossed\n"
@@ -1384,7 +1407,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "zh": (
             "🥕 食材库存命令：\n"
             "  /list [category|week|expired] - 显示食材库存\n"
-            "  /pantry [receipt|category|expires|digest|<id>] - 交互式食材库存管理\n"
+            "  /pantry [receipt|store|category|expires|batch|digest|<id>] - 交互式食材库存管理\n"
             "  /add <自然语言> - 以自然语言提议添加食品\n"
             "  /ate <id> - 标记为已食用\n"
             "  /toss <id> - 标记为已丢弃\n"
@@ -1396,7 +1419,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "fr": (
             "🥕 Commandes garde-manger :\n"
             "  /list [category|week|expired] - afficher le garde-manger\n"
-            "  /pantry [receipt|category|expires|digest|<id>] - contrôles interactifs\n"
+            "  /pantry [receipt|store|category|expires|batch|digest|<id>] - contrôles interactifs\n"
             "  /add <texte libre> - proposer de nouveaux articles\n"
             "  /ate <id> - marquer comme mangé\n"
             "  /toss <id> - marquer comme jeté\n"
@@ -1408,7 +1431,7 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": (
             "🥕 Comandos de despensa:\n"
             "  /list [category|week|expired] - mostrar despensa\n"
-            "  /pantry [receipt|category|expires|digest|<id>] - controles interactivos\n"
+            "  /pantry [receipt|store|category|expires|batch|digest|<id>] - controles interactivos\n"
             "  /add <texto libre> - proponer nuevos artículos\n"
             "  /ate <id> - marcar como comido\n"
             "  /toss <id> - marcar como desechado\n"
@@ -1618,10 +1641,10 @@ MESSAGES: dict[str, dict[str, str]] = {
         "es": "Tu despensa está vacía.",
     },
     "pantry.usage": {
-        "en": "usage: /pantry [receipt|category|expires|digest|<id>]",
-        "zh": "用法：/pantry [receipt|category|expires|digest|<id>]",
-        "fr": "usage : /pantry [receipt|category|expires|digest|<id>]",
-        "es": "uso: /pantry [receipt|category|expires|digest|<id>]",
+        "en": "usage: /pantry [receipt|store|category|expires|batch|digest|<id>]",
+        "zh": "用法：/pantry [receipt|store|category|expires|batch|digest|<id>]",
+        "fr": "usage : /pantry [receipt|store|category|expires|batch|digest|<id>]",
+        "es": "uso: /pantry [receipt|store|category|expires|batch|digest|<id>]",
     },
     "pantry.no_item": {
         "en": "no item #{id}",

@@ -11,7 +11,7 @@ from app.client_set import PerUserClients
 from app.correction_service import propose_add
 from app.llm import LLMResult, ParsedItem, ParseResult, ProposedAddItem
 from app.models import Household, PantryItem, Receipt, User
-from app.pantry_service import compute_stats
+from app.pantry_service import compute_stats, move_to_storage
 from app.refine_service import (
     SEARCH_MIN_CONFIDENCE,
     AnthropicSearchClient,
@@ -123,6 +123,25 @@ async def test_refine_updates_untouched_item_and_writes_cache(session):
 
 
 @pytest.mark.asyncio
+async def test_refine_keeps_purchase_date_for_an_expired_default_item(session):
+    item = _item(session, "Milk", days=7)
+    assert item.id is not None
+    today = date(2026, 6, 8)
+    search = FakeSearchClient(
+        default=ShelfLifeSearchResult(days=7, confidence=0.95, cost_micros_usd=100)
+    )
+
+    result = await refine_receipt_items(
+        session, search, household_id=1, item_ids=[item.id], today=today,
+    )
+
+    session.refresh(item)
+    assert result.updated_ids == [item.id]
+    assert item.expires_on == date(2026, 6, 4)
+    assert item.expires_on < today
+
+
+@pytest.mark.asyncio
 async def test_refine_skips_touched_items(session):
     corrected = _item(session, "Tofu", source="user_correction")
     eaten = _item(session, "Milk", status="eaten")
@@ -139,6 +158,85 @@ async def test_refine_skips_touched_items(session):
     )
     assert result.updated_ids == []
     assert search.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["fridge", "frozen"])
+async def test_refine_skips_items_already_moved_to_storage(session, state):
+    item = _item(session, "Milk", days=7)
+    assert item.id is not None
+    today = date(2026, 6, 8)
+    await move_to_storage(
+        session, household_id=1, item_id=item.id, state=state, today=today,
+    )
+    expected = (item.shelf_life_days, item.expires_on, item.shelf_life_source)
+    search = FakeSearchClient(
+        default=ShelfLifeSearchResult(days=1, confidence=0.95, cost_micros_usd=100)
+    )
+
+    result = await refine_receipt_items(
+        session, search, household_id=1, item_ids=[item.id], today=today,
+    )
+
+    session.refresh(item)
+    assert (item.shelf_life_days, item.expires_on, item.shelf_life_source) == expected
+    assert item.expires_on > today
+    assert result.updated_ids == []
+    assert result.total_cost_micros is None
+    assert search.calls == []
+    assert get_cached(session, 1, "milk") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["fridge", "frozen"])
+async def test_refine_preserves_storage_change_during_search(tmp_path, state):
+    engine = create_engine(f"sqlite:///{(tmp_path / 'food.db').as_posix()}")
+    SQLModel.metadata.create_all(engine)
+    today = date(2026, 6, 8)
+    try:
+        with Session(engine) as session:
+            session.add(Household(created_at=datetime.now(UTC)))
+            session.commit()
+            item = _item(session, "Milk", days=7)
+            item_id = item.id
+            assert item_id is not None
+
+        class StoringSearch:
+            async def lookup_shelf_life(self, *, name, category):
+                # A separate request commits a storage move while refinement awaits.
+                with Session(engine) as session:
+                    await move_to_storage(
+                        session, household_id=1, item_id=item_id,
+                        state=state, today=today,
+                    )
+                return ShelfLifeSearchResult(
+                    days=1, confidence=0.95, cost_micros_usd=100,
+                )
+
+        with Session(engine) as session:
+            # Retain the old row in the identity map to exercise the refresh.
+            original = session.get(PantryItem, item_id)
+            assert original is not None and original.storage == "default"
+            result = await refine_receipt_items(
+                session, StoringSearch(), household_id=1,
+                item_ids=[item_id], today=today,
+            )
+
+        with Session(engine) as session:
+            stored = session.get(PantryItem, item_id)
+            assert stored is not None
+            expected_days = 7 if state == "fridge" else 90
+            assert stored.storage == state
+            assert stored.stored_on == today
+            assert stored.shelf_life_days == expected_days
+            assert stored.expires_on == today + timedelta(days=expected_days)
+            assert stored.expires_on > today
+            assert stored.shelf_life_source == f"{state}_foodkeeper"
+            assert get_cached(session, 1, "milk") is None
+        assert result.updated_ids == []
+        assert result.total_cost_micros == 100
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.asyncio

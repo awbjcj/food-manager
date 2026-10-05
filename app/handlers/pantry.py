@@ -7,6 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlmodel import Session
 
 from app import handler_support, views
+from app.batch_service import create_batch
 from app.billing.meter import admit, commit
 from app.cache import get_cached
 from app.client_set import PerUserClients
@@ -128,6 +129,15 @@ async def handle_pantry(
             mode = parse_pantry_arg(args)
         except CommandError:
             await msg.answer(t("pantry.usage", user.lang))
+            return
+
+        if mode == "batch":
+            batch = create_batch(
+                session, household_id=user.household_id, user_id=user.telegram_id,
+                sort_by="store", today=today, now=now_provider(user.tz),
+            )
+            view = views.pantry_batch(session, batch, lang=user.lang)
+            await msg.answer(view.text, reply_markup=to_aiogram_keyboard(view.rows))
             return
 
         if isinstance(mode, int):

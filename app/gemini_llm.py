@@ -41,6 +41,7 @@ from app.llm import (
     ProposedAddItem,
     ProposedAddItems,
     _detect_media_type,
+    receipt_user_prompt,
 )
 from app.llm_transport import with_transport_retry
 from app.profile_service import FoodProfile
@@ -216,13 +217,14 @@ class GeminiLLMClient:
         image_bytes: bytes,
         *,
         image_media_type: str | None = None,
+        today: date | None = None,
     ) -> LLMResult:
         from google.genai import types
 
         media_type = image_media_type or _detect_media_type(image_bytes)
         contents = [
             types.Part.from_bytes(data=image_bytes, mime_type=media_type),
-            "Parse this receipt.",
+            receipt_user_prompt(today),
         ]
         response = await self._caller.generate(
             system=SYSTEM_PROMPT,

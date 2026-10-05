@@ -23,8 +23,8 @@ ALLOWED_CATEGORIES = frozenset({
 })
 
 Window = Literal["all", "week", "expired"]
-PantrySort = Literal["receipt", "category", "expires"]
-PANTRY_SORTS: tuple[PantrySort, ...] = ("receipt", "category", "expires")
+PantrySort = Literal["receipt", "store", "category", "expires"]
+PANTRY_SORTS: tuple[PantrySort, ...] = ("receipt", "store", "category", "expires")
 
 
 @dataclass(frozen=True)
@@ -85,7 +85,34 @@ def list_active(
         query = query.order_by(
             col(PantryItem.expires_on).asc(), col(PantryItem.id).asc()
         )
-    return list(session.exec(query).all())
+    items = list(session.exec(query).all())
+    if sort_by == "store":
+        stores = receipt_stores(session, household_id=household_id, items=items)
+        items.sort(key=lambda item: (
+            not bool(stores.get(item.source_receipt_id or 0)),
+            (stores.get(item.source_receipt_id or 0) or "").casefold(),
+            item.expires_on,
+            item.id or 0,
+        ))
+    return items
+
+
+def receipt_stores(
+    session: Session, *, household_id: int, items: list[PantryItem]
+) -> dict[int, str]:
+    ids = {item.source_receipt_id for item in items if item.source_receipt_id is not None}
+    if not ids:
+        return {}
+    receipts = session.exec(
+        select(Receipt).where(
+            Receipt.household_id == household_id, col(Receipt.id).in_(ids)
+        )
+    ).all()
+    return {
+        receipt.id: receipt.store_name
+        for receipt in receipts
+        if receipt.id is not None and receipt.store_name
+    }
 
 
 def active_pantry_names(session: Session, *, household_id: int, today: date) -> list[str]:

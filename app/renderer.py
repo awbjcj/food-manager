@@ -124,6 +124,8 @@ def render_ingest_reply(
         return "\n".join(lines)
 
     lines.append(t("ingest.logged", lang, n=summary.inserted_food_count))
+    if summary.store_name:
+        lines.append(t("pantry.store", lang, name=summary.store_name))
     for item_id, name, expires_on, shelf_life_days in zip(
         summary.inserted_item_ids,
         summary.inserted_item_names,
@@ -205,6 +207,7 @@ def render_digest(
     cap: int | None = DIGEST_CAP,
     tonight: str | None = None,
     sort_by: PantrySort = "expires",
+    stores: Mapping[int, str] | None = None,
 ) -> DigestRender:
     total = len(items)
     if total == 0:
@@ -248,6 +251,16 @@ def render_digest(
                 lines.append(f"{section_icons[key]} {heading}")
                 lines.extend(line_for(item) for item in buckets[key])
                 lines.append("")
+    elif sort_by == "store":
+        previous_store: str | object = object()
+        for item in capped:
+            store = (stores or {}).get(getattr(item, "source_receipt_id", None) or 0)
+            key = (store or "").casefold()
+            if key != previous_store:
+                label = store or t("pantry.unknown_store", lang)
+                lines.append("🏪 " + label)
+                previous_store = key
+            lines.append(line_for(item))
     elif sort_by == "category":
         previous_category: str | None | object = object()
         for item in capped:
@@ -320,6 +333,13 @@ def build_digest_keyboard(
                 callback_data="item:list:all:expires",
             ),
         ])
+        rows.append([
+            CallbackButton(
+                text=("✓ " if sort_by == "store" else "") + t("btn.sort_store", lang),
+                callback_data="item:list:all:store",
+            ),
+            CallbackButton(text=t("batch.select", lang), callback_data=f"batch:start:{sort_by}"),
+        ])
     rows.extend([button] for button in buttons)
     if has_more:
         rows.append(
@@ -332,7 +352,7 @@ def build_digest_keyboard(
     return rows
 
 
-def render_item_card(item, *, today: date, lang: str = "en", names=None) -> str:
+def render_item_card(item, *, today: date, lang: str = "en", names=None, store_name: str | None = None) -> str:
     storage = getattr(item, "storage", "default")
     storage_label = t(f"storage.{storage}", lang)
     qty = _qty_prefix(item.qty, item.unit).strip() or "1"
@@ -343,6 +363,7 @@ def render_item_card(item, *, today: date, lang: str = "en", names=None) -> str:
             t("item.detail.quantity", lang, value=qty),
             t("item.detail.storage", lang, value=storage_label),
             t("item.detail.shelf_life", lang, days=item.shelf_life_days),
+            *([t("pantry.store", lang, name=store_name)] if store_name else []),
         ]
     )
 

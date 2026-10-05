@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 
 from sqlmodel import Session
 
+from app.batch_renderer import render_batch
+from app.batch_service import PAGE_SIZE, batch_items
 from app.cook.models import ScoredCandidate
-from app.pantry_service import PantrySort
+from app.models import PantryBatch
+from app.pantry_service import PantrySort, receipt_stores
 from app.plan_service import tonight_entry
 from app.renderer import (
     DIGEST_CAP,
+    CallbackButton,
     build_nl_picker_keyboard,
     render_cook_result,
     render_cooked_history,
@@ -35,6 +40,24 @@ from app.translation_service import cached_name_translations, translate_texts
 class LocalizedView:
     text: str
     names: dict[str, str]
+
+
+@dataclass(frozen=True)
+class LocalizedBatchView:
+    text: str
+    rows: list[list[CallbackButton]]
+
+
+def pantry_batch(session: Session, batch: PantryBatch, *, lang: str) -> LocalizedBatchView:
+    items = batch_items(session, batch, selected_only=batch.status == "confirming")
+    page_items = items[batch.page * PAGE_SIZE:(batch.page + 1) * PAGE_SIZE]
+    text, rows = render_batch(
+        batch, page_items, total=len(items), selected=set(json.loads(batch.selected_ids_json)),
+        lang=lang,
+        names=cached_names(session, lang=lang, texts=[item.raw_name for item in page_items]),
+        stores=receipt_stores(session, household_id=batch.household_id, items=page_items),
+    )
+    return LocalizedBatchView(text, rows)
 
 
 @dataclass(frozen=True)
@@ -122,6 +145,8 @@ async def digest(
             cap=cap,
             tonight=None if title is None else names.get(title, title),
             sort_by=sort_by,
+            stores=(receipt_stores(session, household_id=user.household_id, items=items)
+                    if sort_by == "store" else None),
         ),
         names,
     )
@@ -150,6 +175,8 @@ def digest_cached(
             cap=cap,
             tonight=None if title is None else names.get(title, title),
             sort_by=sort_by,
+            stores=(receipt_stores(session, household_id=household_id, items=items)
+                    if sort_by == "store" else None),
         ),
         names,
     )
@@ -179,14 +206,26 @@ async def item_card(
         translation_llm=translation_llm,
     )
     return LocalizedView(
-        render_item_card(item, today=today, lang=user.lang, names=names), names
+        render_item_card(
+            item, today=today, lang=user.lang, names=names,
+            store_name=receipt_stores(
+                session, household_id=item.household_id, items=[item]
+            ).get(item.source_receipt_id),
+        ),
+        names,
     )
 
 
 def item_card_cached(session: Session, item, *, lang: str, today: date) -> LocalizedView:
     names = cached_names(session, lang=lang, texts=[item.raw_name])
     return LocalizedView(
-        render_item_card(item, today=today, lang=lang, names=names), names
+        render_item_card(
+            item, today=today, lang=lang, names=names,
+            store_name=receipt_stores(
+                session, household_id=item.household_id, items=[item]
+            ).get(item.source_receipt_id),
+        ),
+        names,
     )
 
 

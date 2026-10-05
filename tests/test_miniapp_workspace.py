@@ -290,6 +290,44 @@ async def test_add_apply_and_retry_are_real_and_idempotent(kitchen):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("target,label", [("eaten", "Ate"), ("tossed", "Tossed"), ("removed", "Remove")])
+async def test_store_pantry_and_batch_status_through_miniapp_buttons(kitchen, target, label):
+    with kitchen.sessions() as session:
+        now = datetime.now(UTC)
+        receipt = Receipt(household_id=1, photo_file_id="store-batch", store_name="Costco",
+                          purchase_date=now.date(), purchase_date_source="receipt", scanned_at=now)
+        session.add(receipt)
+        session.flush()
+        for name in ("Apples", "Brussels sprouts"):
+            session.add(PantryItem(
+                household_id=1, raw_name=name, normalized_name=name.lower(),
+                purchased_on=now.date(), expires_on=now.date() + timedelta(days=7),
+                shelf_life_days=7, shelf_life_source="llm", ingest_shelf_life_source="llm",
+                created_via="receipt", source_receipt_id=receipt.id, created_at=now))
+        session.commit()
+    async with TestClient(TestServer(kitchen.app)) as client:
+        result = await action(client, kind="command", command="pantry")
+        result = await action(client, **button(result, "Store"))
+        assert "🏪 Costco" in result["cards"][-1]["text"]
+        assert "🏪 Unknown store" in result["cards"][-1]["text"]
+        result = await action(client, **button(result, "Select items"))
+        result = await action(client, **button(result, "Apples"))
+        result = await action(client, **button(result, "Brussels sprouts"))
+        result = await action(client, **button(result, label))
+        assert "Mark 2 selected" in result["cards"][-1]["text"]
+        with kitchen.sessions() as session:
+            assert all(row.status == "active" for row in session.exec(select(PantryItem)).all())
+        result = await action(client, **button(result, "Confirm status change"))
+        assert f"Updated 2 items to {target}" in result["cards"][-1]["text"]
+        result = await action(client, **button(result, "Back"))
+        assert "🏪 Costco" not in result["cards"][-1]["text"]
+        with kitchen.sessions() as session:
+            rows = session.exec(select(PantryItem).where(PantryItem.household_id == 1)).all()
+            assert {row.raw_name: row.status for row in rows} == {
+                "Milk": "active", "Apples": target, "Brussels sprouts": target}
+
+
+@pytest.mark.asyncio
 async def test_pantry_buttons_correction_reply_and_stale_actions(kitchen):
     async with TestClient(TestServer(kitchen.app)) as client:
         result = await action(client, kind="command", command="pantry", text="1")

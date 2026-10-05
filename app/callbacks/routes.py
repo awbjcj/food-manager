@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.callback_dispatch import CallbackResult
 from app.callbacks import EXPECTED_CALLBACK_ROUTES
 from app.callbacks.actions import handle_callback
+from app.callbacks.batch import handle_batch_callback
 from app.callbacks.cook import handle_cook_callback
 from app.callbacks.cooked import handle_cooked_callback
 from app.callbacks.help import handle_help_callback
@@ -13,6 +14,16 @@ from app.callbacks.registry import CallbackRegistry
 
 def build_callback_registry() -> CallbackRegistry:
     registry = CallbackRegistry()
+
+    @registry.register("batch")
+    async def batch_route(request, context):
+        async def run():
+            await handle_batch_callback(
+                context.callback, session_factory=context.session_factory,
+                now_provider=context.now_provider,
+            )
+
+        return CallbackResult(deferred=run)
 
     @registry.register("help")
     async def help_route(_request, context):

@@ -35,3 +35,5 @@ tests/fixtures/private_receipts/
 web/node_modules/
 web/dist/
 web/*.tsbuildinfo
+web/test-results/
+web/playwright-report/

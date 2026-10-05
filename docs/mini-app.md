@@ -7,9 +7,18 @@ forms and interactive result cards for all commands registered on the user bot.
 Home shortcuts open the corresponding Kitchen feature. No command typing or
 return to the chat is required for these workflows.
 
-Choose **Pantry**, **Meals**, **Household**, or **Settings & help**, then select an
-action within that category. Forms and activity appear side by side on wider
-screens and stack on phones. Account settings use the same spacing and controls.
+Home puts pantry, receipt scanning, cooking, and shopping shortcuts first, with
+plan usage and household details below them on phones or alongside them on wider
+screens. The profile button opens Account; household management opens Kitchen.
+
+Choose **Pantry**, **Meals**, **Household**, or **Settings & help**, then select a
+visible action. **More actions** reveals the remaining workflows. The selected
+action names the submit button. Food-ID forms offer a pantry lookup that preserves
+the current draft. Forms and activity appear side by side on wider screens and
+stack on phones; completed submissions move focus to activity, and scroll there
+on phones. The latest result stays open, with earlier results in an expandable
+history. Account settings show unsaved changes, allow discarding edits, and lock
+fields during saving. Failed saves retain the draft.
 
 | Area | Available workflows | Bot command equivalents |
 | --- | --- | --- |
@@ -70,8 +79,14 @@ uv run pyright
 cd web
 npm test # Node.js 22.18+; translation coverage and glossary checks
 npm run build
+npx playwright install chromium # first-time browser setup
+npm run test:ui
 ```
 
 Integration tests exercise real SQLite mutations with fake external providers,
 including approval and undo, recipe generation, household isolation, stale-card
 rejection, calendar export, upload limits, and command-catalog coverage.
+Browser tests mock the API and cover navigation, confirmations, draft retention,
+save failures, payment availability, and layouts across all four languages in
+light and dark themes. They start an isolated Vite server on port 5174. Set
+`MINIAPP_TEST_CHROMIUM_PATH` to use an existing Chromium executable.

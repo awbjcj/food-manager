@@ -18,33 +18,7 @@ import {
 import type { AccountData, PlanOption, Tab } from './types'
 import { WorkspaceView } from './Workspace'
 import { w } from './workspace-copy'
-
-type IconName =
-  | 'account' | 'arrow' | 'brain' | 'calendar' | 'check' | 'close'
-  | 'home' | 'household' | 'leaf' | 'pantry' | 'plan' | 'receipt'
-  | 'recipes' | 'refresh' | 'shopping' | 'sparkle'
-
-function Icon({ name, size = 24 }: { name: IconName; size?: number }) {
-  const paths: Record<IconName, ReactNode> = {
-    account: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
-    arrow: <path d="m9 18 6-6-6-6" />,
-    brain: <><path d="M9.5 4a3 3 0 0 0-5 2.2A3 3 0 0 0 3 11a3 3 0 0 0 1.5 4.8A3 3 0 0 0 9.5 18Z" /><path d="M14.5 4a3 3 0 0 1 5 2.2A3 3 0 0 1 21 11a3 3 0 0 1-1.5 4.8A3 3 0 0 1 14.5 18ZM9.5 8h5M9.5 13h5M12 4v16" /></>,
-    calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M16 3v4M8 3v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" /></>,
-    check: <path d="m5 12 4 4L19 6" />,
-    close: <path d="m6 6 12 12M18 6 6 18" />,
-    home: <><path d="m3 11 9-8 9 8" /><path d="M5 10v11h14V10M9 21v-7h6v7" /></>,
-    household: <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.5" /><path d="M3 20a6 6 0 0 1 12 0M14 15a5 5 0 0 1 7 4.5" /></>,
-    leaf: <><path d="M20 4c-8 0-14 4-14 10 0 3 2 5 5 5 6 0 9-7 9-15Z" /><path d="M4 21c2-6 6-9 12-12" /></>,
-    pantry: <><path d="M5 5h14l-1 16H6L5 5Z" /><path d="M4 5h16M8 2h8l1 3M9 10h6M9 14h6" /></>,
-    plan: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M9 7h6M9 11h6M9 15h4" /></>,
-    receipt: <path d="M6 3v18l3-2 3 2 3-2 3 2V3l-3 2-3-2-3 2-3-2Zm3 7h6m-6 4h5" />,
-    recipes: <><path d="M4 5a3 3 0 0 1 3-3h5v18H7a3 3 0 0 0-3 2V5Z" /><path d="M20 5a3 3 0 0 0-3-3h-5v18h5a3 3 0 0 1 3 2V5Z" /></>,
-    refresh: <><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></>,
-    shopping: <><path d="M3 4h2l2.4 10.2a2 2 0 0 0 2 1.6H18a2 2 0 0 0 2-1.6L21 8H7" /><circle cx="10" cy="20" r="1" /><circle cx="18" cy="20" r="1" /></>,
-    sparkle: <><path d="m12 3 1.2 3.8L17 8l-3.8 1.2L12 13l-1.2-3.8L7 8l3.8-1.2L12 3Z" /><path d="m19 14 .7 2.3L22 17l-2.3.7L19 20l-.7-2.3L16 17l2.3-.7L19 14Z" /></>,
-  }
-  return <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>
-}
+import { Icon, type IconName } from './Icon'
 
 function Logo() {
   return <div className="brand-mark" aria-hidden="true"><Icon name="leaf" size={22} /></div>
@@ -73,8 +47,8 @@ function SectionLabel({ children }: { children: ReactNode }) {
   return <h2 className="section-label">{children}</h2>
 }
 
-function OpenRow({ icon, title, detail, action, onClick }: { icon: IconName; title: string; detail?: string; action?: string; onClick?: () => void }) {
-  return <button className="open-row" onClick={onClick} type="button">
+function OpenRow({ icon, title, detail, action, onClick, disabled = false }: { icon: IconName; title: string; detail?: string; action?: string; onClick?: () => void; disabled?: boolean }) {
+  return <button className="open-row" onClick={onClick} type="button" disabled={disabled}>
     <span className="icon-disc"><Icon name={icon} /></span>
     <span className="row-copy"><strong>{title}</strong>{detail && <small>{detail}</small>}</span>
     {action && <span className="row-action">{action}</span>}
@@ -82,36 +56,47 @@ function OpenRow({ icon, title, detail, action, onClick }: { icon: IconName; tit
   </button>
 }
 
-function Header({ data, locale }: { data: AccountData; locale: Locale }) {
+function Header({ data, locale, openAccount }: { data: AccountData; locale: Locale; openAccount: () => void }) {
   const initials = data.user.name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()
-  return <header className="brand-header"><div className="brand"><Logo /><span>{t(locale, 'brand.name')}</span></div><div className="avatar" aria-label={data.user.name}>{initials}</div></header>
+  return <header className="brand-header"><div className="brand"><Logo /><span>{t(locale, 'brand.name')}</span></div><button type="button" className="avatar" onClick={openAccount} aria-label={`${t(locale, 'account.title')} · ${data.user.name}`}>{initials}</button></header>
 }
 
-type QuickAccess = 'pantry' | 'cook' | 'plan' | 'shopping' | 'favorites' | 'prefs' | 'stats'
+type QuickAccess = 'pantry' | 'photo' | 'cook' | 'plan' | 'shopping' | 'favorites' | 'prefs' | 'stats' | 'household'
 
 function HomeView({ data, locale, selectTab, openFeature }: { data: AccountData; locale: Locale; selectTab: (tab: Tab) => void; openFeature: (destination?: QuickAccess) => void }) {
   const firstName = data.user.name.split(' ')[0]
   const greeting = t(locale, greetingKey(hourInTimeZone(data.user.timeZone)), { name: firstName })
   const reset = formatShortDate(locale, new Date(data.plan.periodEnd), data.user.timeZone)
+  const shortcuts = [
+    { command: 'pantry', icon: 'pantry', label: t(locale, 'shortcut.pantry'), detail: w(locale, 'pantryShortcut') },
+    { command: 'photo', icon: 'receipt', label: w(locale, 'photo'), detail: w(locale, 'photoShortcut') },
+    { command: 'cook', icon: 'recipes', label: t(locale, 'shortcut.cook'), detail: w(locale, 'cookShortcut') },
+    { command: 'shopping', icon: 'shopping', label: t(locale, 'shortcut.shopping'), detail: w(locale, 'shoppingShortcut') },
+  ] as const
   return <main className="page home-page">
-    <Header data={data} locale={locale} />
-    <section className="hero-copy"><h1>{greeting}</h1><p>{t(locale, 'home.running')}</p></section>
-    {data.hostedFeaturesEnabled && <button className="plan-band" onClick={() => selectTab('plans')}><span className="plan-dot"><Icon name="leaf" /></span><strong>{currentPlanName(data, locale)}</strong><span>{t(locale, 'home.viewPlans')}</span><Icon name="arrow" /></button>}
-    {data.hostedFeaturesEnabled && <section className="usage-list">
-      <UsageRow icon="receipt" label={t(locale, 'usage.receipts')} used={data.quota.receiptsUsed} limit={data.quota.receiptsLimit} locale={locale} />
-      <UsageRow icon="brain" label={t(locale, 'usage.actions')} used={data.quota.actionsUsed} limit={data.quota.actionsLimit} locale={locale} />
-      <p className="reset-copy"><Icon name="refresh" size={18} /> {t(locale, 'usage.resets', { date: reset })}</p>
-    </section>}
-    {data.hostedFeaturesEnabled && <section className="content-section"><SectionLabel>{t(locale, 'home.myHousehold')}</SectionLabel><OpenRow icon="household" title={data.household.name} detail={countLabel(locale, data.household.members, 'count.member.one', 'count.member.many')} action={t(locale, 'home.manage')} onClick={() => selectTab('account')} /></section>}
-    <section className="content-section"><SectionLabel>{t(locale, 'home.quickAccess')}</SectionLabel><div className="open-list">
-      <OpenRow icon="pantry" title={t(locale, 'shortcut.pantry')} onClick={() => openFeature('pantry')} />
-      <OpenRow icon="recipes" title={t(locale, 'shortcut.cook')} onClick={() => openFeature('cook')} />
+    <Header data={data} locale={locale} openAccount={() => selectTab('account')} />
+    <section className="hero-copy"><h1>{greeting}</h1><p>{w(locale, 'subtitle')}</p></section>
+    <div className="home-layout"><section className="home-tools" aria-labelledby="quick-access-title">
+    <h2 id="quick-access-title" className="section-label">{t(locale, 'home.quickAccess')}</h2>
+    <div className="quick-grid">{shortcuts.map(shortcut => <button key={shortcut.command} type="button" className="quick-card" onClick={() => openFeature(shortcut.command)}>
+      <span className="icon-disc"><Icon name={shortcut.icon} /></span><strong>{shortcut.label}</strong><small>{shortcut.detail}</small><Icon name="arrow" size={18} />
+    </button>)}</div>
+    <div className="open-list home-secondary">
       <OpenRow icon="calendar" title={t(locale, 'shortcut.plan')} onClick={() => openFeature('plan')} />
-      <OpenRow icon="shopping" title={t(locale, 'shortcut.shopping')} onClick={() => openFeature('shopping')} />
       <OpenRow icon="recipes" title={t(locale, 'shortcut.favorites')} onClick={() => openFeature('favorites')} />
       <OpenRow icon="brain" title={t(locale, 'shortcut.preferences')} onClick={() => openFeature('prefs')} />
       <OpenRow icon="plan" title={t(locale, 'shortcut.stats')} onClick={() => openFeature('stats')} />
     </div></section>
+    {data.hostedFeaturesEnabled && <aside className="home-overview" aria-label={w(locale, 'overview')}>
+    <SectionLabel>{w(locale, 'overview')}</SectionLabel>
+    <button type="button" className="plan-band" onClick={() => selectTab('plans')}><span className="plan-dot"><Icon name="leaf" /></span><strong>{currentPlanName(data, locale)}</strong><span>{t(locale, 'home.viewPlans')}</span><Icon name="arrow" /></button>
+    <section className="usage-list">
+      <UsageRow icon="receipt" label={t(locale, 'usage.receipts')} used={data.quota.receiptsUsed} limit={data.quota.receiptsLimit} locale={locale} />
+      <UsageRow icon="brain" label={t(locale, 'usage.actions')} used={data.quota.actionsUsed} limit={data.quota.actionsLimit} locale={locale} />
+      <p className="reset-copy"><Icon name="refresh" size={18} /> {t(locale, 'usage.resets', { date: reset })}</p>
+    </section>
+    <section className="content-section"><SectionLabel>{t(locale, 'home.myHousehold')}</SectionLabel><OpenRow icon="household" title={data.household.name} detail={countLabel(locale, data.household.members, 'count.member.one', 'count.member.many')} action={t(locale, 'home.manage')} onClick={() => openFeature('household')} /></section>
+    </aside>}</div>
   </main>
 }
 
@@ -123,7 +108,7 @@ function PlanFeatures({ plan, locale }: { plan: PlanOption; locale: Locale }) {
   </ul>
 }
 
-function PlansView({ data, locale, checkout, manage }: { data: AccountData; locale: Locale; checkout: (sku: string) => void; manage: () => void }) {
+function PlansView({ data, locale, checkout, manage, busy }: { data: AccountData; locale: Locale; checkout: (sku: string) => void; manage: () => void; busy: boolean }) {
   const free = data.plans.find(plan => plan.code === 'free')!
   const family = data.plans.find(plan => plan.code === 'family_monthly')!
   const topups = data.plans.filter(plan => plan.kind === 'topup')
@@ -132,14 +117,14 @@ function PlansView({ data, locale, checkout, manage }: { data: AccountData; loca
   return <main className="page plans-page">
     <section className="page-heading"><h1>{t(locale, 'plan.choose')}</h1><p>{t(locale, 'plan.subtitle')}</p><small>{t(locale, 'plan.billingCycle')}</small></section>
     <section className="plan-option">
-      <div className="plan-option-head"><span className="icon-disc"><Icon name="leaf" /></span><div><h2>{planTitle(locale, free.code, free.title)}</h2><p>{t(locale, 'plan.freePrice')}</p></div><button className="button secondary compact" disabled>{familyActive ? t(locale, 'plan.included') : t(locale, 'plan.current')}</button></div>
+      <div className="plan-option-head"><span className="icon-disc"><Icon name="leaf" /></span><div><h2>{planTitle(locale, free.code, free.title)}</h2><p>{t(locale, 'plan.freePrice')}</p></div><span className="plan-badge">{familyActive || unlimitedActive ? t(locale, 'plan.included') : t(locale, 'plan.current')}</span></div>
       <PlanFeatures plan={free} locale={locale} />
     </section>
     <section className="plan-option featured">
-      <div className="plan-option-head"><span className="icon-disc"><Icon name="household" /></span><div><h2>{planTitle(locale, family.code, family.title)}</h2><p>{t(locale, 'plan.familyPrice', { stars: formatNumber(locale, family.stars) })}</p></div><button className="button primary compact" disabled={!data.billingEnabled || unlimitedActive} onClick={familyActive ? manage : () => checkout(family.code)}>{unlimitedActive ? t(locale, 'plan.current') : familyActive ? t(locale, 'plan.manage') : t(locale, 'plan.upgrade')}</button></div>
+      <div className="plan-option-head"><span className="icon-disc"><Icon name="household" /></span><div><h2>{planTitle(locale, family.code, family.title)}</h2><p>{t(locale, 'plan.familyPrice', { stars: formatNumber(locale, family.stars) })}</p></div><button className="button primary compact" disabled={busy || unlimitedActive || (!familyActive && !data.billingEnabled)} onClick={familyActive ? manage : () => checkout(family.code)}>{unlimitedActive ? t(locale, 'plan.included') : familyActive ? t(locale, 'plan.manage') : t(locale, 'plan.upgrade')}</button></div>
       <PlanFeatures plan={family} locale={locale} />
     </section>
-    {!unlimitedActive && <section className="topups"><h2>{t(locale, 'plan.needMore')}</h2>{topups.map(plan => <OpenRow key={plan.code} icon={plan.receipts ? 'receipt' : 'sparkle'} title={[planTitle(locale, plan.code, plan.title), t(locale, 'plan.stars', { count: formatNumber(locale, plan.stars) })].join(' · ')} onClick={() => checkout(plan.code)} />)}</section>}
+    {!unlimitedActive && <section className="topups"><h2>{t(locale, 'plan.needMore')}</h2>{topups.map(plan => <OpenRow key={plan.code} icon={plan.receipts ? 'receipt' : 'sparkle'} title={planTitle(locale, plan.code, plan.title)} detail={t(locale, 'plan.stars', { count: formatNumber(locale, plan.stars) })} disabled={busy || !data.billingEnabled} onClick={() => checkout(plan.code)} />)}</section>}
     {unlimitedActive && <p className="notice">{t(locale, 'plan.unlimitedManaged')}</p>}
     {!data.billingEnabled && <p className="notice">{t(locale, 'plan.paymentsUnavailable')}</p>}
     <p className="payment-note">{t(locale, 'plan.paymentNote')}</p>
@@ -148,17 +133,24 @@ function PlansView({ data, locale, checkout, manage }: { data: AccountData; loca
 
 const commonZones = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Europe/London', 'Europe/Paris', 'Asia/Shanghai']
 
-function AccountView({ data, locale, onSaved, selectTab, openFeature }: { data: AccountData; locale: Locale; onSaved: (data: AccountData) => void; selectTab: (tab: Tab) => void; openFeature: (destination?: QuickAccess) => void }) {
+function AccountView({ data, locale, onSaved, selectTab }: { data: AccountData; locale: Locale; onSaved: (data: AccountData) => void; selectTab: (tab: Tab) => void }) {
   const [form, setForm] = useState({ householdName: data.household.name, digestHour: data.user.digestHour, timeZone: data.user.timeZone, language: data.user.language, provider: data.user.provider })
+  const [savedForm, setSavedForm] = useState(form)
   const [status, setStatus] = useState<MessageKey | null>(null)
+  const saving = status === 'account.saving'
+  const dirty = Object.keys(form).some(key => form[key as keyof typeof form] !== savedForm[key as keyof typeof form])
   const initials = data.user.name.split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase()
   const zones = useMemo(() => Array.from(new Set([data.user.timeZone, ...commonZones])), [data.user.timeZone])
   async function submit(event: FormEvent) {
     event.preventDefault()
+    if (saving || !dirty) return
+    const submitted = { ...form, householdName: form.householdName.trim() }
     setStatus('account.saving')
     try {
-      await saveAccount(form)
-      onSaved({ ...data, user: { ...data.user, language: form.language, timeZone: form.timeZone, digestHour: form.digestHour, provider: form.provider }, household: { ...data.household, name: form.householdName } })
+      await saveAccount(submitted)
+      onSaved({ ...data, user: { ...data.user, language: submitted.language, timeZone: submitted.timeZone, digestHour: submitted.digestHour, provider: submitted.provider }, household: { ...data.household, name: submitted.householdName } })
+      setForm(submitted)
+      setSavedForm(submitted)
       setStatus('account.saved')
     } catch {
       setStatus('error.save')
@@ -167,11 +159,11 @@ function AccountView({ data, locale, onSaved, selectTab, openFeature }: { data: 
   return <main className="page account-page">
     <section className="page-heading"><h1>{t(locale, 'account.title')}</h1><p>{t(locale, 'account.subtitle')}</p></section>
     <div className="profile-row"><div className="avatar large" aria-hidden="true">{initials}</div><div><strong>{data.user.name}</strong><span>{data.user.role === 'owner' ? t(locale, 'account.owner') : t(locale, 'account.member')}</span></div></div>
-    <form onSubmit={submit}>
-      <fieldset><legend>{t(locale, 'account.household')}</legend><label>{t(locale, 'account.householdName')}<input value={form.householdName} disabled={data.user.role !== 'owner'} maxLength={80} onChange={event => setForm({ ...form, householdName: event.target.value })} /></label>{data.hostedFeaturesEnabled && <p className="field-note">{t(locale, 'account.seatsUsed', { used: formatNumber(locale, data.household.members), limit: formatNumber(locale, data.household.seatCap) })}</p>}</fieldset>
-      <fieldset><legend>{t(locale, 'account.dailyDigest')}</legend><div className="form-fields"><label>{t(locale, 'account.deliveryTime')}<select value={form.digestHour} onChange={event => setForm({ ...form, digestHour: Number(event.target.value) })}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{formatDigestHour(locale, hour)}</option>)}</select></label><label>{t(locale, 'account.timeZone')}<select value={form.timeZone} onChange={event => setForm({ ...form, timeZone: event.target.value })}>{zones.map(zone => <option key={zone}>{zone}</option>)}</select></label></div></fieldset>
-      <fieldset><legend>{t(locale, 'account.preferences')}</legend><div className="form-fields"><label>{t(locale, 'account.language')}<select value={form.language} onChange={event => setForm({ ...form, language: event.target.value })}>{Object.entries(languageNames).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label><label>{t(locale, 'account.provider')}<select value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value })}>{data.availableProviders.map(provider => <option key={provider} value={provider}>{provider === 'openai' ? 'OpenAI' : provider === 'deepseek' ? 'DeepSeek' : provider[0].toUpperCase() + provider.slice(1)}</option>)}</select></label></div></fieldset>
-      <div className="form-actions"><button className="button primary" type="submit" disabled={status === 'account.saving'}>{t(locale, status === 'account.saving' ? 'account.saving' : 'account.save')}</button><button className="button secondary" type="button" onClick={() => openFeature()}>{w(locale, 'kitchen')}</button>{status && <p role="status" className="save-status">{t(locale, status)}</p>}</div>
+    <form onSubmit={submit} onChange={() => setStatus(null)} aria-busy={saving}>
+      <fieldset disabled={saving}><legend>{t(locale, 'account.household')}</legend><label>{t(locale, 'account.householdName')}<input required value={form.householdName} disabled={data.user.role !== 'owner'} maxLength={80} onChange={event => setForm({ ...form, householdName: event.target.value })} /></label>{data.hostedFeaturesEnabled && <p className="field-note">{t(locale, 'account.seatsUsed', { used: formatNumber(locale, data.household.members), limit: formatNumber(locale, data.household.seatCap) })}</p>}</fieldset>
+      <fieldset disabled={saving}><legend>{t(locale, 'account.dailyDigest')}</legend><div className="form-fields"><label>{t(locale, 'account.deliveryTime')}<select value={form.digestHour} onChange={event => setForm({ ...form, digestHour: Number(event.target.value) })}>{Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{formatDigestHour(locale, hour)}</option>)}</select></label><label>{t(locale, 'account.timeZone')}<select value={form.timeZone} onChange={event => setForm({ ...form, timeZone: event.target.value })}>{zones.map(zone => <option key={zone}>{zone}</option>)}</select></label></div></fieldset>
+      <fieldset disabled={saving}><legend>{t(locale, 'account.preferences')}</legend><div className="form-fields"><label>{t(locale, 'account.language')}<select value={form.language} onChange={event => setForm({ ...form, language: event.target.value })}>{Object.entries(languageNames).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label><label>{t(locale, 'account.provider')}<select value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value })}>{data.availableProviders.map(provider => <option key={provider} value={provider}>{provider === 'openai' ? 'OpenAI' : provider === 'deepseek' ? 'DeepSeek' : provider[0].toUpperCase() + provider.slice(1)}</option>)}</select></label></div></fieldset>
+      <div className="form-actions"><p role={status === 'error.save' ? 'alert' : 'status'} className={`save-status${status === 'error.save' ? ' save-error' : ''}`}>{status ? t(locale, status) : w(locale, dirty ? 'unsavedChanges' : 'allSaved')}</p><button className="button primary" type="submit" disabled={saving || !dirty}>{t(locale, saving ? 'account.saving' : 'account.save')}</button><button className="button secondary" type="button" disabled={saving || !dirty} onClick={() => { setForm(savedForm); setStatus(null) }}>{w(locale, 'discardChanges')}</button></div>
     </form>
     {data.hostedFeaturesEnabled && <button className="subscription-row" onClick={() => selectTab('plans')}><strong>{t(locale, 'account.subscription')}</strong><span>{currentPlanName(data, locale)}</span><b>{t(locale, 'home.viewPlans')}</b><Icon name="arrow" size={20} /></button>}
   </main>
@@ -279,8 +271,8 @@ export function App() {
   return <div className={busy ? 'app busy' : 'app'} aria-busy={busy}>
     {error && <div className="error-toast" role="alert"><span>{t(locale, error)}</span><button type="button" onClick={() => setError(null)} aria-label={t(locale, 'common.close')}><Icon name="close" size={18} /></button></div>}
     {tab === 'home' && <HomeView data={data} locale={locale} selectTab={setTab} openFeature={openFeature} />}
-    {tab === 'plans' && data.hostedFeaturesEnabled && <PlansView data={data} locale={locale} checkout={checkout} manage={() => setManage(true)} />}
-    {tab === 'account' && <AccountView data={data} locale={locale} onSaved={setData} selectTab={setTab} openFeature={openFeature} />}
+    {tab === 'plans' && data.hostedFeaturesEnabled && <PlansView data={data} locale={locale} checkout={checkout} manage={() => setManage(true)} busy={busy} />}
+    {tab === 'account' && <AccountView data={data} locale={locale} onSaved={setData} selectTab={setTab} />}
     {tab === 'kitchen' && <WorkspaceView data={data} locale={locale} entry={workspaceEntry} onAccountChanged={refreshAccount} />}
     <BottomNav tab={tab} locale={locale} select={setTab} hostedFeaturesEnabled={data.hostedFeaturesEnabled} />
     {manage && <ManageSheet data={data} locale={locale} close={() => setManage(false)} cancel={cancel} />}

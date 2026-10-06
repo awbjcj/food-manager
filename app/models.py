@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Literal
 
-from sqlalchemy import Index, UniqueConstraint
+from sqlalchemy import DateTime, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 Category = Literal[
@@ -42,6 +42,8 @@ PaymentKind = Literal["subscription", "topup", "refund", "grant"]
 CookedSource = Literal["plan", "cook"]
 
 
+# Keep the existing SQLite timestamp contract when SQLModel changes its defaults.
+# Services store and compare UTC timestamps without timezone information.
 class Household(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     name: str = "My Household"
@@ -51,7 +53,7 @@ class Household(SQLModel, table=True):
     max_cook_minutes: int | None = None
     household_size: int = 1
     profile_note: str = ""
-    created_at: datetime
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
 
 
 class User(SQLModel, table=True):
@@ -64,7 +66,7 @@ class User(SQLModel, table=True):
     lang: str = "en"
     role: str = "member"  # "owner" | "member"; owner is the household creator
     banned: bool = False
-    created_at: datetime
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
     # Last date (user tz) a digest run completed — silent days count. None = never.
     last_digest_date: date | None = None
 
@@ -76,7 +78,7 @@ class GroupBinding(SQLModel, table=True):
     chat_id: int = Field(primary_key=True)
     household_id: int = Field(foreign_key="household.id", index=True)
     bound_by_user_id: int = Field(foreign_key="user.telegram_id")
-    created_at: datetime
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
 
 
 class Receipt(SQLModel, table=True):
@@ -89,7 +91,7 @@ class Receipt(SQLModel, table=True):
     photo_file_id: str
     purchase_date: date
     purchase_date_source: str
-    scanned_at: datetime
+    scanned_at: datetime = Field(sa_type=DateTime(timezone=False))
     llm_cost_micros_usd: int | None = None
     store_name: str | None = None
 
@@ -110,8 +112,8 @@ class PantryBatch(SQLModel, table=True):
     applied_count: int = 0
     skipped_count: int = 0
     version: int = 0
-    created_at: datetime
-    expires_at: datetime
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
+    expires_at: datetime = Field(sa_type=DateTime(timezone=False))
 
 
 class PantryItem(SQLModel, table=True):
@@ -144,7 +146,7 @@ class PantryItem(SQLModel, table=True):
     stored_on: date | None = None
     created_via: str
     source_receipt_id: int | None = Field(default=None, foreign_key="receipt.id")
-    created_at: datetime
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
 
 
 class PantryOutcome(SQLModel, table=True):
@@ -172,7 +174,7 @@ class ShelfLifeCache(SQLModel, table=True):
     days: int
     category: str | None = None
     confidence: float
-    learned_at: datetime
+    learned_at: datetime = Field(sa_type=DateTime(timezone=False))
     source: str = "llm"
 
 
@@ -192,8 +194,8 @@ class PendingCorrection(SQLModel, table=True):
     chat_id: int
     message_id: int | None = None
     status: str = "pending"
-    created_at: datetime
-    expires_at: datetime
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
+    expires_at: datetime = Field(sa_type=DateTime(timezone=False))
 
 
 class CookSession(SQLModel, table=True):
@@ -215,9 +217,9 @@ class CookSession(SQLModel, table=True):
     message_id: int | None = None
     llm_cost_micros_usd: int | None = None
     feedback: str = "none"
-    feedback_at: datetime | None = None
-    created_at: datetime
-    expires_at: datetime
+    feedback_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=False))
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
+    expires_at: datetime = Field(sa_type=DateTime(timezone=False))
 
 
 class MealPlan(SQLModel, table=True):
@@ -229,7 +231,7 @@ class MealPlan(SQLModel, table=True):
     cost_micros_usd: int = 0
     chat_id: int
     message_id: int | None = None
-    created_at: datetime
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
 
 
 class MealPlanEntry(SQLModel, table=True):
@@ -264,7 +266,7 @@ class CookedMeal(SQLModel, table=True):
     recipe_title: str
     cooked_on: date
     selection_json: str = "[]"
-    confirmed_at: datetime | None = None
+    confirmed_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=False))
 
 
 class ShoppingList(SQLModel, table=True):
@@ -274,8 +276,8 @@ class ShoppingList(SQLModel, table=True):
     name_normalized: str = Field(index=True)
     qty: float | None = None
     unit: str | None = None
-    added_at: datetime
-    bought_at: datetime | None = None
+    added_at: datetime = Field(sa_type=DateTime(timezone=False))
+    bought_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=False))
 
 
 class SavedRecipe(SQLModel, table=True):
@@ -286,7 +288,7 @@ class SavedRecipe(SQLModel, table=True):
     source_url: str | None = None
     ingredients_json: str
     method_gist: str
-    saved_at: datetime
+    saved_at: datetime = Field(sa_type=DateTime(timezone=False))
 
 
 class NameTranslation(SQLModel, table=True):
@@ -305,15 +307,15 @@ class HouseholdInvite(SQLModel, table=True):
     household_id: int = Field(foreign_key="household.id", index=True)
     token: str = Field(index=True, unique=True)
     created_by: int  # telegram_id of the inviting member
-    created_at: datetime
-    expires_at: datetime
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
+    expires_at: datetime = Field(sa_type=DateTime(timezone=False))
     # None = unlimited redemptions until expiry. Default is None (not 1) so an
     # explicit None survives insert: a SQLAlchemy column default of 1 would
     # coerce None back to 1. create_invite always passes max_uses explicitly.
     max_uses: int | None = None
     uses: int = 0  # redemptions so far
     redeemed_by: int | None = None  # telegram_id of the last joiner; None = unused
-    redeemed_at: datetime | None = None
+    redeemed_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=False))
 
 
 class Subscription(SQLModel, table=True):
@@ -323,16 +325,16 @@ class Subscription(SQLModel, table=True):
     telegram_charge_id: str | None = None
     payer_telegram_id: int | None = None
     cancel_at_period_end: bool = False
-    period_start: datetime
-    period_end: datetime
+    period_start: datetime = Field(sa_type=DateTime(timezone=False))
+    period_end: datetime = Field(sa_type=DateTime(timezone=False))
     seat_cap: int = 2
-    created_at: datetime
-    updated_at: datetime
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
+    updated_at: datetime = Field(sa_type=DateTime(timezone=False))
 
 
 class QuotaUsage(SQLModel, table=True):
     household_id: int = Field(foreign_key="household.id", primary_key=True)
-    period_start: datetime = Field(primary_key=True)
+    period_start: datetime = Field(primary_key=True, sa_type=DateTime(timezone=False))
     receipts_used: int = 0
     actions_used: int = 0
     cook_used: int = 0
@@ -358,7 +360,7 @@ class PaymentEvent(SQLModel, table=True):
     stars: int
     payer_telegram_id: int
     payload_json: str
-    created_at: datetime
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
 
 
 class ProviderModeOverride(SQLModel, table=True):
@@ -371,5 +373,5 @@ class ProviderModeOverride(SQLModel, table=True):
 
     provider: str = Field(primary_key=True)  # anthropic | openai | gemini | deepseek
     mode: str  # "api" | "subscription"
-    updated_at: datetime
+    updated_at: datetime = Field(sa_type=DateTime(timezone=False))
     updated_by: int | None = None  # operator telegram_id, when known

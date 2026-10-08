@@ -222,7 +222,7 @@ inventing those facts. The new history starts after migration `0023_pantry_outco
 | `LLM_PROVIDER`             | No                   | `anthropic`                 | Default provider: `anthropic`, `openai`, `gemini`, or `deepseek`. Each user can override with `/llm`. `deepseek` is text-only, so at least one image-capable provider's key must also be set |
 | `ANTHROPIC_API_KEY`        | When using anthropic | —                           | Anthropic API key                                                                                                                                                                            |
 | `ANTHROPIC_MODEL`          | No                   | `claude-opus-5-5`           | Claude model to use for receipt parsing                                                                                                                                                      |
-| `ANTHROPIC_TEXT_MODEL`     | No                   | `claude-haiku-4-5-20251001` | Claude model to use for `/correct` and `/add` proposals                                                                                                                                      |
+| `ANTHROPIC_TEXT_MODEL`     | No                   | `claude-haiku-5-5`         | Claude model to use for `/correct` and `/add` proposals                                                                                                                                      |
 | `ANTHROPIC_SEARCH_MODEL`   | No                   | `claude-opus-5-5`           | Claude model used for shelf-life web search — **requires web search enabled on the Anthropic workspace**                                                                                     |
 | `OPENAI_API_KEY`           | When using openai    | —                           | OpenAI API key                                                                                                                                                                               |
 | `OPENAI_MODEL`             | No                   | `gpt-6-sol`                 | OpenAI model to use for receipt parsing                                                                                                                                                      |
@@ -251,14 +251,19 @@ million tokens, checked September 22, 2026) are:
 | Model | Use | Input | Output |
 | --- | --- | ---: | ---: |
 | `claude-opus-5-5` | Claude receipt, cook, and search | $4.00 | $20.00 |
-| `claude-haiku-4-5-20251001` | Claude text tasks | $1.00 | $5.00 |
+| `claude-haiku-5-5` | Claude text tasks (up to 100K input tokens) | $0.10 | $0.50 |
+| `claude-haiku-5-5` | Claude text tasks (over 100K input tokens) | $0.50 | $2.50 |
 | `gpt-6-sol` | OpenAI receipt, cook, and search | $2.00 | $10.00 |
 | `gpt-6-luna` | OpenAI text tasks | $0.10 | $0.50 |
 | `gemini-3.8-flash` | Gemini receipt, cook, search, and text | $0.75 | $3.75 |
 
 These are ordinary input and output rates. GPT-6 rates above apply up to 272K
 input tokens; longer prompts have higher rates. Gemini 3.8 Flash has introductory
-rates through December 31, 2026. Cache and search charges are separate. See
+rates through December 31, 2026. Haiku 5.5 rates were checked October 8, 2026;
+its 100K threshold includes cached input and changes the rates for the entire
+request. Text calls retain its default adaptive thinking at medium effort,
+with an 8,192-token output ceiling for thinking and visible output. Cache and
+search charges are separate. See
 [OpenAI pricing](https://developers.openai.com/api/docs/pricing),
 [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing), and
 [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing).

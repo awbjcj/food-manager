@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     anthropic_model: str = Field(default="claude-opus-5-5", alias="ANTHROPIC_MODEL")
     anthropic_text_model: str = Field(
-        default="claude-haiku-4-5-20251001",
+        default="claude-haiku-5-5",
         alias="ANTHROPIC_TEXT_MODEL",
     )
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")

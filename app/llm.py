@@ -221,6 +221,7 @@ _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "claude-sonnet-5-5": {"input": 2, "output": 10},
     "claude-opus-5-5": {"input": 4, "output": 20},
     "claude-haiku-4-5-20251001": {"input": 1, "output": 5},
+    "claude-haiku-5-5": {"input": 0.1, "output": 0.5},
     "gpt-5.4": {"input": 2.5, "output": 15},
     "gpt-5.4-mini": {"input": 0.75, "output": 4.5},
     "gpt-5.6-terra": {"input": 2, "output": 12},
@@ -257,9 +258,18 @@ _OPENAI_REASONING = {"effort": "low"}
 
 def _reasoning_max_tokens(model: str, regular_limit: int) -> int:
     """Leave room for new reasoning models to think and return visible output."""
-    return max(regular_limit, 8192) if model in {
-        "claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-sol", "gpt-6-luna"
-    } else regular_limit
+    return (
+        max(regular_limit, 8192)
+        if model
+        in {
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5",
+            "gpt-6-sol",
+            "gpt-6-luna",
+        }
+        else regular_limit
+    )
 
 
 def _extract_tool_input(message) -> dict:
@@ -279,6 +289,8 @@ def _cost_micros(message, model: str) -> int | None:
     if usage is None:
         return None
     try:
+        if model == "claude-haiku-5-5":
+            return _haiku_5_5_cost_micros(usage)
         # round the total to whole micro-USD; per-token rates may be fractional
         # (e.g. OpenAI), while the integer Anthropic rates are unaffected.
         return round(
@@ -286,6 +298,28 @@ def _cost_micros(message, model: str) -> int | None:
         )
     except Exception:  # noqa: BLE001 - cost estimate is best-effort
         return None
+
+
+def _haiku_5_5_cost_micros(usage) -> int:
+    """Standard-tier pricing, including caches and the full-prompt 100K tier."""
+    input_tokens = usage.input_tokens
+    output_tokens = usage.output_tokens
+    cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
+    cache_write = getattr(usage, "cache_creation_input_tokens", None) or 0
+    creation = getattr(usage, "cache_creation", None)
+    cache_write_1h = getattr(creation, "ephemeral_1h_input_tokens", None) or 0
+    cache_write_5m = cache_write - cache_write_1h
+    # Anthropic input_tokens excludes cache reads/writes. Count all three for
+    # the tier, then price each category once. Rates are micro-USD per 1K tokens.
+    multiplier = 5 if input_tokens + cache_read + cache_write > 100_000 else 1
+    total = (
+        input_tokens * 100
+        + output_tokens * 500
+        + cache_read * 10
+        + cache_write_5m * 125
+        + cache_write_1h * 200
+    ) * multiplier
+    return round(total / 1000)
 
 
 # Server-side web-search tool fees, billed per call/query in addition to token

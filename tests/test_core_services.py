@@ -62,7 +62,7 @@ def test_settings_load_from_env(monkeypatch):
     assert settings.allowed_telegram_user_id == 12345
     assert settings.llm_provider == "anthropic"
     assert settings.anthropic_model == "claude-opus-5-5"
-    assert settings.anthropic_text_model == "claude-haiku-4-5-20251001"
+    assert settings.anthropic_text_model == "claude-haiku-5-5"
     assert settings.anthropic_search_model == "claude-opus-5-5"
     assert settings.openai_model == "gpt-6-sol"
     assert settings.openai_text_model == "gpt-6-luna"

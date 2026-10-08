@@ -34,7 +34,8 @@ def _credentials(provider: str, base_url: str | None = None) -> ProviderCredenti
     )
 
 
-def test_claude_structured_output_kwargs_are_accepted_by_installed_anthropic_sdk():
+@pytest.mark.parametrize("model_id", ["claude-sonnet-4-5-20250929", "claude-haiku-5-5"])
+def test_claude_structured_output_kwargs_are_accepted_by_installed_anthropic_sdk(model_id):
     """Every kwarg Agno emits for an `output_schema` run must exist on create().
 
     Both Agno seams set `output_schema`, so this is the exact request shape
@@ -52,7 +53,7 @@ def test_claude_structured_output_kwargs_are_accepted_by_installed_anthropic_sdk
     from anthropic.resources.messages.messages import Messages as StableMessages
 
     model = build_agno_model(
-        model_id="claude-sonnet-4-5-20250929",
+        model_id=model_id,
         credentials=_credentials("anthropic"),
     )
 

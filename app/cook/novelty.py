@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import date, timedelta
 
-from sqlmodel import Session, select
+from sqlmodel import Session, func, select
 
 from app.models import CookedMeal
 from app.normalization import normalize
@@ -63,11 +63,10 @@ def count_confirmed(session: Session, *, household_id: int, since: date) -> int:
     `cooked_service`) so `pantry_service.compute_stats` can import it without
     a circular import (`cooked_service` itself imports from `pantry_service`).
     """
-    rows = session.exec(
-        select(CookedMeal).where(
+    return session.exec(
+        select(func.count()).select_from(CookedMeal).where(
             CookedMeal.household_id == household_id,
             CookedMeal.confirmed_at.is_not(None),  # type: ignore[union-attr]
             CookedMeal.cooked_on >= since,
         )
-    ).all()
-    return len(list(rows))
+    ).one()

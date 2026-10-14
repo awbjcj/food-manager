@@ -5,7 +5,8 @@ from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import case, update
-from sqlmodel import Session, col, select
+from sqlmodel import Session, col, func, select
+from sqlmodel.sql.expression import Select
 
 from app.cache import write_user_correction
 from app.frozen_shelf_life import resolve_storage_days, storage_cache_key
@@ -117,11 +118,15 @@ def receipt_stores(
 
 def active_pantry_names(session: Session, *, household_id: int, today: date) -> list[str]:
     """Normalized names of active, not-yet-expired pantry items (for shopping diffs)."""
-    return [
-        item.normalized_name
-        for item in list_active(session, household_id=household_id, f=ListFilter.default(), today=today)
-        if item.expires_on >= today
-    ]
+    return list(session.exec(
+        select(PantryItem.normalized_name)
+        .where(
+            PantryItem.household_id == household_id,
+            PantryItem.status == "active",
+            col(PantryItem.expires_on) >= today,
+        )
+        .order_by(col(PantryItem.expires_on).asc(), col(PantryItem.id).asc())
+    ).all())
 
 
 def list_digest_due(session: Session, *, household_id: int, today: date) -> list[PantryItem]:
@@ -398,71 +403,71 @@ class Stats:
 
 
 def compute_stats(session: Session, *, household_id: int, now: datetime) -> Stats:
+    """Aggregate the 30-day history without loading records or recipe payloads."""
     since = now - timedelta(days=30)
-    receipts = list(
-        session.exec(
-            select(Receipt).where(
-                Receipt.household_id == household_id,
-                Receipt.scanned_at >= since,
-            )
-        ).all()
-    )
-    known_costs = [
-        receipt.llm_cost_micros_usd
-        for receipt in receipts
-        if receipt.llm_cost_micros_usd is not None
-    ]
-    total_cost = sum(known_costs) if known_costs else 0
-    avg_cost = total_cost // len(known_costs) if known_costs else None
+    receipt_count, known_cost_count, total_cost = session.exec(
+        select(
+            func.count(),
+            func.count(col(Receipt.llm_cost_micros_usd)),
+            func.sum(col(Receipt.llm_cost_micros_usd)),
+        ).where(
+            Receipt.household_id == household_id,
+            Receipt.scanned_at >= since,
+        )
+    ).one()
+    total_cost = total_cost or 0
+    avg_cost = total_cost // known_cost_count if known_cost_count else None
 
-    items_30d = list(
-        session.exec(
-            select(PantryItem).where(
-                PantryItem.household_id == household_id,
-                PantryItem.created_at >= since,
-            )
-        ).all()
+    receipt_item = (
+        (col(PantryItem.created_via) == "receipt")
+        & (col(PantryItem.status) != "removed")
+        & col(PantryItem.ingest_shelf_life_source).in_(("cache", "llm"))
     )
-    tracked = [item for item in items_30d if item.status != "removed"]
-    removed = [item for item in items_30d if item.status == "removed"]
-    receipt_items = [
-        item
-        for item in items_30d
-        if item.created_via == "receipt"
-        and item.status != "removed"
-        and item.ingest_shelf_life_source in ("cache", "llm")
-    ]
-    if receipt_items:
-        hits = sum(1 for item in receipt_items if item.ingest_shelf_life_source == "cache")
-        cache_hit_percent = hits * 100.0 / len(receipt_items)
-    else:
-        cache_hit_percent = None
-
-    eaten = sum(1 for item in items_30d if item.status == "eaten")
-    tossed = sum(1 for item in items_30d if item.status == "tossed")
+    tracked, removed, receipt_items, hits, eaten, tossed = session.exec(
+        # SQLModel's select() overloads cover at most four columns.
+        Select[int, int, int, int, int, int](
+            func.count().filter(col(PantryItem.status) != "removed"),
+            func.count().filter(col(PantryItem.status) == "removed"),
+            func.count().filter(receipt_item),
+            func.count().filter(
+                receipt_item, col(PantryItem.ingest_shelf_life_source) == "cache"
+            ),
+            func.count().filter(col(PantryItem.status) == "eaten"),
+            func.count().filter(col(PantryItem.status) == "tossed"),
+        ).where(
+            PantryItem.household_id == household_id,
+            PantryItem.created_at >= since,
+        )
+    ).one()
+    cache_hit_percent = hits * 100.0 / receipt_items if receipt_items else None
     waste_rate = tossed * 100.0 / (eaten + tossed) if eaten + tossed else None
 
-    pending_rows = list(
-        session.exec(
-            select(PendingCorrection).where(
+    text_costs = {
+        action: (count, cost or 0, count - known)
+        for action, count, cost, known in session.exec(
+            select(
+                PendingCorrection.action_type,
+                func.count(),
+                func.sum(col(PendingCorrection.llm_cost_micros_usd)),
+                func.count(col(PendingCorrection.llm_cost_micros_usd)),
+            ).where(
                 PendingCorrection.household_id == household_id,
                 PendingCorrection.created_at >= since,
-            )
-        ).all()
+                col(PendingCorrection.action_type).in_(("correct", "add")),
+            ).group_by(col(PendingCorrection.action_type))
+        )
+    }
+    correction_count, correction_cost, correction_unknown = text_costs.get(
+        "correct", (0, 0, 0)
     )
-    correction_rows = [row for row in pending_rows if row.action_type == "correct"]
-    add_rows = [row for row in pending_rows if row.action_type == "add"]
+    add_count, add_cost, add_unknown = text_costs.get("add", (0, 0, 0))
     text_llm = TextLLMCost(
-        correction_proposal_count=len(correction_rows),
-        correction_cost_micros=sum(row.llm_cost_micros_usd or 0 for row in correction_rows),
-        correction_unknown_cost_count=sum(
-            1 for row in correction_rows if row.llm_cost_micros_usd is None
-        ),
-        add_proposal_count=len(add_rows),
-        add_cost_micros=sum(row.llm_cost_micros_usd or 0 for row in add_rows),
-        add_unknown_cost_count=sum(
-            1 for row in add_rows if row.llm_cost_micros_usd is None
-        ),
+        correction_proposal_count=correction_count,
+        correction_cost_micros=correction_cost,
+        correction_unknown_cost_count=correction_unknown,
+        add_proposal_count=add_count,
+        add_cost_micros=add_cost,
+        add_unknown_cost_count=add_unknown,
     )
 
     # Local imports: app.cook's __init__ imports back from this module, so a
@@ -471,36 +476,32 @@ def compute_stats(session: Session, *, household_id: int, now: datetime) -> Stat
     from app.cook.novelty import count_confirmed
     from app.models import CookSession  # local import; avoids top-level churn
 
-    cook_rows = list(
-        session.exec(
-            select(CookSession).where(
-                CookSession.household_id == household_id,
-                CookSession.created_at >= since.replace(tzinfo=None),
-            )
-        ).all()
-    )
-    cook_cost = sum(row.llm_cost_micros_usd or 0 for row in cook_rows)
-    cook_feedback_count = sum(
-        1 for row in cook_rows if row.feedback in ("liked", "disliked")
-    )
-    cook_liked_count = sum(1 for row in cook_rows if row.feedback == "liked")
+    cook_count, cook_cost, cook_feedback_count, cook_liked_count = session.exec(
+        select(
+            func.count(),
+            func.sum(col(CookSession.llm_cost_micros_usd)),
+            func.count().filter(col(CookSession.feedback).in_(("liked", "disliked"))),
+            func.count().filter(col(CookSession.feedback) == "liked"),
+        ).where(
+            CookSession.household_id == household_id,
+            CookSession.created_at >= since.replace(tzinfo=None),
+        )
+    ).one()
     meals_cooked = count_confirmed(
         session, household_id=household_id, since=since.date()
     )
 
     return Stats(
-        receipt_count=len(receipts),
-        tracked_item_count=len(tracked),
-        removed_item_count=len(removed),
+        receipt_count=receipt_count,
+        tracked_item_count=tracked,
+        removed_item_count=removed,
         cache_hit_percent=cache_hit_percent,
         total_cost_micros_usd=total_cost,
         avg_cost_micros_usd=avg_cost,
-        unknown_cost_receipt_count=sum(
-            1 for receipt in receipts if receipt.llm_cost_micros_usd is None
-        ),
+        unknown_cost_receipt_count=receipt_count - known_cost_count,
         waste_rate_percent=waste_rate,
-        cook_cost_micros_usd=cook_cost,
-        cook_count=len(cook_rows),
+        cook_cost_micros_usd=cook_cost or 0,
+        cook_count=cook_count,
         cook_feedback_count=cook_feedback_count,
         cook_liked_count=cook_liked_count,
         meals_cooked_count=meals_cooked,

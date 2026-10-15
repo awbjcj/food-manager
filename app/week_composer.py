@@ -14,6 +14,7 @@ import logging
 from collections.abc import Sequence
 from datetime import date
 from typing import Literal, Protocol
+from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -95,7 +96,8 @@ class AgnoWeekComposer:
             f"max_cook_minutes={profile.max_cook_minutes}\n"
             f"pantry: {pantry_text or '(empty)'}"
         )
-        response = await self._agent.arun(prompt)
+        # Reuse the provider client without grouping different households' runs.
+        response = await self._agent.arun(prompt, session_id=str(uuid4()))
         spec = getattr(response, "content", None)
         if not isinstance(spec, WeekPlanSpec):
             raise ValueError("week composer returned no structured WeekPlanSpec")  # noqa: TRY004 - JSON-shape contract, not a type check

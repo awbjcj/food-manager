@@ -49,7 +49,7 @@ jobs:
         run: uv run ruff check app tests bin migrations
 
       - name: Type check
-        run: uv run pyright app bin
+        run: uv run pyright
 
       - name: Verify migrations from an empty database
         run: uv run alembic upgrade head

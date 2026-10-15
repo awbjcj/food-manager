@@ -16,6 +16,7 @@ import logging
 from collections.abc import Sequence
 from datetime import date
 from typing import Literal, Protocol
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -109,7 +110,8 @@ class AgnoIntentAgent:
             f"pantry items: {', '.join(pantry_names) if pantry_names else '(empty)'}\n"
             f"message: {text}"
         )
-        response = await self._agent.arun(prompt)
+        # The provider agent is shared; each message is an independent request.
+        response = await self._agent.arun(prompt, session_id=str(uuid4()))
         intent = getattr(response, "content", None)
         if not isinstance(intent, NLIntent):
             raise ValueError("intent agent returned no structured NLIntent")  # noqa: TRY004 - JSON-shape contract, not a type check

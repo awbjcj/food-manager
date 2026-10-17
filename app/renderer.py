@@ -35,15 +35,17 @@ def _urgency_icon(expires_on: date, *, today: date) -> str:
     return "🟢"
 
 
-def _qty_prefix(qty: float, unit: str | None) -> str:
+def _qty_prefix(qty: float, unit: str | None, *, lang: str = "en") -> str:
     qty_str = str(int(qty)) if float(qty).is_integer() else str(qty)
     if unit:
+        unit = t(f"unit.{unit}", lang) if unit in _DISPLAY_UNITS else unit
         return f"{qty_str} {unit} "
     if qty_str != "1":
         return f"{qty_str} "
     return ""
 
 
+_DISPLAY_UNITS = {"gal", "lb", "oz", "g", "kg", "ml", "l", "ct", "bunch", "each"}
 _STORAGE_BADGES = {"frozen": "❄️ ", "fridge": "🧊 "}
 
 # Telegram does not support arbitrary font colours in bot messages or inline
@@ -82,7 +84,7 @@ def render_item_line(item, *, today: date, lang: str = "en", names=None) -> str:
     icon = _urgency_icon(item.expires_on, today=today)
     receipt = _receipt_badge(item)
     badge = _storage_badge(item)
-    qty = _qty_prefix(item.qty, item.unit)
+    qty = _qty_prefix(item.qty, item.unit, lang=lang)
     name = _name(names, item.raw_name)
     delta = (item.expires_on - today).days
     if delta < 0:
@@ -117,7 +119,7 @@ def render_ingest_reply(
         else:
             lines.append(t("ingest.none_found", lang))
         if summary.skipped_excluded_count:
-            exc_names = ", ".join(summary.skipped_excluded_names[:5])
+            exc_names = ", ".join(_name(names, name) for name in summary.skipped_excluded_names[:5])
             more = "" if len(summary.skipped_excluded_names) <= 5 else ", ..."
             lines.append(t("ingest.skipped_excluded", lang, names=exc_names, more=more))
             lines.append(t("ingest.want_tracked", lang))
@@ -154,12 +156,12 @@ def render_ingest_reply(
         lines.append(t("ingest.low_confidence", lang, ids=ids, more=more))
 
     if summary.skipped_low_confidence_count:
-        skipped_names = ", ".join(summary.skipped_low_confidence_names[:3])
+        skipped_names = ", ".join(_name(names, name) for name in summary.skipped_low_confidence_names[:3])
         more = "" if len(summary.skipped_low_confidence_names) <= 3 else ", ..."
         lines.append(t("ingest.skipped_unclear", lang, n=summary.skipped_low_confidence_count, names=skipped_names, more=more))
 
     if summary.skipped_excluded_count:
-        exc_names = ", ".join(summary.skipped_excluded_names[:5])
+        exc_names = ", ".join(_name(names, name) for name in summary.skipped_excluded_names[:5])
         more = "" if len(summary.skipped_excluded_names) <= 5 else ", ..."
         lines.append(t("ingest.skipped_excluded", lang, names=exc_names, more=more))
         lines.append(t("ingest.want_tracked", lang))
@@ -356,7 +358,7 @@ def build_digest_keyboard(
 def render_item_card(item, *, today: date, lang: str = "en", names=None, store_name: str | None = None) -> str:
     storage = getattr(item, "storage", "default")
     storage_label = t(f"storage.{storage}", lang)
-    qty = _qty_prefix(item.qty, item.unit).strip() or "1"
+    qty = _qty_prefix(item.qty, item.unit, lang=lang).strip() or "1"
     return "\n".join(
         [
             render_item_line(item, today=today, lang=lang, names=names),
@@ -741,7 +743,7 @@ def render_shopping_list(
         return t("shopping.empty", lang)
     lines = [t("shopping.title", lang, n=len(items)), ""]
     for item in items:
-        qty = _qty_prefix(item.qty, item.unit) if item.qty is not None else ""
+        qty = _qty_prefix(item.qty, item.unit, lang=lang) if item.qty is not None else ""
         lines.append(f"☐ {qty}{_name(names, item.name_raw)}")
     return "\n".join(lines)
 

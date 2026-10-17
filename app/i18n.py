@@ -11,6 +11,16 @@ DEFAULT_LANG = "en"
 # Catalog. English is mandatory for every key; other languages are optional and
 # fall back to English. Keys are added incrementally by later tasks.
 MESSAGES: dict[str, dict[str, str]] = {
+    "unit.gal": {"en": "gal", "zh": "加仑", "fr": "gal", "es": "gal"},
+    "unit.lb": {"en": "lb", "zh": "磅", "fr": "lb", "es": "lb"},
+    "unit.oz": {"en": "oz", "zh": "盎司", "fr": "oz", "es": "oz"},
+    "unit.g": {"en": "g", "zh": "克", "fr": "g", "es": "g"},
+    "unit.kg": {"en": "kg", "zh": "千克", "fr": "kg", "es": "kg"},
+    "unit.ml": {"en": "ml", "zh": "毫升", "fr": "ml", "es": "ml"},
+    "unit.l": {"en": "l", "zh": "升", "fr": "l", "es": "l"},
+    "unit.ct": {"en": "ct", "zh": "个", "fr": "pièce(s)", "es": "unidad(es)"},
+    "unit.bunch": {"en": "bunch", "zh": "把", "fr": "botte(s)", "es": "manojo(s)"},
+    "unit.each": {"en": "each", "zh": "个", "fr": "pièce(s)", "es": "unidad(es)"},
     "preferences.explanation": {
         "en": "Learned taste: eating earlier before expiry is a stronger like; tossing before expiry is a dislike. Actions on or after expiry are neutral. Likes and dislikes guide recipes without changing dietary restrictions.",
         "zh": "学习到的口味：越早在到期前吃掉，越表示喜欢；到期前丢弃表示不喜欢。到期当天或之后的操作不影响口味评分。口味用于推荐食谱，不会改变饮食限制。",

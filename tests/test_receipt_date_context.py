@@ -11,6 +11,7 @@ from app.llm import (
     AnthropicLLMClient,
     LLMProviderSelector,
     LLMResult,
+    NameTranslationItem,
     OpenAILLMClient,
     ParsedItem,
     ParseResult,
@@ -21,7 +22,15 @@ from tests.fakes import FakeLLMClient
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai", "gemini"])
 async def test_receipt_parsers_receive_local_scan_date_through_selector(provider):
-    parsed = ParseResult(store_name="Costco", items=[])
+    parsed = ParseResult(store_name="Costco", items=[ParsedItem(
+        is_food=True, name="Milk", est_shelf_life_days=7, confidence=0.9,
+        name_translations=[
+            NameTranslationItem(lang="en", text="Milk"),
+            NameTranslationItem(lang="zh", text="牛奶"),
+            NameTranslationItem(lang="fr", text="Lait"),
+            NameTranslationItem(lang="es", text="Leche"),
+        ],
+    )])
     sdk = MagicMock()
     if provider == "anthropic":
         sdk.messages.create = AsyncMock(
@@ -66,6 +75,9 @@ async def test_receipt_parsers_receive_local_scan_date_through_selector(provider
         text = kwargs["contents"][1]
     assert "2026-09-23" in text
     assert result.parse.store_name == "Costco"
+    assert {entry.lang: entry.text for entry in result.parse.items[0].name_translations} == {
+        "en": "Milk", "zh": "牛奶", "fr": "Lait", "es": "Leche",
+    }
     # Every provider receives the shared retailer extraction instructions.
     if provider == "anthropic":
         system = kwargs["system"]
@@ -74,6 +86,7 @@ async def test_receipt_parsers_receive_local_scan_date_through_selector(provider
     else:
         system = kwargs["config"].system_instruction
     assert "store_name" in str(system)
+    assert "name_translations" in str(system)
 
 
 @pytest.mark.parametrize("purchase_date", [date(2026, 9, 22), date(2024, 9, 22)])

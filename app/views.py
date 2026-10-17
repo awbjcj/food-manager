@@ -85,8 +85,10 @@ async def _names_for(
     translation_llm,
 ) -> dict[str, str]:
     filtered = [text for text in texts if text]
-    if lang == "en" or translation_llm is None or not filtered:
+    if lang == "en" or not filtered:
         return {}
+    if translation_llm is None:
+        return cached_names(session, lang=lang, texts=filtered)
     return await translate_texts(
         session, filtered, lang=lang, llm=translation_llm
     )
@@ -305,12 +307,21 @@ async def ingest_reply(
     names = await _names_for(
         session,
         lang=user.lang,
-        texts=summary.inserted_item_names,
+        texts=ingest_texts(summary),
         translation_llm=translation_llm,
     )
     return LocalizedView(
         render_ingest_reply(summary, today=today, lang=user.lang, names=names), names
     )
+
+
+def ingest_texts(summary) -> list[str]:
+    return [
+        *summary.inserted_item_names,
+        *summary.skipped_low_confidence_names,
+        *summary.skipped_excluded_names,
+        *summary.shopping_checked_names,
+    ]
 
 
 def _cook_texts(cards: Sequence) -> Iterable[str]:

@@ -23,7 +23,14 @@ from app.cook.models import (
     SelectedItems,
 )
 from app.i18n import t
-from app.llm import CorrectionDiff, LLMResult, ParsedItem, ParseResult, ProposedAddItem
+from app.llm import (
+    CorrectionDiff,
+    LLMResult,
+    NameTranslationItem,
+    ParsedItem,
+    ParseResult,
+    ProposedAddItem,
+)
 from app.miniapp_workspace import COMMANDS, MAX_IMAGE_BYTES, WorkspaceRuntime
 from app.models import (
     CookSession,
@@ -401,6 +408,54 @@ async def test_receipt_upload_and_undo(kitchen):
                 )
                 == 1
             )
+
+
+@pytest.mark.asyncio
+async def test_receipt_result_switches_all_languages_and_keeps_undo(kitchen):
+    translations = {"en": "Carrots", "zh": "胡萝卜", "fr": "Carottes", "es": "Zanahorias"}
+    kitchen.image.canned.parse.items[0].name_translations = [
+        NameTranslationItem(lang=lang, text=text) for lang, text in translations.items()
+    ]
+    async with TestClient(TestServer(kitchen.app)) as client:
+        current = await state(client)
+        response = await client.post(
+            "/api/workspace/photo",
+            headers={"Authorization": _auth(42), "X-Workspace-Id": current["id"], "X-Request-Id": "multilingual"},
+            data=b"\xff\xd8\xffmultilingual",
+        )
+        assert response.status == 202
+        result = await finished(client)
+        receipt_card_id = result["cards"][-1]["id"]
+        old_action = button(result, "Undo")
+        for lang in ("zh", "fr", "es", "en"):
+            # Account settings and /lang share User.lang. The existing card
+            # must update on the next poll, without rerunning recognition.
+            with kitchen.sessions() as session:
+                user = session.get(User, 42)
+                user.lang = lang
+                session.add(user)
+                session.commit()
+            result = await state(client)
+            card = next(card for card in result["cards"] if card["id"] == receipt_card_id)
+            assert translations[lang] in card["text"]
+            assert t("ingest.logged", lang, n=1) in card["text"]
+            assert card["buttons"][0][0]["text"] == t("btn.undo", lang)
+        assert len(kitchen.image.calls) == 1
+        response = await client.post(
+            "/api/workspace/actions", headers={"Authorization": _auth(42)},
+            json={"workspaceId": result["id"], "requestId": "stale-undo", **old_action},
+        )
+        assert response.status == 409
+        await action(client, **button(result, "Undo"))
+        # Switching after Undo must never resurrect the receipt or its button.
+        await action(client, kind="command", command="lang", text="fr")
+        result = await state(client)
+        card = next(card for card in result["cards"] if card["id"] == receipt_card_id)
+        assert not card["buttons"]
+        with kitchen.sessions() as session:
+            item = session.exec(select(PantryItem).where(PantryItem.raw_name == "Carrots")).one()
+            assert item.normalized_name == "carrots"
+            assert item.status != "active"
 
 
 @pytest.mark.asyncio

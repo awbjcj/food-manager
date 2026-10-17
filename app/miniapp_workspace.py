@@ -31,6 +31,9 @@ from app.handlers.meta import handle_nl_message, handle_photo
 from app.handlers.pantry import handle_correct_reply
 from app.handlers.plan import handle_plan_current
 from app.i18n import t
+from app.renderer import build_undo_keyboard, render_ingest_reply
+from app.telegram_ui import to_aiogram_keyboard
+from app.views import cached_names, ingest_texts
 
 log = logging.getLogger(__name__)
 COMMANDS = {name: (handler, deps) for name, handler, deps in _MESSAGE_COMMANDS}
@@ -77,6 +80,7 @@ class AppMessage:
         self.photo = []
         self.document = None
         self.revision = secrets.token_urlsafe(12)
+        self.receipt_view = None
 
     def model_copy(self, *, update):
         result = copy(self)
@@ -91,6 +95,7 @@ class AppMessage:
         return result
 
     async def edit_text(self, text, reply_markup=None, **_kwargs):
+        self.receipt_view = None
         self.text = text
         self.reply_markup = reply_markup
         self.revision = secrets.token_urlsafe(12)
@@ -224,7 +229,29 @@ class WorkspaceRuntime:
             self.workspaces[user_id] = workspace
         workspace.lang = lang
         workspace.touched = now
+        if not workspace.busy:
+            self._refresh_receipts(workspace)
         return workspace
+
+    def _refresh_receipts(self, workspace):
+        for card in workspace.cards.values():
+            if card.receipt_view is None:
+                continue
+            summary, today, refined_ids, rendered_lang = card.receipt_view
+            if rendered_lang == workspace.lang:
+                continue
+            with self.deps["session_factory"]() as session:
+                names = cached_names(session, lang=workspace.lang, texts=ingest_texts(summary))
+            card.text = render_ingest_reply(
+                summary, today=today, refined_ids=refined_ids,
+                lang=workspace.lang, names=names,
+            )
+            card.reply_markup = (
+                to_aiogram_keyboard(build_undo_keyboard(receipt_id=summary.receipt_id, lang=workspace.lang))
+                if summary.receipt_id is not None and summary.inserted_food_count else None
+            )
+            card.revision = secrets.token_urlsafe(12)
+            card.receipt_view = (summary, today, refined_ids, workspace.lang)
 
     async def close(self, _app):
         tasks = [
@@ -320,11 +347,15 @@ class WorkspaceRuntime:
         async def photo_downloader(_id):
             return image
 
+        def on_receipt_rendered(message, summary, today, refined_ids, lang):
+            message.receipt_view = (summary, today, refined_ids, lang)
+
         deps = {
             **self.deps,
             "bot": transport,
             "spawn": spawn,
             "photo_downloader": photo_downloader,
+            "on_receipt_rendered": on_receipt_rendered,
         }
 
         async def invoke(handler, names, event):
@@ -413,6 +444,7 @@ class WorkspaceRuntime:
                         "now_provider",
                         "clients",
                         "photo_downloader",
+                        "on_receipt_rendered",
                         "on_user_created",
                         "spawn",
                         "bot",

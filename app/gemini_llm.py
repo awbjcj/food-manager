@@ -230,6 +230,7 @@ class GeminiLLMClient:
             system=SYSTEM_PROMPT,
             contents=contents,
             response_schema=ParseResult,
+            max_output_tokens=8192,
         )
         try:
             parsed_raw = getattr(response, "parsed", None)

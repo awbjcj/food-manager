@@ -43,7 +43,11 @@ import.
 
 Workspace validation, pantry action confirmations, and empty states follow the
 saved account language. Changing language updates the interface and subsequent
-results; existing activity cards retain the language in which they were created.
+results. Receipt result cards re-render with cached item translations and localized
+buttons on the next workspace poll, without rescanning. Other existing activity
+cards retain the language in which they were created. Recognition requests English,
+Chinese, French, and Spanish item names together; canonical stored names stay
+English. Missing translations fall back to English.
 Shared labels use one frontend glossary. Catalog checks require all four locales
 and matching interpolation placeholders.
 

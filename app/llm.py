@@ -32,9 +32,15 @@ Category = Literal[
 ]
 
 
+class NameTranslationItem(BaseModel):
+    lang: str
+    text: str
+
+
 class ParsedItem(BaseModel):
     is_food: bool
     name: str
+    name_translations: list[NameTranslationItem] = Field(default_factory=list)
     # ge, not gt: Pydantic emits gt as JSON Schema `exclusiveMinimum`, a field
     # Gemini's structured-output Schema type doesn't recognize and rejects.
     qty: float = Field(default=1.0, ge=0.01)
@@ -69,11 +75,6 @@ class LLMResult(BaseModel):
 
 
 CacheAction = Literal["move", "add_new", "leave"]
-
-
-class NameTranslationItem(BaseModel):
-    lang: str
-    text: str
 
 
 class CorrectionDiff(BaseModel):
@@ -173,7 +174,12 @@ returned line item:
   - is_food: true if this is a pantry-relevant food OR drink item (beverages
     like juice, milk drinks, soda, water all count), false for purchased
     non-food items such as paper towels or bags
-  - name: clean human-readable name ("Whole Milk 1 gal"), expand abbreviations
+  - name: clean canonical English name ("Whole Milk 1 gal"), expand abbreviations
+    and translate receipt text into English regardless of its original language
+  - name_translations: one {"lang": code, "text": translated_name} entry for EACH
+    of en, zh (Simplified Chinese), fr (French), es (Spanish), including skipped
+    and non-food items. The en text must equal name. Preserve product brands,
+    quantities and package sizes; translate food descriptions and unit words.
   - qty: display-oriented purchased quantity (1.0 if ambiguous)
   - unit: "gal"|"lb"|"oz"|"g"|"kg"|"ml"|"l"|"ct"|"bunch"|"each"|null
   - category: "dairy"|"produce"|"meat"|"seafood"|"bakery"|"pantry"|"frozen"|"beverage"|"other"
@@ -513,7 +519,7 @@ class AnthropicLLMClient(LLMClient):
         return await with_transport_retry(
             lambda: self._sdk.messages.create(
                 model=self._model,
-                max_tokens=_reasoning_max_tokens(self._model, 2048),
+                max_tokens=_reasoning_max_tokens(self._model, 8192),
                 system=(
                     SYSTEM_PROMPT + "\nCall the parse_receipt tool with the result."
                     if sonnet_5_5
@@ -593,7 +599,7 @@ class OpenAILLMClient(LLMClient):
                 tools=[_OPENAI_WEB_SEARCH_TOOL],
                 reasoning=_OPENAI_REASONING,
                 text_format=ParseResult,
-                max_output_tokens=_reasoning_max_tokens(self._model, 2048),
+                max_output_tokens=_reasoning_max_tokens(self._model, 8192),
             ),
             log_event="llm_transport_failed",
             sleep=self._sleep,

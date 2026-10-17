@@ -106,7 +106,10 @@ For native Windows, macOS, and Linux instructions, direct `docker build` /
   cooked-meal follow-through, and LLM cost over the last 30 days.
 - `/lang [en|zh|fr|es]` sets your language; every household member can pick
   their own — the underlying data stays in English and is translated per
-  message.
+  message. Receipt recognition requests item names in all four languages and
+  caches them for pantry views and digests. Units and item details follow the
+  selected language. Mini App receipt result cards also update when you change
+  your saved language, without rescanning the receipt.
 
 ## Tests
 

@@ -668,6 +668,7 @@ async def handle_photo(
     spawn=None,
     bot=None,
     translation_llm=None,
+    on_receipt_rendered=None,
 ) -> None:
     if msg.chat.type != "private":
         with session_factory() as session:
@@ -787,6 +788,8 @@ async def handle_photo(
             view.text,
             keyboard,
         )
+        if on_receipt_rendered is not None:
+            on_receipt_rendered(sent, summary, today, frozenset(), user_lang)
 
     if (
         refine_search is not None
@@ -828,6 +831,8 @@ async def handle_photo(
                         build_undo_keyboard(receipt_id=receipt_id, lang=user_lang)
                     ),
                 )
+                if on_receipt_rendered is not None:
+                    on_receipt_rendered(sent, summary, today, refined, user_lang)
             except Exception as exc:  # noqa: BLE001 - background edit is best-effort
                 log.warning(
                     "refine_edit_failed", extra={"error_class": type(exc).__name__}

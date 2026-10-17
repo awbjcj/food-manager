@@ -14,6 +14,7 @@ from app.models import PantryItem, Receipt
 from app.normalization import normalize
 from app.shelf_life_search import ShelfLifeSearchClient
 from app.shopping_service import check_off_purchased_names
+from app.translation_service import upsert_name_translations
 
 
 @dataclass(frozen=True)
@@ -101,6 +102,14 @@ async def ingest_photo(
 
     llm_result = await llm.extract_items_from_image(image_bytes, today=today)
     parsed_receipt = llm_result.parse
+    # Recognition supplies all display languages in the same paid image call.
+    # Keep domain keys English; only the shared display cache is multilingual.
+    for parsed_item in parsed_receipt.items:
+        translations = {entry.lang: entry.text for entry in parsed_item.name_translations}
+        parsed_item.name = translations.get("en", "").strip() or parsed_item.name
+        upsert_name_translations(
+            session, source_text=parsed_item.name, translations=translations,
+        )
     if (
         parsed_receipt.purchase_date is not None
         and parsed_receipt.purchase_date_confidence >= PURCHASE_DATE_MIN_CONFIDENCE
@@ -138,6 +147,7 @@ async def ingest_photo(
         to_insert.append((parsed_item, parsed_item.confidence < CONFIDENCE_FOR_CACHE_WRITE))
 
     if not to_insert:
+        session.commit()
         return summary
 
     try:

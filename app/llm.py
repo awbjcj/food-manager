@@ -9,6 +9,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.deepseek_pricing import deepseek_token_cost_micros
 from app.llm_transport import with_transport_retry
 from app.profile_service import FoodProfile
 
@@ -249,10 +250,6 @@ _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "gemini-3.5-flash-lite": {"input": 0.3, "output": 2.5},
     "gemini-3.1-pro-preview": {"input": 2.0, "output": 12.0},
     "gemini-3.1-flash-lite": {"input": 0.25, "output": 1.5},
-    # Conservative peak-hour, cache-miss rates. The v4-pro route serves
-    # V4.1 Flash from 2026-09-10 until the V4.1 Pro launch.
-    "deepseek-v4-flash": {"input": 0.44, "output": 1.32},
-    "deepseek-v4-pro": {"input": 0.30, "output": 1.20},
 }
 
 _OPENAI_WEB_SEARCH_TOOL = {
@@ -288,6 +285,8 @@ def _extract_tool_input(message) -> dict:
 
 
 def _cost_micros(message, model: str) -> int | None:
+    if model.startswith("deepseek-"):
+        return deepseek_token_cost_micros(message, model)
     price = _PRICE_MICROS_PER_TOKEN_BY_MODEL.get(model)
     if price is None:
         return None

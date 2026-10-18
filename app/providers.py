@@ -25,13 +25,11 @@ log = logging.getLogger(__name__)
 Provider = Literal["anthropic", "openai", "gemini", "deepseek"]
 ALL_PROVIDERS: tuple[Provider, ...] = ("anthropic", "openai", "gemini", "deepseek")
 
-# A coarse description of what each provider's API can serve. "text" covers the
+# A coarse description of what each provider integration can serve. "text" covers the
 # JSON tasks every provider can do (corrections, /add, profile, cook selection &
 # nutrition, translation). "image" is receipt photo understanding; "search" is a
-# built-in web-search tool. DeepSeek's public API has no image input, so image
-# capability still falls back to another provider; it does have a native
-# web_search tool on its Responses API (app.deepseek_llm), so "search" is no
-# longer fallback-only for it.
+# web-search capability. DeepSeek has no image client here, so photo calls fall
+# back to another provider. Its standalone Search API works with Pro and Flash.
 Capability = Literal["image", "text", "search"]
 
 PROVIDER_CAPABILITIES: dict[Provider, frozenset[Capability]] = {

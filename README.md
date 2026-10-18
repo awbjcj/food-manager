@@ -295,7 +295,10 @@ does not defer standalone API charges. Built-in Responses `web_search` works
 only with Pro and is ignored by Flash. Text/search tool turns send
 `reasoning={"effort": "low"}` with `max_output_tokens=9216`, a hard ceiling
 covering both reasoning and visible output, rather than a thinking-only budget.
-Full reasoning output is replayed in memory between tool turns. See the official
+Full reasoning output is replayed in memory between tool turns.
+Search is requested with `tool_choice="auto"`: DeepSeek rejects forced
+`required`/named tool choices while thinking is enabled. Shelf-life lookup
+returns unknown unless a successful search produced evidence. See the official
 [Search guide](https://api-docs.deepseek.com/zh-cn/guides/search/),
 [Responses compatibility](https://api-docs.deepseek.com/guides/responses_api/), and
 [DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/).

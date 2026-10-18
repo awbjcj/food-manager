@@ -78,6 +78,14 @@ async def _sdk(replies, *, base_url="https://deepseek.test"):
     def handle(request):
         requests.append(request)
         assert request.headers["authorization"] == "Bearer test-only"
+        body = json.loads(request.content)
+        if (
+            request.url.path.endswith("/responses")
+            and body.get("reasoning", {}).get("effort") != "none"
+        ):
+            assert body.get("tool_choice") in {None, "auto", "none"}, (
+                "DeepSeek thinking rejects forced tool choices"
+            )
         reply = next(pending)
         if isinstance(reply, tuple):
             status, body = reply
@@ -182,7 +190,8 @@ async def test_standalone_search_wire_payload_and_reasoning_replay(
     }
     first, final = (json.loads(requests[n].content) for n in (0, 2))
     assert first["tools"][0]["type"] == "function"
-    assert first["tool_choice"] == "required"
+    assert first["tool_choice"] == "auto"
+    assert "Call the web_search function" in first["input"][0]["content"]
     assert final["reasoning"] == {"effort": "low"}
     assert final["max_output_tokens"] == 9216
     assert final["input"][2]["content"] == reasoning["content"]
@@ -340,3 +349,14 @@ async def test_unknown_function_cannot_execute_another_endpoint():
     assert len(requests) == 2
     assert result.days is None
     assert result.cost_micros_usd == 2706
+
+
+async def test_thinking_search_without_a_tool_call_cannot_claim_web_evidence():
+    async with _sdk([_response()]) as (sdk, requests):
+        result = await DeepSeekSearchClient(sdk, "deepseek-flash").lookup_shelf_life(
+            name="milk", category=None
+        )
+    assert len(requests) == 1
+    assert result.days is None
+    assert result.confidence == 0
+    assert result.cost_micros_usd == 1353

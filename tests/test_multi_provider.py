@@ -262,11 +262,11 @@ async def test_deepseek_parse_add_happy_path():
         user_text="oat milk", today=date(2026, 6, 29), tz="UTC"
     )
     assert [i.name for i in items] == ["Oat Milk"]
-    assert cost == round(10 * 0.30 + 5 * 1.20)  # V4.1 Flash via v4-pro route
-    # every text call carries the native web_search tool
-    assert sdk.responses.calls[0]["tools"] == [
-        {"type": "web_search", "search_context_size": "low"}
-    ]
+    assert cost == round(10 * 1.32 + 5 * 3.96)  # conservative peak estimate
+    # Search is an executable function on both Pro and Flash.
+    tool = sdk.responses.calls[0]["tools"][0]
+    assert tool["type"] == "function"
+    assert tool["name"] == "web_search"
 
 
 async def test_deepseek_selection_has_no_web_search_tool():
@@ -338,10 +338,8 @@ async def test_deepseek_selection_raises_on_malformed_output_text():
         await client.select_items(prompt="pick stuff")
 
 
-async def test_deepseek_search_tool_cost_is_unknown_when_invoked():
-    """DeepSeek doesn't publish a web_search price, so a response with a
-    web_search_call in it must report cost as unknown, not silently
-    under-priced at token cost alone."""
+async def test_deepseek_unexpected_server_search_cost_remains_unknown():
+    """Server output does not reveal billable non-empty Search/Fetch requests."""
     from app.deepseek_llm import DeepSeekSearchClient
 
     sdk = FakeDeepSeekSDK(
@@ -350,8 +348,8 @@ async def test_deepseek_search_tool_cost_is_unknown_when_invoked():
     sdk.responses._responses[0].output_text = '{"days": 10, "confidence": 0.9}'
     client = DeepSeekSearchClient(sdk, "deepseek-v4-flash")
     result = await client.lookup_shelf_life(name="milk", category="dairy")
-    assert result.days == 10
-    assert result.confidence == 0.9
+    assert result.days is None
+    assert result.confidence == 0.0
     assert result.cost_micros_usd is None
 
 

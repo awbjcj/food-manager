@@ -48,12 +48,10 @@ class Settings(BaseSettings):
     gemini_text_model: str = Field(
         default="gemini-3.8-flash", alias="GEMINI_TEXT_MODEL"
     )
-    # DeepSeek is OpenAI-Responses-API-compatible; it has no image capability,
-    # but does have a native web_search tool. One model field suffices since
-    # a single model serves both the text and search capabilities.
+    # DeepSeek uses Responses for text and the standalone Search API for web
+    # evidence. This integration delegates receipt photos to another provider.
     deepseek_api_key: str | None = Field(default=None, alias="DEEPSEEK_API_KEY")
-    # DeepSeek V4.1 Flash is served through the documented deepseek-v4-pro API
-    # route; there is no separate public deepseek-v4.1 model identifier.
+    # Pro uses deepseek-v4-pro; V4.1 Flash uses deepseek-flash.
     deepseek_model: str = Field(default="deepseek-v4-pro", alias="DEEPSEEK_MODEL")
     deepseek_base_url: str = Field(
         default="https://api.deepseek.com", alias="DEEPSEEK_BASE_URL"

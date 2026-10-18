@@ -11,15 +11,14 @@ means the model is schema-guaranteed to return valid JSON, so — like the
 OpenAI clients this mirrors — there is no "ask for JSON, validate, repair
 once" loop here anymore.
 
-DeepSeek's ``web_search``/``web_search_2025_08_26`` tool is native and
-server-side (queries execute on DeepSeek's infrastructure, not the caller's),
-but its per-call price is undisclosed — unlike OpenAI's published $10/1,000
-calls. A response with search invoked therefore reports its cost as unknown
-(``None``) rather than silently under-pricing it; see
-``_deepseek_cost_micros``.
+Search uses POST /v1/tools/search via a bounded function-tool loop. Unlike the
+Responses built-in web_search (Pro only), this works with Flash as well. Only
+non-empty successful searches incur the $0.75/1,000-request fee. The temporary
+server-side tool free period does not apply to these standalone API requests.
+See https://api-docs.deepseek.com/guides/search/.
 
-DeepSeek is still image-incapable (no image extraction client here); it now
-has a search capability via the native web_search tool, reflected in
+This integration has no image extraction client; photo calls still fall back
+to another provider. Text and search capabilities are reflected in
 ``app.providers.PROVIDER_CAPABILITIES``.
 """
 
@@ -29,24 +28,24 @@ import asyncio
 import json
 import logging
 from datetime import date
+from functools import partial
 from typing import Any
 
 from app.cook.llm import NUTRITION_SYSTEM_PROMPT, SELECTION_SYSTEM_PROMPT
 from app.cook.models import NutritionScores, SelectedItems
 from app.llm import (
-    _OPENAI_REASONING,
-    _OPENAI_WEB_SEARCH_TOOL,
     CORRECTION_SYSTEM_PROMPT,
     OPENAI_ADD_SYSTEM_PROMPT,
     PROFILE_SYSTEM_PROMPT,
     CorrectionDiff,
     ProposedAddItem,
     ProposedAddItems,
+    _add_cost,
     _cost_micros,
     _extract_openai_parsed,
     _web_search_call_count,
 )
-from app.llm_transport import with_transport_retry
+from app.llm_transport import is_retryable_transport_error, with_transport_retry
 from app.profile_service import FoodProfile
 from app.refine_service import SEARCH_SYSTEM_PROMPT
 from app.shelf_life_search import ShelfLifeSearchClient, ShelfLifeSearchResult
@@ -64,22 +63,43 @@ log = logging.getLogger(__name__)
 # top of each call's intended *output* size; it is only a cap (unused tokens
 # cost nothing), so it is deliberately generous.
 _REASONING_HEADROOM_TOKENS = 8192
+_DEEPSEEK_REASONING = {"effort": "low"}
+_SEARCH_COST_MICROS = 750
+_MAX_SEARCH_CALLS = 3
+_DEEPSEEK_SEARCH_TOOL = {
+    "type": "function",
+    "name": "web_search",
+    "description": "Search the web for current food safety and shelf-life evidence.",
+    "strict": True,
+    "parameters": {
+        "type": "object",
+        "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 128}},
+        "required": ["query"],
+        "additionalProperties": False,
+    },
+}
 
 
 def _deepseek_cost_micros(response, model: str) -> int | None:
     """Token cost via the shared OpenAI-shaped helper.
 
-    Unknown (``None``), not silently under-priced, whenever the web_search
-    tool was invoked — DeepSeek does not publish a per-search rate for it.
+    Unexpected server-side search remains unknown: its output items do not
+    expose the number of successful, non-empty Search/Fetch API requests.
     """
     base = _cost_micros(response, model)
     if base is None:
         return None
     calls = _web_search_call_count(response)
     if calls:
-        log.info("deepseek_web_search_cost_unknown", extra={"search_calls": calls})
         return None
     return base
+
+
+def _retryable_search_error(exc: Exception) -> bool:
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status in {408, 429} or status >= 500
+    return is_retryable_transport_error(exc)
 
 
 class _DeepSeekResponsesClient:
@@ -93,30 +113,111 @@ class _DeepSeekResponsesClient:
         self._web_search = web_search
         self._sleep = sleep
 
-    async def _create_response(self, system: str, user_text: str, text_format):
-        return await with_transport_retry(
-            lambda: self._sdk.responses.parse(
-                model=self._model,
-                input=[
-                    {"role": "system", "content": system},
+    async def _search(self, call) -> tuple[dict, int]:
+        try:
+            if call.name != "web_search":
+                raise ValueError("unsupported search tool")
+            args = json.loads(call.arguments)
+            query = args["query"]
+            if not isinstance(query, str) or not query.strip() or len(query) > 128:
+                raise ValueError("query must contain 1 to 128 characters")
+            # SDK post retains the configured route/auth/HTTP client. Avoid
+            # duplicating /v1 for gateways whose base URL already includes it.
+            path = (
+                "/tools/search"
+                if self._sdk.base_url.path.rstrip("/").endswith("/v1")
+                else "/v1/tools/search"
+            )
+            result = await with_transport_retry(
+                lambda: self._sdk.post(
+                    path,
+                    cast_to=dict,
+                    body={"query": query, "count": 5, "need_content": False},
+                ),
+                log_event="deepseek_search_failed",
+                sleep=self._sleep,
+                classify=_retryable_search_error,
+            )
+            if not isinstance(result, dict) or not isinstance(
+                result.get("results"), list
+            ):
+                # A malformed successful response may still have been billed.
+                return {"error": "Invalid search response"}, _SEARCH_COST_MICROS
+            return result, _SEARCH_COST_MICROS if result["results"] else 0
+        except Exception as exc:  # noqa: BLE001 - search must not block text tasks
+            log.warning(
+                "deepseek_search_unavailable", extra={"error_class": type(exc).__name__}
+            )
+            return {"error": "Search unavailable; do not claim web evidence."}, 0
+
+    async def _create_response(
+        self, system: str, user_text: str, text_format=None, *, require_search=False
+    ):
+        history: list[Any] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": [{"type": "input_text", "text": user_text}]},
+        ]
+        cost: int | None = 0
+        searches = 0
+        grounded = False
+        for turn in range(_MAX_SEARCH_CALLS + 1):
+            can_search = (
+                self._web_search
+                and searches < _MAX_SEARCH_CALLS
+                and turn < _MAX_SEARCH_CALLS
+            )
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "input": list(history),
+                "tools": [_DEEPSEEK_SEARCH_TOOL] if can_search else [],
+                "tool_choice": "auto" if can_search else "none",
+                "reasoning": _DEEPSEEK_REASONING,
+                "max_output_tokens": 1024 + _REASONING_HEADROOM_TOKENS,
+            }
+            if require_search and turn == 0:
+                kwargs["tool_choice"] = "required"
+            create = self._sdk.responses.create
+            if text_format is not None:
+                kwargs["text_format"] = text_format
+                create = self._sdk.responses.parse
+            response = await with_transport_retry(
+                partial(create, **kwargs),
+                log_event="deepseek_llm_failed",
+                sleep=self._sleep,
+            )
+            token_cost = _deepseek_cost_micros(response, self._model)
+            cost = None if token_cost is None else _add_cost(cost, token_cost)
+            calls = [item for item in response.output if item.type == "function_call"]
+            if not calls:
+                return (None if require_search and not grounded else response), cost
+            if not can_search:
+                raise ValueError("DeepSeek exceeded the search tool budget")
+            # Stateless Responses requires the full output, including opaque
+            # reasoning content, on every subsequent turn. Never log it.
+            history.extend(response.output)
+            for call in calls:
+                if searches < _MAX_SEARCH_CALLS:
+                    result, search_cost = await self._search(call)
+                    grounded = grounded or bool(result.get("results"))
+                    searches += 1
+                    cost = _add_cost(cost, search_cost)
+                else:
+                    result = {
+                        "error": "Search limit reached; answer with available evidence."
+                    }
+                history.append(
                     {
-                        "role": "user",
-                        "content": [{"type": "input_text", "text": user_text}],
-                    },
-                ],
-                tools=[_OPENAI_WEB_SEARCH_TOOL] if self._web_search else [],
-                reasoning=_OPENAI_REASONING,
-                text_format=text_format,
-                max_output_tokens=1024 + _REASONING_HEADROOM_TOKENS,
-            ),
-            log_event="deepseek_llm_failed",
-            sleep=self._sleep,
-        )
+                        "type": "function_call_output",
+                        "call_id": call.call_id,
+                        "output": json.dumps(result),
+                    }
+                )
+        raise ValueError("DeepSeek exceeded the response turn budget")
 
     async def call(self, system: str, user_text: str, model_cls):
-        response = await self._create_response(system, user_text, model_cls)
+        response, cost = await self._create_response(system, user_text, model_cls)
         parsed = model_cls.model_validate(_extract_openai_parsed(response))
-        return parsed, _deepseek_cost_micros(response, self._model)
+        return parsed, cost
 
 
 class DeepSeekTextLLMClient:
@@ -141,7 +242,9 @@ class DeepSeekTextLLMClient:
                 "user_text": user_text,
             }
         )
-        return await self._client.call(CORRECTION_SYSTEM_PROMPT, user_msg, CorrectionDiff)
+        return await self._client.call(
+            CORRECTION_SYSTEM_PROMPT, user_msg, CorrectionDiff
+        )
 
     async def parse_add(
         self,
@@ -216,44 +319,41 @@ class DeepSeekTranslationLLMClient:
             sleep=self._sleep,
         )
         parsed = TranslationList.model_validate(_extract_openai_parsed(response))
-        return [str(x) for x in parsed.items], _deepseek_cost_micros(response, self._model)
+        return [str(x) for x in parsed.items], _deepseek_cost_micros(
+            response, self._model
+        )
 
 
 class DeepSeekSearchClient(ShelfLifeSearchClient):
-    """Shelf-life lookup via DeepSeek's native ``web_search`` tool."""
+    """Shelf-life lookup backed by DeepSeek's standalone Search API."""
 
     def __init__(self, sdk, model: str, sleep=asyncio.sleep):
-        self._sdk = sdk
-        self._model = model
-        self._sleep = sleep
+        self._client = _DeepSeekResponsesClient(
+            sdk, model, web_search=True, sleep=sleep
+        )
 
     async def lookup_shelf_life(
         self, *, name: str, category: str | None
     ) -> ShelfLifeSearchResult:
         prompt = f"Item: {name}" + (f" (category: {category})" if category else "")
         try:
-            response = await with_transport_retry(
-                lambda: self._sdk.responses.create(
-                    model=self._model,
-                    input=[
-                        {"role": "system", "content": SEARCH_SYSTEM_PROMPT},
-                        {
-                            "role": "user",
-                            "content": [{"type": "input_text", "text": prompt}],
-                        },
-                    ],
-                    tools=[_OPENAI_WEB_SEARCH_TOOL],
-                ),
-                log_event="deepseek_llm_failed",
-                sleep=self._sleep,
+            response, cost = await self._client._create_response(
+                SEARCH_SYSTEM_PROMPT,
+                prompt,
+                require_search=True,
             )
         except Exception as exc:  # noqa: BLE001 - search must degrade to unknown, not crash
             log.warning(
                 "search_transport_failed", extra={"error_class": type(exc).__name__}
             )
-            return ShelfLifeSearchResult(days=None, confidence=0.0, cost_micros_usd=None)
+            return ShelfLifeSearchResult(
+                days=None, confidence=0.0, cost_micros_usd=None
+            )
 
-        cost = _deepseek_cost_micros(response, self._model)
+        if response is None:
+            return ShelfLifeSearchResult(
+                days=None, confidence=0.0, cost_micros_usd=cost
+            )
         try:
             text = response.output_text
             data = json.loads(text[text.index("{") : text.rindex("}") + 1])
@@ -266,4 +366,6 @@ class DeepSeekSearchClient(ShelfLifeSearchClient):
             log.warning(
                 "search_parse_failed", extra={"error_class": type(exc).__name__}
             )
-            return ShelfLifeSearchResult(days=None, confidence=0.0, cost_micros_usd=cost)
+            return ShelfLifeSearchResult(
+                days=None, confidence=0.0, cost_micros_usd=cost
+            )

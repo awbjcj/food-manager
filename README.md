@@ -233,8 +233,8 @@ inventing those facts. The new history starts after migration `0023_pantry_outco
 | `GEMINI_API_KEY`           | When using gemini    | —                           | Google Gemini API key (native `google-genai` SDK)                                                                                                                                            |
 | `GEMINI_MODEL`             | No                   | `gemini-3.8-flash`          | Gemini model to use for receipt parsing                                                                                                                                                      |
 | `GEMINI_TEXT_MODEL`        | No                   | `gemini-3.8-flash`          | Gemini model to use for `/correct` and `/add` proposals                                                                                                                                      |
-| `DEEPSEEK_API_KEY`         | When using deepseek  | —                           | DeepSeek API key. DeepSeek still can't read receipt photos, but now has native web search                                                                                                    |
-| `DEEPSEEK_MODEL`           | No                   | `deepseek-v4-pro`           | DeepSeek model to use for text and search tasks; this documented route serves V4.1 Flash until V4.1 Pro launches                                                                            |
+| `DEEPSEEK_API_KEY`         | When using deepseek  | —                           | DeepSeek API key for text and standalone web search; receipt photos use another provider                                                                                                    |
+| `DEEPSEEK_MODEL`           | No                   | `deepseek-v4-pro`           | DeepSeek model for text and search tasks: V4 Pro (`deepseek-v4-pro`) or V4.1 Flash (`deepseek-flash`)                                                                            |
 | `DEEPSEEK_BASE_URL`        | No                   | `https://api.deepseek.com`  | DeepSeek API base URL (OpenAI-compatible)                                                                                                                                                    |
 | `SUB2API_BASE_URL`         | No                   | —                           | Shared Sub2API gateway root; HTTPS required except for loopback HTTP in `ENV=dev`                                                                                                            |
 | `SUB2API_ANTHROPIC_TOKEN`  | No                   | —                           | Anthropic subscription-routing token; makes subscription mode the default for Anthropic                                                                                                     |
@@ -270,6 +270,35 @@ search charges are separate. See
 [OpenAI pricing](https://developers.openai.com/api/docs/pricing),
 [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing), and
 [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing).
+
+DeepSeek pricing (checked October 18, 2026, USD per million tokens):
+
+| Model | Cache hit, off-peak / peak | Cache miss, off-peak / peak | Output, off-peak / peak |
+| --- | ---: | ---: | ---: |
+| `deepseek-flash` | $0.003 / $0.006 | $0.15 / $0.30 | $0.60 / $1.20 |
+| `deepseek-v4-pro` | $0.022 / $0.044 | $0.66 / $1.32 | $1.98 / $3.96 |
+
+The legacy `deepseek-v4-flash` and `deepseek-v4-flash-vision-exp` IDs bill at
+Flash rates. Estimates use the response timestamp: weekday peak windows are
+01:00–04:00 and 06:00–10:00 UTC. Other hours and weekends use off-peak rates;
+Chinese public holidays also qualify for off-peak, but the bot conservatively
+estimates peak-window holiday requests at peak rates. A missing timestamp uses
+peak rates. Cached input is subtracted from ordinary input before pricing;
+reasoning tokens are already included in billed output.
+
+DeepSeek search uses the standalone `POST /v1/tools/search` API through function
+tools on both models, with at most three searches per task. It charges $0.75 per
+1,000 HTTP 200 requests with non-empty results; empty results and failures add no
+search fee. These fees accrue alongside tokens from every model turn. The
+November 1 billing start described for Harness/Claude Code/Codex server tools
+does not defer standalone API charges. Built-in Responses `web_search` works
+only with Pro and is ignored by Flash. Text/search tool turns send
+`reasoning={"effort": "low"}` with `max_output_tokens=9216`, a hard ceiling
+covering both reasoning and visible output, rather than a thinking-only budget.
+Full reasoning output is replayed in memory between tool turns. See the official
+[Search guide](https://api-docs.deepseek.com/zh-cn/guides/search/),
+[Responses compatibility](https://api-docs.deepseek.com/guides/responses_api/), and
+[DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/).
 
 Stars subscriptions renew every 30 days. Household owners can cancel renewal
 from the Mini App; top-ups expire at the end of the current quota period.

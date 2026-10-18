@@ -345,8 +345,8 @@ def _build_llm_clients(settings: Settings, modes: ModeMap | None = None) -> LLMB
         )
         # Still image-incapable: no image extraction / search-backed recipe
         # client here; those fall back to a capable provider via the selectors.
-        # Search itself is native (DeepSeekSearchClient, via the Responses API
-        # web_search tool) and no longer falls back.
+        # Search uses the standalone Search API via bounded function calls,
+        # supported by both Pro and Flash.
         text_clients["deepseek"] = DeepSeekTextLLMClient(
             deepseek_sdk, settings.deepseek_model
         )

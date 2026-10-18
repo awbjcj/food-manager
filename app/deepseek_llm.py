@@ -153,6 +153,12 @@ class _DeepSeekResponsesClient:
     async def _create_response(
         self, system: str, user_text: str, text_format=None, *, require_search=False
     ):
+        if require_search:
+            # DeepSeek rejects required/named tool_choice in thinking mode.
+            # Request search in the prompt and verify evidence before returning.
+            system += (
+                " Call the web_search function before returning a shelf-life answer."
+            )
         history: list[Any] = [
             {"role": "system", "content": system},
             {"role": "user", "content": [{"type": "input_text", "text": user_text}]},
@@ -174,8 +180,6 @@ class _DeepSeekResponsesClient:
                 "reasoning": _DEEPSEEK_REASONING,
                 "max_output_tokens": 1024 + _REASONING_HEADROOM_TOKENS,
             }
-            if require_search and turn == 0:
-                kwargs["tool_choice"] = "required"
             create = self._sdk.responses.create
             if text_format is not None:
                 kwargs["text_format"] = text_format

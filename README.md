@@ -228,7 +228,7 @@ inventing those facts. The new history starts after migration `0023_pantry_outco
 | `ANTHROPIC_TEXT_MODEL`     | No                   | `claude-haiku-5-5`         | Claude model to use for `/correct` and `/add` proposals                                                                                                                                      |
 | `ANTHROPIC_SEARCH_MODEL`   | No                   | `claude-opus-5-5`           | Claude model used for shelf-life web search — **requires web search enabled on the Anthropic workspace**                                                                                     |
 | `OPENAI_API_KEY`           | When using openai    | —                           | OpenAI API key                                                                                                                                                                               |
-| `OPENAI_MODEL`             | No                   | `gpt-6-sol`                 | OpenAI model to use for receipt parsing                                                                                                                                                      |
+| `OPENAI_MODEL`             | No                   | `gpt-6.1-terra`             | OpenAI model to use for receipt parsing, cook, and search                                                                                                                                     |
 | `OPENAI_TEXT_MODEL`        | No                   | `gpt-6-luna`                | OpenAI model to use for `/correct` and `/add` proposals                                                                                                                                      |
 | `GEMINI_API_KEY`           | When using gemini    | —                           | Google Gemini API key (native `google-genai` SDK)                                                                                                                                            |
 | `GEMINI_MODEL`             | No                   | `gemini-3.8-flash`          | Gemini model to use for receipt parsing                                                                                                                                                      |
@@ -256,7 +256,7 @@ million tokens, checked September 22, 2026) are:
 | `claude-opus-5-5` | Claude receipt, cook, and search | $4.00 | $20.00 |
 | `claude-haiku-5-5` | Claude text tasks (up to 100K input tokens) | $0.10 | $0.50 |
 | `claude-haiku-5-5` | Claude text tasks (over 100K input tokens) | $0.50 | $2.50 |
-| `gpt-6-sol` | OpenAI receipt, cook, and search | $2.00 | $10.00 |
+| `gpt-6.1-terra` | OpenAI receipt, cook, and search | $1.00 | $5.00 |
 | `gpt-6-luna` | OpenAI text tasks | $0.10 | $0.50 |
 | `gemini-3.8-flash` | Gemini receipt, cook, search, and text | $0.75 | $3.75 |
 
@@ -270,6 +270,16 @@ search charges are separate. See
 [OpenAI pricing](https://developers.openai.com/api/docs/pricing),
 [Claude pricing](https://platform.claude.com/docs/en/about-claude/pricing), and
 [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing).
+
+GPT-6.1 Terra's model contract and Standard prices were checked October 28, 2026.
+Main-model OpenAI calls use Responses with `reasoning={"effort": "low"}` and an 8,192-token
+total output ceiling, including reasoning. Sampling controls are omitted.
+Terra estimates account for reported cache reads ($0.05/M), 30-minute writes
+($1.25/M), and 12-hour writes ($2.50/M); above 272K input tokens, input/cache
+rates double and output costs $7.50/M for the full request. Missing cache details
+use ordinary-input estimates. These first-party estimates do not establish
+gateway billing or live model access. See the
+[Terra model page](https://developers.openai.com/api/docs/models/gpt-6.1-terra).
 
 DeepSeek pricing (checked October 18, 2026, USD per million tokens):
 

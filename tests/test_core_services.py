@@ -64,7 +64,7 @@ def test_settings_load_from_env(monkeypatch):
     assert settings.anthropic_model == "claude-opus-5-5"
     assert settings.anthropic_text_model == "claude-haiku-5-5"
     assert settings.anthropic_search_model == "claude-opus-5-5"
-    assert settings.openai_model == "gpt-6-sol"
+    assert settings.openai_model == "gpt-6.1-terra"
     assert settings.openai_text_model == "gpt-6-luna"
     assert settings.gemini_model == "gemini-3.8-flash"
     assert settings.gemini_text_model == "gemini-3.8-flash"
@@ -79,7 +79,7 @@ def test_settings_load_openai_provider_from_env(monkeypatch):
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     assert settings.llm_provider == "openai"
     assert settings.openai_api_key == "test-openai-key"
-    assert settings.openai_model == "gpt-6-sol"
+    assert settings.openai_model == "gpt-6.1-terra"
     assert settings.openai_text_model == "gpt-6-luna"
 
 

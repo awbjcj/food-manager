@@ -198,6 +198,7 @@ def test_cost_micros_prices_openai_models():
     # gpt-5.4-mini: 1000*0.75 + 200*4.5 = 1650
     assert _cost_micros(usage, "gpt-5.4-mini") == 1650
     assert _cost_micros(usage, "gpt-6-sol") == 4000
+    assert _cost_micros(usage, "gpt-6.1-terra") == 2000
     assert _cost_micros(usage, "gpt-6-luna") == 200
     assert _cost_micros(usage, "claude-opus-5-5") == 8000
     assert _cost_micros(usage, "claude-sonnet-5") == 4000
@@ -220,7 +221,7 @@ async def test_new_reasoning_models_leave_room_for_visible_output():
 
     openai_sdk = MagicMock()
     openai_sdk.responses.parse = AsyncMock(return_value=MagicMock())
-    await OpenAILLMClient(openai_sdk, "gpt-6-sol")._create_response("receipt")
+    await OpenAILLMClient(openai_sdk, "gpt-6.1-terra")._create_response("receipt")
     assert openai_sdk.responses.parse.call_args.kwargs["max_output_tokens"] == 8192
     await OpenAITextLLMClient(openai_sdk, "gpt-6-luna")._create_response(
         "system", "message", CorrectionDiff

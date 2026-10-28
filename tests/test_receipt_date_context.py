@@ -49,7 +49,7 @@ async def test_receipt_parsers_receive_local_scan_date_through_selector(provider
                 usage=None,
             )
         )
-        client = OpenAILLMClient(sdk, "gpt-6-sol")
+        client = OpenAILLMClient(sdk, "gpt-6.1-terra")
         call = sdk.responses.parse
     else:
         sdk.aio.models.generate_content = AsyncMock(

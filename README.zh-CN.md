@@ -155,7 +155,7 @@ uv run pytest tests/test_core_services.py::test_shelf_life_defaults
 | `ANTHROPIC_TEXT_MODEL` | 否 | `claude-haiku-4-5-20251001` | 用于 `/correct` 和 `/add` 提案的 Claude 模型 |
 | `ANTHROPIC_SEARCH_MODEL` | 否 | `claude-opus-5-5` | 用于保存期网络搜索的 Claude 模型——**需要在 Anthropic 工作区启用网络搜索** |
 | `OPENAI_API_KEY` | 使用 OpenAI 时 | — | OpenAI API 密钥 |
-| `OPENAI_MODEL` | 否 | `gpt-6-sol` | 用于解析收据的 OpenAI 模型 |
+| `OPENAI_MODEL` | 否 | `gpt-6.1-terra` | 用于解析收据、菜谱及搜索的 OpenAI 模型 |
 | `OPENAI_TEXT_MODEL` | 否 | `gpt-6-luna` | 用于 `/correct` 和 `/add` 提案的 OpenAI 模型 |
 | `GEMINI_API_KEY` | 使用 Gemini 时 | — | Google Gemini API 密钥（原生 `google-genai` SDK） |
 | `GEMINI_MODEL` | 否 | `gemini-3.8-flash` | 用于解析收据的 Gemini 模型 |
@@ -181,7 +181,7 @@ uv run pytest tests/test_core_services.py::test_shelf_life_defaults
 | --- | --- | ---: | ---: |
 | `claude-opus-5-5` | Claude 收据、菜谱及搜索 | $4.00 | $20.00 |
 | `claude-haiku-4-5-20251001` | Claude 文本任务 | $1.00 | $5.00 |
-| `gpt-6-sol` | OpenAI 收据、菜谱及搜索 | $2.00 | $10.00 |
+| `gpt-6.1-terra` | OpenAI 收据、菜谱及搜索 | $1.00 | $5.00 |
 | `gpt-6-luna` | OpenAI 文本任务 | $0.10 | $0.50 |
 | `gemini-3.8-flash` | Gemini 收据、菜谱、搜索及文本 | $0.75 | $3.75 |
 
@@ -190,6 +190,15 @@ uv run pytest tests/test_core_services.py::test_shelf_life_defaults
 31 日；缓存和搜索费用另计。来源：[OpenAI 价格](https://developers.openai.com/api/docs/pricing)、
 [Claude 价格](https://platform.claude.com/docs/en/about-claude/pricing)、
 [Gemini 价格](https://ai.google.dev/gemini-api/docs/pricing)。
+
+GPT-6.1 Terra 的模型接口和标准价格核对于 2026 年 10 月 28 日。
+OpenAI 主模型请求使用 Responses API，设置 `reasoning={"effort": "low"}`，
+总输出上限为 8,192 token（包括推理），不发送采样参数。
+Terra 费用估算按返回的用量区分缓存读取（$0.05／百万 token）、30 分钟写入
+（$1.25）和 12 小时写入（$2.50）；输入超过 272K token 时，整个请求的输入和缓存
+价格翻倍，输出为 $7.50／百万 token。缺少缓存明细时，按普通输入估算。
+这些官方 API 价格估算不代表网关账单或已验证的线上模型访问。参阅
+[Terra 模型文档](https://developers.openai.com/api/docs/models/gpt-6.1-terra)。
 
 Stars 订阅每 30 天续费一次。家庭所有者可以在 Mini App 中取消续费；加量包会在当前额度周期结束时失效。完整的购买、验证、加量和取消流程请参阅 [`docs/telegram-subscriptions.zh-CN.md`](docs/telegram-subscriptions.zh-CN.md)。
 

@@ -38,7 +38,7 @@ class Settings(BaseSettings):
         alias="ANTHROPIC_TEXT_MODEL",
     )
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
-    openai_model: str = Field(default="gpt-6-sol", alias="OPENAI_MODEL")
+    openai_model: str = Field(default="gpt-6.1-terra", alias="OPENAI_MODEL")
     openai_text_model: str = Field(default="gpt-6-luna", alias="OPENAI_TEXT_MODEL")
     anthropic_search_model: str = Field(
         default="claude-opus-5-5", alias="ANTHROPIC_SEARCH_MODEL"

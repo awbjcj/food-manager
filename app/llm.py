@@ -234,6 +234,7 @@ _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
     "gpt-5.6-terra": {"input": 2, "output": 12},
     "gpt-5.6-luna": {"input": 0.2, "output": 1.2},
     "gpt-6-sol": {"input": 2, "output": 10},
+    "gpt-6.1-terra": {"input": 1, "output": 5},
     "gpt-6-luna": {"input": 0.1, "output": 0.5},
     # Approximate public per-token (micro-USD) rates; cost stays best-effort and
     # is reported as unknown for any model absent from this table. Some models
@@ -269,6 +270,7 @@ def _reasoning_max_tokens(model: str, regular_limit: int) -> int:
             "claude-sonnet-5-5",
             "claude-haiku-5-5",
             "gpt-6-sol",
+            "gpt-6.1-terra",
             "gpt-6-luna",
         }
         else regular_limit
@@ -296,6 +298,8 @@ def _cost_micros(message, model: str) -> int | None:
     try:
         if model == "claude-haiku-5-5":
             return _haiku_5_5_cost_micros(usage)
+        if model == "gpt-6.1-terra":
+            return _terra_cost_micros(usage)
         # round the total to whole micro-USD; per-token rates may be fractional
         # (e.g. OpenAI), while the integer Anthropic rates are unaffected.
         return round(
@@ -303,6 +307,45 @@ def _cost_micros(message, model: str) -> int | None:
         )
     except Exception:  # noqa: BLE001 - cost estimate is best-effort
         return None
+
+
+def _terra_cost_micros(usage) -> int:
+    """Standard Responses rates checked 2026-10-28; integer hundredths of micro-USD.
+
+    https://developers.openai.com/api/docs/models/gpt-6.1-terra
+    Missing cache details use ordinary-input estimates, as for other models.
+    """
+    input_tokens = usage.input_tokens
+    details = getattr(usage, "input_tokens_details", None)
+    cache_read = getattr(details, "cached_tokens", None) or 0
+    cache_write = getattr(details, "cache_write_tokens", None) or 0
+    writes = getattr(details, "cache_write_tokens_details", None)
+    # The installed SDK retains new usage extensions as plain dictionaries.
+    if isinstance(writes, dict):
+        cache_write_12h = writes.get("ttl_12h_tokens") or 0
+        cache_write_30m = writes.get("ttl_30m_tokens")
+    else:
+        cache_write_12h = getattr(writes, "ttl_12h_tokens", None) or 0
+        cache_write_30m = getattr(writes, "ttl_30m_tokens", None)
+    if cache_write_30m is None:
+        if cache_write:
+            raise ValueError("cache-write lifetime usage is missing")
+        cache_write_30m = 0
+    ordinary_input = input_tokens - cache_read - cache_write
+    if (
+        min(input_tokens, usage.output_tokens, ordinary_input, cache_read,
+            cache_write, cache_write_30m, cache_write_12h) < 0
+        or cache_write_30m + cache_write_12h != cache_write
+    ):
+        raise ValueError("inconsistent token usage")
+    long_context = input_tokens > 272_000
+    input_cost = (
+        ordinary_input * 100 + cache_read * 5
+        + cache_write_30m * 125 + cache_write_12h * 250
+    ) * (2 if long_context else 1)
+    # output_tokens already includes reasoning; do not add it again.
+    output_cost = usage.output_tokens * (750 if long_context else 500)
+    return round((input_cost + output_cost) / 100)
 
 
 def _haiku_5_5_cost_micros(usage) -> int:

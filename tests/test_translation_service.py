@@ -116,16 +116,16 @@ async def test_count_mismatch_falls_back_to_english():
 async def test_anthropic_translation_parses_json_array():
     sdk = MagicMock()
     sdk.messages.create = AsyncMock(return_value=_TextResponse(json.dumps(["牛奶", "鸡蛋"])))
-    client = AnthropicTranslationLLMClient(sdk=sdk, model="claude-haiku-4-5-20251001")
+    client = AnthropicTranslationLLMClient(sdk=sdk, model="claude-haiku-5-5")
     out, cost = await client.translate(texts=["Milk", "Eggs"], lang="zh")
     assert out == ["牛奶", "鸡蛋"]
-    assert cost == 500
+    assert cost == 50
 
 
 async def test_anthropic_translation_rejects_non_array():
     sdk = MagicMock()
     sdk.messages.create = AsyncMock(return_value=_TextResponse(json.dumps({"not": "an array"})))
-    client = AnthropicTranslationLLMClient(sdk=sdk, model="claude-haiku-4-5-20251001")
+    client = AnthropicTranslationLLMClient(sdk=sdk, model="claude-haiku-5-5")
     with pytest.raises(ValueError):
         await client.translate(texts=["Milk"], lang="zh")
 
@@ -134,10 +134,10 @@ async def test_openai_translation_parses_items():
     parsed = TranslationList(items=["牛奶", "鸡蛋"])
     sdk = MagicMock()
     sdk.responses.parse = AsyncMock(return_value=_OpenAIParsedResponse(parsed))
-    client = OpenAITranslationLLMClient(sdk=sdk, model="gpt-5.4-mini")
+    client = OpenAITranslationLLMClient(sdk=sdk, model="gpt-6.1-terra")
     out, cost = await client.translate(texts=["Milk", "Eggs"], lang="zh")
     assert out == ["牛奶", "鸡蛋"]
-    assert cost == 420
+    assert cost == 500
 
 
 async def test_selector_delegates_to_default_provider():

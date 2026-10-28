@@ -12,7 +12,8 @@ from app.llm import OpenAILLMClient, ParseResult, _cost_micros
 
 
 @pytest.mark.parametrize("cook", [False, True])
-async def test_terra_responses_payload_and_structured_output(cook):
+@pytest.mark.parametrize("model", ["gpt-6.1-terra", "gpt-6.1-sol"])
+async def test_gpt_61_responses_payload_and_structured_output(cook, model):
     requests = []
 
     def handle(request):
@@ -22,7 +23,7 @@ async def test_terra_responses_payload_and_structured_output(cook):
             "object": "response",
             "created_at": 1793145600,
             "status": "completed",
-            "model": "gpt-6.1-terra",
+            "model": model,
             "output": [{
                 "type": "message", "id": "msg_terra", "status": "completed",
                 "role": "assistant",
@@ -48,20 +49,20 @@ async def test_terra_responses_payload_and_structured_output(cook):
     ) as sdk:
         if cook:
             parsed, cost = await _OpenAIJSONClient(
-                sdk, "gpt-6.1-terra", web_search=True, max_tool_calls=1,
+                sdk, model, web_search=True, max_tool_calls=1,
             )._call("Return receipt data.", "milk", ParseResult)
         else:
-            result = await OpenAILLMClient(sdk, "gpt-6.1-terra").extract_items_from_image(
+            result = await OpenAILLMClient(sdk, model).extract_items_from_image(
                 b"\x89PNG\r\n\x1a\npng"
             )
             parsed, cost = result.parse, result.cost_micros_usd
 
     assert parsed.items == []
-    assert cost == 2035  # 400 ordinary + 10 read + 375/250 writes + 1000 output
+    assert cost == (4070 if model == "gpt-6.1-sol" else 2035)
     assert len(requests) == 1
     assert requests[0].url.path == "/v1/responses"
     body = json.loads(requests[0].content)
-    assert body["model"] == "gpt-6.1-terra"
+    assert body["model"] == model
     assert body["reasoning"] == {"effort": "low"}
     assert body["max_output_tokens"] == 8192
     assert body["text"]["format"]["type"] == "json_schema"
@@ -84,8 +85,9 @@ async def test_terra_responses_payload_and_structured_output(cook):
         (272_001, 200, 300, 100, 545_572),
     ],
 )
-def test_terra_prices_disjoint_cache_buckets_and_full_request_tier(
-    input_tokens, cache_read, write_30m, write_12h, expected,
+@pytest.mark.parametrize("model", ["gpt-6.1-terra", "gpt-6.1-sol"])
+def test_gpt_61_prices_disjoint_cache_buckets_and_full_request_tier(
+    input_tokens, cache_read, write_30m, write_12h, expected, model,
 ):
     usage = SimpleNamespace(
         input_tokens=input_tokens, output_tokens=200,
@@ -97,7 +99,9 @@ def test_terra_prices_disjoint_cache_buckets_and_full_request_tier(
         ),
         output_tokens_details=SimpleNamespace(reasoning_tokens=100),
     )
-    assert _cost_micros(SimpleNamespace(usage=usage), "gpt-6.1-terra") == expected
+    assert _cost_micros(SimpleNamespace(usage=usage), model) == (
+        expected * (2 if model == "gpt-6.1-sol" else 1)
+    )
 
 
 @pytest.mark.parametrize("details", [

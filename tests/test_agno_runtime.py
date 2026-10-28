@@ -22,7 +22,10 @@ from app.week_composer import DaySpec, WeekPlanSpec, build_week_composer
 
 PROVIDERS = [
     ("anthropic", "claude-haiku-5-5", "api.anthropic.com"),
-    ("openai", "gpt-6-luna", "api.openai.com"),
+    ("anthropic", "claude-opus-5-5", "api.anthropic.com"),
+    ("anthropic", "claude-sonnet-5-5", "api.anthropic.com"),
+    ("openai", "gpt-6.1-terra", "api.openai.com"),
+    ("openai", "gpt-6.1-sol", "api.openai.com"),
     ("gemini", "gemini-3.8-flash", "generativelanguage.googleapis.com"),
     ("deepseek", "deepseek-v4-pro", "api.deepseek.com"),
 ]
@@ -210,7 +213,7 @@ async def test_provider_failure_does_not_become_an_action(
 async def test_reused_agents_isolate_sequential_and_concurrent_requests(
     seam, monkeypatch
 ):
-    async with _agent(seam, "openai", "gpt-6-luna") as (wrapper, requests):
+    async with _agent(seam, "openai", "gpt-6.1-terra") as (wrapper, requests):
         outputs = []
         arun = wrapper._agent.arun
 

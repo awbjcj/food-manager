@@ -65,7 +65,7 @@ def test_settings_load_from_env(monkeypatch):
     assert settings.anthropic_text_model == "claude-haiku-5-5"
     assert settings.anthropic_search_model == "claude-opus-5-5"
     assert settings.openai_model == "gpt-6.1-terra"
-    assert settings.openai_text_model == "gpt-6-luna"
+    assert settings.openai_text_model == "gpt-6.1-terra"
     assert settings.gemini_model == "gemini-3.8-flash"
     assert settings.gemini_text_model == "gemini-3.8-flash"
     assert settings.deepseek_model == "deepseek-v4-pro"
@@ -80,7 +80,7 @@ def test_settings_load_openai_provider_from_env(monkeypatch):
     assert settings.llm_provider == "openai"
     assert settings.openai_api_key == "test-openai-key"
     assert settings.openai_model == "gpt-6.1-terra"
-    assert settings.openai_text_model == "gpt-6-luna"
+    assert settings.openai_text_model == "gpt-6.1-terra"
 
 
 def test_recipe_api_keys_optional(monkeypatch):
@@ -505,10 +505,10 @@ async def test_anthropic_client_parse_retry_transport_retry_and_unknown_cost():
         _StubMessage(good, {"in": 100, "out": 10}),
     ])
     sleep = AsyncMock()
-    client = AnthropicLLMClient(sdk=sdk, model="claude-sonnet-4-6", sleep=sleep)
+    client = AnthropicLLMClient(sdk=sdk, model="claude-sonnet-5-5", sleep=sleep)
     result = await client.extract_items_from_image(b"\xff\xd8\xffjpeg")
     assert result.parse.items[0].name == "Whole Milk 1 gal"
-    assert result.cost_micros_usd == 450
+    assert result.cost_micros_usd == 300
     assert sleep.await_count == 1
     content = sdk.messages.create.call_args.kwargs["messages"][0]["content"]
     assert content[0]["source"]["data"] == base64.b64encode(b"\xff\xd8\xffjpeg").decode()
@@ -538,7 +538,7 @@ async def test_anthropic_client_validates_purchase_date_confidence():
     sdk.messages.create = AsyncMock(return_value=_StubMessage(bad_confidence, {"in": 100, "out": 10}))
 
     with pytest.raises(ValidationError):
-        await AnthropicLLMClient(sdk=sdk, model="claude-sonnet-4-6").extract_items_from_image(b"\xff\xd8\xffjpeg")
+        await AnthropicLLMClient(sdk=sdk, model="claude-sonnet-5-5").extract_items_from_image(b"\xff\xd8\xffjpeg")
 
 
 @pytest.mark.asyncio
@@ -551,7 +551,7 @@ async def test_anthropic_client_preserves_png_media_type():
     sdk = MagicMock()
     sdk.messages.create = AsyncMock(return_value=_StubMessage(good, {"in": 100, "out": 10}))
 
-    await AnthropicLLMClient(sdk=sdk, model="claude-sonnet-4-6").extract_items_from_image(
+    await AnthropicLLMClient(sdk=sdk, model="claude-sonnet-5-5").extract_items_from_image(
         b"\x89PNG\r\n\x1a\npng",
     )
 

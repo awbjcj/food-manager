@@ -457,11 +457,11 @@ async def test_anthropic_search_client_parses_days_and_cost():
     msg.usage = MagicMock(input_tokens=100, output_tokens=10, server_tool_use=None)
     sdk = MagicMock()
     sdk.messages.create = AsyncMock(return_value=msg)
-    client = AnthropicSearchClient(sdk=sdk, model="claude-sonnet-4-6")
+    client = AnthropicSearchClient(sdk=sdk, model="claude-sonnet-5-5")
     result = await client.lookup_shelf_life(name="Kefir", category="dairy")
     assert result.days == 14
     assert result.confidence == 0.9
-    assert result.cost_micros_usd == 450  # 100*3 + 10*15 (sonnet pricing)
+    assert result.cost_micros_usd == 300  # 100*2 + 10*10 (Sonnet 5.5 pricing)
 
 
 @pytest.mark.asyncio
@@ -475,17 +475,17 @@ async def test_anthropic_search_client_adds_web_search_tool_fee():
     )
     sdk = MagicMock()
     sdk.messages.create = AsyncMock(return_value=msg)
-    client = AnthropicSearchClient(sdk=sdk, model="claude-sonnet-4-6")
+    client = AnthropicSearchClient(sdk=sdk, model="claude-sonnet-5-5")
     result = await client.lookup_shelf_life(name="Kefir", category="dairy")
-    # 100*3 + 10*15 (sonnet pricing) + 10_000 ($10/1000 web_search_requests)
-    assert result.cost_micros_usd == 450 + 10_000
+    # 100*2 + 10*10 (Sonnet 5.5) + 10_000 ($10/1000 web_search_requests)
+    assert result.cost_micros_usd == 300 + 10_000
 
 
 @pytest.mark.asyncio
 async def test_anthropic_search_client_handles_transport_error():
     sdk = MagicMock()
     sdk.messages.create = AsyncMock(side_effect=RuntimeError("boom"))
-    client = AnthropicSearchClient(sdk=sdk, model="claude-sonnet-4-6")
+    client = AnthropicSearchClient(sdk=sdk, model="claude-sonnet-5-5")
     result = await client.lookup_shelf_life(name="Kefir", category=None)
     assert result.days is None
     assert result.confidence == 0.0

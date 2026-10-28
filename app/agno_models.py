@@ -19,12 +19,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.model_policy import resolve_model_id
 from app.providers import ProviderCredentials
 
 
 def build_agno_model(*, model_id: str, credentials: ProviderCredentials) -> Any:
     """Construct the Agno model identified by the resolved credentials."""
     provider = credentials.provider
+    model_id = resolve_model_id(provider, model_id)
     api_key = credentials.api_key
     base_url = credentials.base_url
 

@@ -34,7 +34,7 @@ def _credentials(provider: str, base_url: str | None = None) -> ProviderCredenti
     )
 
 
-@pytest.mark.parametrize("model_id", ["claude-sonnet-4-5-20250929", "claude-haiku-5-5"])
+@pytest.mark.parametrize("model_id", ["claude-sonnet-5-5", "claude-haiku-5-5"])
 def test_claude_structured_output_kwargs_are_accepted_by_installed_anthropic_sdk(model_id):
     """Every kwarg Agno emits for an `output_schema` run must exist on create().
 
@@ -82,8 +82,8 @@ def test_claude_structured_output_kwargs_are_accepted_by_installed_anthropic_sdk
 @pytest.mark.parametrize(
     ("provider", "model_id"),
     [
-        ("anthropic", "claude-sonnet-4-5-20250929"),
-        ("openai", "gpt-5.2"),
+        ("anthropic", "claude-sonnet-5-5"),
+        ("openai", "gpt-6.1-terra"),
         ("gemini", "gemini-3-flash-preview"),
         ("deepseek", "deepseek-chat"),
     ],

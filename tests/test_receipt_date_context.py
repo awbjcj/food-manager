@@ -39,7 +39,7 @@ async def test_receipt_parsers_receive_local_scan_date_through_selector(provider
                 usage=SimpleNamespace(input_tokens=0, output_tokens=0),
             )
         )
-        client = AnthropicLLMClient(sdk, "claude-sonnet-4-6")
+        client = AnthropicLLMClient(sdk, "claude-sonnet-5-5")
         call = sdk.messages.create
     elif provider == "openai":
         sdk.responses.parse = AsyncMock(

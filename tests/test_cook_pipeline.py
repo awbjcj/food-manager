@@ -653,11 +653,11 @@ def test_anthropic_schema_repair_retry_accumulates_known_cost():
     )
 
     selected, cost = asyncio.run(
-        AnthropicSelectionLLM(sdk, "claude-sonnet-4-6").select_items(prompt="x")
+        AnthropicSelectionLLM(sdk, "claude-sonnet-5-5").select_items(prompt="x")
     )
 
     assert selected.item_ids == [4]
-    assert cost == 102
+    assert cost == 68
     assert len(sdk.messages.calls) == 2
     retry_content = sdk.messages.calls[1]["messages"][0]["content"]
     assert retry_content[-1]["text"] == SCHEMA_REPAIR_INSTRUCTION

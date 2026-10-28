@@ -1,9 +1,10 @@
 from typing import Any, ClassVar, Self, TypeVar, cast
 from urllib.parse import urlsplit
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.model_policy import resolve_model_id
 from app.providers import (
     ALL_CREDENTIAL_MODES,
     ALL_PROVIDERS,
@@ -39,7 +40,7 @@ class Settings(BaseSettings):
     )
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_model: str = Field(default="gpt-6.1-terra", alias="OPENAI_MODEL")
-    openai_text_model: str = Field(default="gpt-6-luna", alias="OPENAI_TEXT_MODEL")
+    openai_text_model: str = Field(default="gpt-6.1-terra", alias="OPENAI_TEXT_MODEL")
     anthropic_search_model: str = Field(
         default="claude-opus-5-5", alias="ANTHROPIC_SEARCH_MODEL"
     )
@@ -90,6 +91,16 @@ class Settings(BaseSettings):
     database_path: str = Field(default="./food.db", alias="DATABASE_PATH")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     env: str = Field(default="dev", alias="ENV")
+
+    @field_validator("openai_model", "openai_text_model")
+    @classmethod
+    def upgrade_openai_model(cls, value: str) -> str:
+        return resolve_model_id("openai", value)
+
+    @field_validator("anthropic_model", "anthropic_text_model", "anthropic_search_model")
+    @classmethod
+    def upgrade_claude_model(cls, value: str) -> str:
+        return resolve_model_id("anthropic", value)
 
     @model_validator(mode="after")
     def validate_web_app(self) -> "Settings":

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.deepseek_pricing import deepseek_token_cost_micros
 from app.llm_transport import with_transport_retry
+from app.model_policy import CURRENT_CLAUDE_MODELS, CURRENT_OPENAI_MODELS
 from app.profile_service import FoodProfile
 
 # Re-exported for callers (app.bot, app.translation_llm) that import the error
@@ -223,19 +224,11 @@ _PARSE_RECEIPT_TOOL = {
 }
 
 _PRICE_MICROS_PER_TOKEN_BY_MODEL = {
-    "claude-sonnet-4-6": {"input": 3, "output": 15},
-    "claude-sonnet-5": {"input": 2, "output": 10},
     "claude-sonnet-5-5": {"input": 2, "output": 10},
     "claude-opus-5-5": {"input": 4, "output": 20},
-    "claude-haiku-4-5-20251001": {"input": 1, "output": 5},
     "claude-haiku-5-5": {"input": 0.1, "output": 0.5},
-    "gpt-5.4": {"input": 2.5, "output": 15},
-    "gpt-5.4-mini": {"input": 0.75, "output": 4.5},
-    "gpt-5.6-terra": {"input": 2, "output": 12},
-    "gpt-5.6-luna": {"input": 0.2, "output": 1.2},
-    "gpt-6-sol": {"input": 2, "output": 10},
     "gpt-6.1-terra": {"input": 1, "output": 5},
-    "gpt-6-luna": {"input": 0.1, "output": 0.5},
+    "gpt-6.1-sol": {"input": 2, "output": 10},
     # Approximate public per-token (micro-USD) rates; cost stays best-effort and
     # is reported as unknown for any model absent from this table. Some models
     # (for example Gemini 3.1 Pro Preview) charge more above 200k input tokens;
@@ -264,15 +257,7 @@ def _reasoning_max_tokens(model: str, regular_limit: int) -> int:
     """Leave room for new reasoning models to think and return visible output."""
     return (
         max(regular_limit, 8192)
-        if model
-        in {
-            "claude-opus-5-5",
-            "claude-sonnet-5-5",
-            "claude-haiku-5-5",
-            "gpt-6-sol",
-            "gpt-6.1-terra",
-            "gpt-6-luna",
-        }
+        if model in CURRENT_OPENAI_MODELS | CURRENT_CLAUDE_MODELS
         else regular_limit
     )
 
@@ -298,8 +283,8 @@ def _cost_micros(message, model: str) -> int | None:
     try:
         if model == "claude-haiku-5-5":
             return _haiku_5_5_cost_micros(usage)
-        if model == "gpt-6.1-terra":
-            return _terra_cost_micros(usage)
+        if model in CURRENT_OPENAI_MODELS:
+            return _gpt_61_cost_micros(usage, model)
         # round the total to whole micro-USD; per-token rates may be fractional
         # (e.g. OpenAI), while the integer Anthropic rates are unaffected.
         return round(
@@ -309,10 +294,10 @@ def _cost_micros(message, model: str) -> int | None:
         return None
 
 
-def _terra_cost_micros(usage) -> int:
+def _gpt_61_cost_micros(usage, model: str) -> int:
     """Standard Responses rates checked 2026-10-28; integer hundredths of micro-USD.
 
-    https://developers.openai.com/api/docs/models/gpt-6.1-terra
+    https://developers.openai.com/api/docs/pricing
     Missing cache details use ordinary-input estimates, as for other models.
     """
     input_tokens = usage.input_tokens
@@ -345,7 +330,9 @@ def _terra_cost_micros(usage) -> int:
     ) * (2 if long_context else 1)
     # output_tokens already includes reasoning; do not add it again.
     output_cost = usage.output_tokens * (750 if long_context else 500)
-    return round((input_cost + output_cost) / 100)
+    # Sol's input, cache and output prices are exactly twice Terra's.
+    model_multiplier = 2 if model == "gpt-6.1-sol" else 1
+    return round((input_cost + output_cost) * model_multiplier / 100)
 
 
 def _haiku_5_5_cost_micros(usage) -> int:
@@ -557,21 +544,21 @@ class AnthropicLLMClient(LLMClient):
         self._sleep = sleep
 
     async def _create_message(self, user_content):
-        sonnet_5_5 = self._model == "claude-sonnet-5-5"
+        auto_tool_choice = self._model in {"claude-opus-5-5", "claude-sonnet-5-5"}
         return await with_transport_retry(
             lambda: self._sdk.messages.create(
                 model=self._model,
                 max_tokens=_reasoning_max_tokens(self._model, 8192),
                 system=(
                     SYSTEM_PROMPT + "\nCall the parse_receipt tool with the result."
-                    if sonnet_5_5
+                    if auto_tool_choice
                     else SYSTEM_PROMPT
                 ),
                 tools=[_PARSE_RECEIPT_TOOL],
-                # Sonnet 5.5 rejects forced tool choice; auto lets it call the tool.
+                # Opus/Sonnet 5.5 reject forced tool choice.
                 tool_choice=(
                     {"type": "auto"}
-                    if sonnet_5_5
+                    if auto_tool_choice
                     else {"type": "tool", "name": "parse_receipt"}
                 ),
                 messages=[{"role": "user", "content": user_content}],
@@ -604,7 +591,7 @@ class AnthropicLLMClient(LLMClient):
         cost = _cost_micros(message, self._model)
 
         try:
-            if self._model == "claude-sonnet-5-5" and not any(
+            if self._model in {"claude-opus-5-5", "claude-sonnet-5-5"} and not any(
                 getattr(block, "type", None) == "tool_use" for block in message.content
             ):
                 # Auto tool choice can return JSON text instead of a tool call.

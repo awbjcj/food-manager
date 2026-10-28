@@ -1,6 +1,7 @@
 import asyncio
 import json
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -23,7 +24,7 @@ from tests.fakes import FakeTextLLMClient
 class _TextResponse:
     def __init__(self, text: str, input_tokens: int = 200, output_tokens: int = 60):
         self.content = [MagicMock(type="text", text=text)]
-        self.usage = MagicMock(input_tokens=input_tokens, output_tokens=output_tokens)
+        self.usage = SimpleNamespace(input_tokens=input_tokens, output_tokens=output_tokens)
 
 
 class _OpenAIParsedContent:
@@ -43,7 +44,7 @@ class _OpenAIMessageOutput:
 class _OpenAIParsedResponse:
     def __init__(self, parsed, input_tokens: int = 200, output_tokens: int = 60):
         self.output = [_OpenAIMessageOutput(parsed)]
-        self.usage = MagicMock(
+        self.usage = SimpleNamespace(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=input_tokens + output_tokens,
@@ -91,7 +92,7 @@ async def test_anthropic_text_llm_parse_correct_and_cost():
     })
     sdk = MagicMock()
     sdk.messages.create = AsyncMock(return_value=_TextResponse(raw))
-    client = AnthropicTextLLMClient(sdk=sdk, model="claude-haiku-4-5-20251001")
+    client = AnthropicTextLLMClient(sdk=sdk, model="claude-haiku-5-5")
 
     diff, cost = await client.parse_correct(
         item_snapshot={"id": 42, "raw_name": "Milk"},
@@ -102,7 +103,7 @@ async def test_anthropic_text_llm_parse_correct_and_cost():
 
     assert diff.name == "Heavy Cream"
     assert diff.cache_action == "move"
-    assert cost == 500
+    assert cost == 50
 
 
 @pytest.mark.asyncio
@@ -113,7 +114,7 @@ async def test_anthropic_text_llm_retries_malformed_json_once():
         _TextResponse("not json"),
         _TextResponse(good),
     ])
-    client = AnthropicTextLLMClient(sdk=sdk, model="claude-haiku-4-5-20251001")
+    client = AnthropicTextLLMClient(sdk=sdk, model="claude-haiku-5-5")
 
     diff, _ = await client.parse_correct(
         item_snapshot={},
@@ -142,7 +143,7 @@ async def test_anthropic_text_llm_parse_add_list():
     ])
     sdk = MagicMock()
     sdk.messages.create = AsyncMock(return_value=_TextResponse(raw))
-    client = AnthropicTextLLMClient(sdk=sdk, model="claude-haiku-4-5-20251001")
+    client = AnthropicTextLLMClient(sdk=sdk, model="claude-haiku-5-5")
 
     items, cost = await client.parse_add(
         user_text="oat milk 10d",
@@ -153,7 +154,7 @@ async def test_anthropic_text_llm_parse_add_list():
     assert len(items) == 1
     assert items[0].name == "Oat Milk"
     assert items[0].explicit_user_expiry is True
-    assert cost == 500
+    assert cost == 50
 
 
 @pytest.mark.asyncio
@@ -163,20 +164,20 @@ async def test_openai_llm_parse_receipt_image_and_usage():
     sdk.responses.parse = AsyncMock(
         return_value=_OpenAIParsedResponse(parsed, input_tokens=123, output_tokens=45)
     )
-    client = OpenAILLMClient(sdk=sdk, model="gpt-5.4")
+    client = OpenAILLMClient(sdk=sdk, model="gpt-6.1-terra")
 
     result = await client.extract_items_from_image(b"\x89PNG\r\n\x1a\npng")
 
     assert result.parse.items == []
-    # gpt-5.4: 123*2.5 + 45*15 = 982.5 -> round() -> 982 micro-USD
-    assert result.cost_micros_usd == 982
+    # Terra: 123*1 + 45*5 = 348 micro-USD.
+    assert result.cost_micros_usd == 348
     assert result.provider_usage == {
         "input_tokens": 123,
         "output_tokens": 45,
         "total_tokens": 168,
     }
     kwargs = sdk.responses.parse.call_args.kwargs
-    assert kwargs["model"] == "gpt-5.4"
+    assert kwargs["model"] == "gpt-6.1-terra"
     assert kwargs["text_format"] is ParseResult
     assert kwargs["tools"] == [{"type": "web_search", "search_context_size": "low"}]
     assert kwargs["reasoning"] == {"effort": "low"}
@@ -193,18 +194,11 @@ def test_cost_micros_prices_openai_models():
     from app.llm import _cost_micros
 
     usage = SimpleNamespace(usage=SimpleNamespace(input_tokens=1000, output_tokens=200))
-    # gpt-5.4: 1000*2.5 + 200*15 = 5500
-    assert _cost_micros(usage, "gpt-5.4") == 5500
-    # gpt-5.4-mini: 1000*0.75 + 200*4.5 = 1650
-    assert _cost_micros(usage, "gpt-5.4-mini") == 1650
-    assert _cost_micros(usage, "gpt-6-sol") == 4000
     assert _cost_micros(usage, "gpt-6.1-terra") == 2000
-    assert _cost_micros(usage, "gpt-6-luna") == 200
+    assert _cost_micros(usage, "gpt-6.1-sol") == 4000
     assert _cost_micros(usage, "claude-opus-5-5") == 8000
-    assert _cost_micros(usage, "claude-sonnet-5") == 4000
     assert _cost_micros(usage, "claude-sonnet-5-5") == 4000
-    assert _cost_micros(usage, "gpt-5.6-terra") == 4400
-    assert _cost_micros(usage, "gpt-5.6-luna") == 440
+    assert _cost_micros(usage, "claude-haiku-5-5") == 200
     # unknown model still yields None
     assert _cost_micros(usage, "gpt-unknown") is None
 
@@ -223,23 +217,24 @@ async def test_new_reasoning_models_leave_room_for_visible_output():
     openai_sdk.responses.parse = AsyncMock(return_value=MagicMock())
     await OpenAILLMClient(openai_sdk, "gpt-6.1-terra")._create_response("receipt")
     assert openai_sdk.responses.parse.call_args.kwargs["max_output_tokens"] == 8192
-    await OpenAITextLLMClient(openai_sdk, "gpt-6-luna")._create_response(
+    await OpenAITextLLMClient(openai_sdk, "gpt-6.1-terra")._create_response(
         "system", "message", CorrectionDiff
     )
     assert openai_sdk.responses.parse.call_args.kwargs["max_output_tokens"] == 8192
 
 
 @pytest.mark.asyncio
-async def test_sonnet_5_5_receipt_parser_accepts_json_text_when_auto_tool_is_skipped():
+@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-sonnet-5-5"])
+async def test_claude_5_5_receipt_parser_accepts_json_text_when_auto_tool_is_skipped(model):
     sdk = MagicMock()
     sdk.messages.create = AsyncMock(return_value=_TextResponse(json.dumps({"items": []})))
 
-    result = await AnthropicLLMClient(sdk, "claude-sonnet-5-5").extract_items_from_image(
+    result = await AnthropicLLMClient(sdk, model).extract_items_from_image(
         b"receipt"
     )
 
     assert result.parse.items == []
-    assert result.cost_micros_usd == 1000
+    assert result.cost_micros_usd == (2000 if model == "claude-opus-5-5" else 1000)
     assert sdk.messages.create.call_args.kwargs["tool_choice"] == {"type": "auto"}
 
 
@@ -258,8 +253,8 @@ def test_openai_search_cost_micros_counts_web_search_call_items():
     )
     # 2 web_search_call items * $10/1000 = 20_000 micros
     assert _openai_search_cost_micros(response) == 20_000
-    # gpt-5.4: 1000*2.5 + 200*15 = 5500, plus the 20_000 search fee
-    assert _add_cost(_cost_micros(response, "gpt-5.4"), _openai_search_cost_micros(response)) == 25_500
+    # Terra tokens cost 2000 micros, plus the 20_000 search fee.
+    assert _add_cost(_cost_micros(response, "gpt-6.1-terra"), _openai_search_cost_micros(response)) == 22_000
 
     no_search = SimpleNamespace(output=[SimpleNamespace(type="message")])
     assert _openai_search_cost_micros(no_search) == 0
@@ -290,7 +285,7 @@ def test_correction_diff_schema_has_no_openai_incompatible_dict_fields():
 
 
 @pytest.mark.asyncio
-async def test_openai_text_llm_parse_add_uses_mini_model_and_wrapper_schema():
+async def test_openai_text_llm_parse_add_uses_terra_and_wrapper_schema():
     parsed = ProposedAddItems(items=[
         ProposedAddItem(
             name="Oat Milk",
@@ -303,7 +298,7 @@ async def test_openai_text_llm_parse_add_uses_mini_model_and_wrapper_schema():
     ])
     sdk = MagicMock()
     sdk.responses.parse = AsyncMock(return_value=_OpenAIParsedResponse(parsed))
-    client = OpenAITextLLMClient(sdk=sdk, model="gpt-5.4-mini")
+    client = OpenAITextLLMClient(sdk=sdk, model="gpt-6.1-terra")
 
     items, cost = await client.parse_add(
         user_text="oat milk",
@@ -312,10 +307,10 @@ async def test_openai_text_llm_parse_add_uses_mini_model_and_wrapper_schema():
     )
 
     assert [item.name for item in items] == ["Oat Milk"]
-    # gpt-5.4-mini: 200*0.75 + 60*4.5 = 420 micro-USD
-    assert cost == 420
+    # Terra: 200*1 + 60*5 = 500 micro-USD.
+    assert cost == 500
     kwargs = sdk.responses.parse.call_args.kwargs
-    assert kwargs["model"] == "gpt-5.4-mini"
+    assert kwargs["model"] == "gpt-6.1-terra"
     assert kwargs["text_format"] is ProposedAddItems
     assert kwargs["tools"] == [{"type": "web_search", "search_context_size": "low"}]
     assert kwargs["reasoning"] == {"effort": "low"}

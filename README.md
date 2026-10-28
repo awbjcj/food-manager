@@ -224,9 +224,9 @@ inventing those facts. The new history starts after migration `0023_pantry_outco
 | `OPERATOR_BOT_TOKEN`       | No                   | —                           | Token for the optional, separate operator bot                                                                                                                                                |
 | `LLM_PROVIDER`             | No                   | `anthropic`                 | Default provider: `anthropic`, `openai`, `gemini`, or `deepseek`. Each user can override with `/llm`. `deepseek` is text-only, so at least one image-capable provider's key must also be set |
 | `ANTHROPIC_API_KEY`        | When using anthropic | —                           | Anthropic API key                                                                                                                                                                            |
-| `ANTHROPIC_MODEL`          | No                   | `claude-opus-5-5`           | Claude model to use for receipt parsing                                                                                                                                                      |
+| `ANTHROPIC_MODEL`          | No                   | `claude-sonnet-5-5`         | Claude model to use for receipt parsing                                                                                                                                                      |
 | `ANTHROPIC_TEXT_MODEL`     | No                   | `claude-haiku-5-5`         | Claude model to use for `/correct` and `/add` proposals                                                                                                                                      |
-| `ANTHROPIC_SEARCH_MODEL`   | No                   | `claude-opus-5-5`           | Claude model used for shelf-life web search — **requires web search enabled on the Anthropic workspace**                                                                                     |
+| `ANTHROPIC_SEARCH_MODEL`   | No                   | `claude-sonnet-5-5`         | Claude model used for shelf-life web search — **requires web search enabled on the Anthropic workspace**                                                                                     |
 | `OPENAI_API_KEY`           | When using openai    | —                           | OpenAI API key                                                                                                                                                                               |
 | `OPENAI_MODEL`             | No                   | `gpt-6.1-terra`             | OpenAI model to use for receipt parsing, cook, and search                                                                                                                                     |
 | `OPENAI_TEXT_MODEL`        | No                   | `gpt-6.1-terra`                | OpenAI model to use for `/correct` and `/add` proposals                                                                                                                                      |
@@ -253,8 +253,8 @@ million tokens; OpenAI/Claude checked October 28, 2026, Gemini September 22) are
 
 | Model | Use | Input | Output |
 | --- | --- | ---: | ---: |
-| `claude-opus-5-5` | Claude receipt, cook, and search | $4.00 | $20.00 |
-| `claude-sonnet-5-5` | Optional Claude override | $2.00 | $10.00 |
+| `claude-sonnet-5-5` | Claude receipt, cook, and search (default) | $2.00 | $10.00 |
+| `claude-opus-5-5` | Optional Claude override | $4.00 | $20.00 |
 | `claude-haiku-5-5` | Claude text tasks (up to 100K input tokens) | $0.10 | $0.50 |
 | `claude-haiku-5-5` | Claude text tasks (over 100K input tokens) | $0.50 | $2.50 |
 | `gpt-6.1-terra` | All OpenAI tasks, including text | $1.00 | $5.00 |
@@ -281,6 +281,10 @@ rates double and output costs $7.50/M for the full request. Missing cache detail
 use ordinary-input estimates. These first-party estimates do not establish
 gateway billing or live model access. See the
 [Terra model page](https://developers.openai.com/api/docs/models/gpt-6.1-terra).
+
+Claude defaults to Sonnet 5.5 for receipt parsing, cooking, and search. Opus 5.5
+is optional: set `ANTHROPIC_MODEL` and/or `ANTHROPIC_SEARCH_MODEL` to
+`claude-opus-5-5` to select it. Haiku 5.5 remains the default for text tasks.
 
 Both `OPENAI_MODEL` and `OPENAI_TEXT_MODEL` now default to Terra. Sol is an
 explicit override with twice Terra's Standard token/cache rates. Known older

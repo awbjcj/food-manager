@@ -151,9 +151,9 @@ uv run pytest tests/test_core_services.py::test_shelf_life_defaults
 | `OPERATOR_BOT_TOKEN` | 否 | — | 可选的独立运营机器人令牌 |
 | `LLM_PROVIDER` | 否 | `anthropic` | 默认提供商：`anthropic`、`openai`、`gemini` 或 `deepseek`。每位用户可以通过 `/llm` 覆盖。`deepseek` 仅支持文本，因此还必须配置至少一个支持图像的提供商密钥 |
 | `ANTHROPIC_API_KEY` | 使用 Anthropic 时 | — | Anthropic API 密钥 |
-| `ANTHROPIC_MODEL` | 否 | `claude-opus-5-5` | 用于解析收据的 Claude 模型 |
+| `ANTHROPIC_MODEL` | 否 | `claude-sonnet-5-5` | 用于解析收据的 Claude 模型 |
 | `ANTHROPIC_TEXT_MODEL` | 否 | `claude-haiku-5-5` | 用于 `/correct` 和 `/add` 提案的 Claude 模型 |
-| `ANTHROPIC_SEARCH_MODEL` | 否 | `claude-opus-5-5` | 用于保存期网络搜索的 Claude 模型——**需要在 Anthropic 工作区启用网络搜索** |
+| `ANTHROPIC_SEARCH_MODEL` | 否 | `claude-sonnet-5-5` | 用于保存期网络搜索的 Claude 模型——**需要在 Anthropic 工作区启用网络搜索** |
 | `OPENAI_API_KEY` | 使用 OpenAI 时 | — | OpenAI API 密钥 |
 | `OPENAI_MODEL` | 否 | `gpt-6.1-terra` | 用于解析收据、菜谱及搜索的 OpenAI 模型 |
 | `OPENAI_TEXT_MODEL` | 否 | `gpt-6.1-terra` | 用于 `/correct` 和 `/add` 提案的 OpenAI 模型 |
@@ -180,8 +180,8 @@ uv run pytest tests/test_core_services.py::test_shelf_life_defaults
 
 | 模型 | 用途 | 输入 | 输出 |
 | --- | --- | ---: | ---: |
-| `claude-opus-5-5` | Claude 收据、菜谱及搜索 | $4.00 | $20.00 |
-| `claude-sonnet-5-5` | 可选 Claude 模型 | $2.00 | $10.00 |
+| `claude-sonnet-5-5` | Claude 收据、菜谱及搜索（默认） | $2.00 | $10.00 |
+| `claude-opus-5-5` | 可选 Claude 模型 | $4.00 | $20.00 |
 | `claude-haiku-5-5` | Claude 文本任务（输入不超过 100K token） | $0.10 | $0.50 |
 | `claude-haiku-5-5` | Claude 文本任务（输入超过 100K token） | $0.50 | $2.50 |
 | `gpt-6.1-terra` | 所有 OpenAI 任务，包括文本任务 | $1.00 | $5.00 |
@@ -202,6 +202,10 @@ Terra 费用估算按返回的用量区分缓存读取（$0.05／百万 token）
 价格翻倍，输出为 $7.50／百万 token。缺少缓存明细时，按普通输入估算。
 这些官方 API 价格估算不代表网关账单或已验证的线上模型访问。参阅
 [Terra 模型文档](https://developers.openai.com/api/docs/models/gpt-6.1-terra)。
+
+Claude 收据解析、菜谱和搜索默认使用 Sonnet 5.5。若要选择可选的 Opus 5.5，可将
+`ANTHROPIC_MODEL` 和／或 `ANTHROPIC_SEARCH_MODEL` 设置为 `claude-opus-5-5`。
+文本任务仍默认使用 Haiku 5.5。
 
 `OPENAI_MODEL` 和 `OPENAI_TEXT_MODEL` 现在都默认使用 Terra；也可显式选择 Sol，
 其标准 token 和缓存价格均为 Terra 的两倍。应用启动时会将已知的旧 OpenAI、Claude

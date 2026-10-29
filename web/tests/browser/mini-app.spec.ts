@@ -1,10 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
 import type { WorkspaceState } from '../../src/types'
 
-async function mockKitchen(page: Page, options: { language?: string; hosted?: boolean; billing?: boolean; tier?: string; role?: string } = {}) {
+async function mockKitchen(page: Page, options: { language?: string; hosted?: boolean; billing?: boolean; tier?: string; role?: string; name?: string; householdName?: string } = {}) {
   const account = {
-    user: { telegramId: 1, name: 'Alex Chen', role: options.role ?? 'owner', language: options.language ?? 'en', timeZone: 'America/New_York', digestHour: 8, provider: 'gemini' },
-    household: { name: 'The Chen kitchen', members: 2, seatCap: 2 },
+    user: { telegramId: 1, name: options.name ?? 'Alex Chen', role: options.role ?? 'owner', language: options.language ?? 'en', timeZone: 'America/New_York', digestHour: 8, provider: 'gemini' },
+    household: { name: options.householdName ?? 'The Chen kitchen', members: 2, seatCap: 2 },
     plan: { tier: options.tier ?? 'free', status: 'active', periodEnd: '2026-11-01T08:00:00', renews: true, canManage: true },
     quota: { receiptsUsed: 3, receiptsLimit: 5, actionsUsed: 18, actionsLimit: 30 },
     plans: [
@@ -46,6 +46,41 @@ async function mockKitchen(page: Page, options: { language?: string; hosted?: bo
 async function openKitchen(page: Page) {
   await page.getByRole('navigation').getByRole('button', { name: 'Kitchen', exact: true }).click()
   await expect(page.locator('.workspace-submit')).toBeEnabled()
+}
+
+async function expectReadableLayout(page: Page) {
+  const issues = await page.evaluate(() => {
+    const overflow = Array.from(document.querySelectorAll<HTMLElement>('main *, .bottom-nav *, .sheet *'))
+      .filter(element => element.getClientRects().length && !element.closest('.visually-hidden, .workspace-action > legend, svg') && element.tagName !== 'INPUT')
+      .filter(element => {
+        const box = element.getBoundingClientRect()
+        return box.left < -1 || box.right > innerWidth + 1 || element.scrollWidth > element.clientWidth + 1
+      }).map(element => `${element.tagName}.${element.className}: ${element.textContent?.slice(0, 80)}`)
+    const splitWords: string[] = []
+    const labels = document.querySelectorAll('.brand > span, .quick-card strong, .quick-card small, .home-secondary strong, .plan-band-copy, .subscription-row strong, .subscription-row b, .workspace-categories button span, .workspace-feature-grid button span, .workspace-selected h3, .workspace-submit span, .workspace-results-heading, .plan-option-head, .plan-badge, .form-actions button, .bottom-nav button span, .row-action')
+    for (const label of labels) {
+      if (!label.getClientRects().length) continue
+      const walker = document.createTreeWalker(label, NodeFilter.SHOW_TEXT)
+      while (walker.nextNode()) {
+        const node = walker.currentNode
+        // CJK may break between characters; Latin words should keep their letters together.
+        for (const match of (node.textContent ?? '').matchAll(/[\p{Script=Latin}\p{Number}]+/gu)) {
+          const range = document.createRange()
+          range.setStart(node, match.index!)
+          range.setEnd(node, match.index! + match[0].length)
+          const lines = new Set(Array.from(range.getClientRects()).filter(rect => rect.width > 0).map(rect => Math.round(rect.top)))
+          if (lines.size > 1) splitWords.push(match[0])
+        }
+      }
+    }
+    const wrappedBadges = Array.from(document.querySelectorAll<HTMLElement>('.plan-badge, .bottom-nav button span, .history-count')).filter(element => {
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      return new Set(Array.from(range.getClientRects()).map(rect => Math.round(rect.top))).size > 1
+    }).map(element => element.textContent)
+    return { overflow, splitWords, wrappedBadges }
+  })
+  expect(issues).toEqual({ overflow: [], splitWords: [], wrappedBadges: [] })
 }
 
 test('everyday Home actions are visible above the navigation and lead to the right form', async ({ page }) => {
@@ -245,6 +280,74 @@ test('text, primary buttons, and input boundaries maintain contrast in both them
 })
 
 for (const language of ['en', 'zh', 'fr', 'es']) {
+  test(`localized ${language} controls keep words intact at compact and intermediate widths`, async ({ page }, testInfo) => {
+    await mockKitchen(page, { language })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    for (const viewport of [{ width: 320, height: 812 }, { width: 425, height: 812 }, { width: 768, height: 1024 }]) {
+      await page.setViewportSize(viewport)
+      for (const tab of [0, 1, 2, 3]) {
+        await page.locator('.bottom-nav button').nth(tab).click()
+        if (tab === 1) {
+          await expect(page.locator('.workspace-submit')).toBeEnabled()
+          for (const category of [0, 1, 2, 3]) {
+            await page.locator('.workspace-categories button').nth(category).click()
+            await page.locator('.workspace-feature-picker > .disclosure-button').click()
+            await expectReadableLayout(page)
+          }
+        }
+        await expectReadableLayout(page)
+      }
+    }
+    await page.setViewportSize({ width: 375, height: 812 })
+    for (const [tab, name] of ['home', 'kitchen', 'plans', 'account'].entries()) {
+      await page.locator('.bottom-nav button').nth(tab).click()
+      if (tab === 1) await expect(page.locator('.workspace-submit')).toBeEnabled()
+      await page.screenshot({ path: testInfo.outputPath(`${language}-${name}.png`), fullPage: true })
+    }
+  })
+
+  test(`localized ${language} layouts support enlarged text, long content, and a landscape plan sheet`, async ({ page }, testInfo) => {
+    const { state } = await mockKitchen(page, { language, tier: 'family', name: 'Alexandria'.repeat(7), householdName: 'Our extended family kitchen '.repeat(3) })
+    state.cards.push({ id: 1, text: `https://example.com/${'receipt'.repeat(40)}\n${'VeryLongFoodName'.repeat(15)}`, buttons: [[{ text: 'Action'.repeat(20), action: 'test-action', url: null }]], reply: true, document: null })
+    await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' })
+    await page.evaluate(() => { document.documentElement.style.fontSize = '200%' })
+    for (const viewport of [{ width: 320, height: 812 }, { width: 844, height: 390 }, { width: 1024, height: 768 }]) {
+      await page.setViewportSize(viewport)
+      for (const tab of [0, 1, 2, 3]) {
+        await page.locator('.bottom-nav button').nth(tab).click()
+        if (tab === 1) {
+          await expect(page.locator('.workspace-card')).toBeVisible()
+          for (const category of [0, 1, 2, 3]) {
+            await page.locator('.workspace-categories button').nth(category).click()
+            await page.locator('.workspace-feature-picker > .disclosure-button').click()
+            await expectReadableLayout(page)
+          }
+          await page.locator('.workspace-categories button').nth(0).click()
+          await page.locator('.workspace-feature-grid').first().getByRole('button').nth(1).click()
+          await page.locator('input[type="file"]').setInputFiles({ name: `${'grocery-receipt'.repeat(12)}.png`, mimeType: 'image/png', buffer: Buffer.from('Mock image for layout only') })
+        }
+        await expectReadableLayout(page)
+      }
+      const lastControl = page.locator('.subscription-row')
+      await lastControl.scrollIntoViewIfNeeded()
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+      expect((await lastControl.boundingBox())!.y + (await lastControl.boundingBox())!.height).toBeLessThan((await page.locator('.bottom-nav').boundingBox())!.y)
+    }
+    await page.setViewportSize({ width: 844, height: 390 })
+    await page.locator('.bottom-nav button').nth(2).click()
+    await page.locator('.plan-option.featured button').click()
+    const sheet = page.getByRole('dialog')
+    await expect(sheet).toBeVisible()
+    expect((await sheet.boundingBox())!.y).toBeGreaterThanOrEqual(0)
+    await expectReadableLayout(page)
+    const cancel = sheet.locator('.cancel-button')
+    await cancel.focus()
+    const cancelBox = (await cancel.boundingBox())!
+    expect(cancelBox.y).toBeGreaterThanOrEqual(0)
+    expect(cancelBox.y + cancelBox.height).toBeLessThanOrEqual(390)
+    await page.screenshot({ path: testInfo.outputPath(`${language}-landscape-sheet.png`) })
+  })
+
   test(`responsive ${language} screens have no horizontal overflow in light and dark themes`, async ({ page }) => {
     await mockKitchen(page, { language })
     for (const colorScheme of ['light', 'dark'] as const) {
@@ -253,7 +356,7 @@ for (const language of ['en', 'zh', 'fr', 'es']) {
         await page.setViewportSize(viewport)
         for (const tab of ['home', 'kitchen', 'plans', 'account']) {
           await page.locator(`.bottom-nav button`).nth(['home', 'kitchen', 'plans', 'account'].indexOf(tab)).click()
-          expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+          await expectReadableLayout(page)
           const buttons = page.locator('.bottom-nav button')
           for (const button of await buttons.all()) {
             const box = await button.boundingBox()

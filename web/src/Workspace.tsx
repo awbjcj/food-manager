@@ -181,8 +181,12 @@ export function WorkspaceView({ data, locale, entry, onAccountChanged }: { data:
   useEffect(() => {
     if (!state || busy || !awaitingResult.current) return
     awaitingResult.current = false
-    resultsRef.current?.focus({ preventScroll: true })
-    if (window.matchMedia('(max-width: 759px)').matches) resultsRef.current?.scrollIntoView({ block: 'start' })
+    const results = resultsRef.current
+    results?.focus({ preventScroll: true })
+    const controls = results?.previousElementSibling
+    if (results && controls && results.getBoundingClientRect().top > controls.getBoundingClientRect().top + 1) {
+      results.scrollIntoView({ block: 'start' })
+    }
   }, [state, busy])
 
   async function act(body: object, receipt?: File) {

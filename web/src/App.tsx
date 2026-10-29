@@ -50,8 +50,7 @@ function SectionLabel({ children }: { children: ReactNode }) {
 function OpenRow({ icon, title, detail, action, onClick, disabled = false }: { icon: IconName; title: string; detail?: string; action?: string; onClick?: () => void; disabled?: boolean }) {
   return <button className="open-row" onClick={onClick} type="button" disabled={disabled}>
     <span className="icon-disc"><Icon name={icon} /></span>
-    <span className="row-copy"><strong>{title}</strong>{detail && <small>{detail}</small>}</span>
-    {action && <span className="row-action">{action}</span>}
+    <span className="row-copy"><strong>{title}</strong>{(detail || action) && <span className="row-meta">{detail && <small>{detail}</small>}{action && <span className="row-action">{action}</span>}</span>}</span>
     <Icon name="arrow" size={20} />
   </button>
 }
@@ -89,7 +88,7 @@ function HomeView({ data, locale, selectTab, openFeature }: { data: AccountData;
     </div></section>
     {data.hostedFeaturesEnabled && <aside className="home-overview" aria-label={w(locale, 'overview')}>
     <SectionLabel>{w(locale, 'overview')}</SectionLabel>
-    <button type="button" className="plan-band" onClick={() => selectTab('plans')}><span className="plan-dot"><Icon name="leaf" /></span><strong>{currentPlanName(data, locale)}</strong><span>{t(locale, 'home.viewPlans')}</span><Icon name="arrow" /></button>
+    <button type="button" className="plan-band" onClick={() => selectTab('plans')}><span className="plan-dot"><Icon name="leaf" /></span><span className="plan-band-copy"><strong>{currentPlanName(data, locale)}</strong><span>{t(locale, 'home.viewPlans')}</span></span><Icon name="arrow" /></button>
     <section className="usage-list">
       <UsageRow icon="receipt" label={t(locale, 'usage.receipts')} used={data.quota.receiptsUsed} limit={data.quota.receiptsLimit} locale={locale} />
       <UsageRow icon="brain" label={t(locale, 'usage.actions')} used={data.quota.actionsUsed} limit={data.quota.actionsLimit} locale={locale} />
@@ -117,7 +116,7 @@ function PlansView({ data, locale, checkout, manage, busy }: { data: AccountData
   return <main className="page plans-page">
     <section className="page-heading"><h1>{t(locale, 'plan.choose')}</h1><p>{t(locale, 'plan.subtitle')}</p><small>{t(locale, 'plan.billingCycle')}</small></section>
     <section className="plan-option">
-      <div className="plan-option-head"><span className="icon-disc"><Icon name="leaf" /></span><div><h2>{planTitle(locale, free.code, free.title)}</h2><p>{t(locale, 'plan.freePrice')}</p></div><span className="plan-badge">{familyActive || unlimitedActive ? t(locale, 'plan.included') : t(locale, 'plan.current')}</span></div>
+      <div className="plan-option-head"><span className="icon-disc"><Icon name="leaf" /></span><div><div className="plan-title-row"><h2>{planTitle(locale, free.code, free.title)}</h2><span className="plan-badge">{familyActive || unlimitedActive ? t(locale, 'plan.included') : t(locale, 'plan.current')}</span></div><p>{t(locale, 'plan.freePrice')}</p></div></div>
       <PlanFeatures plan={free} locale={locale} />
     </section>
     <section className="plan-option featured">
@@ -165,12 +164,26 @@ function AccountView({ data, locale, onSaved, selectTab }: { data: AccountData; 
       <fieldset disabled={saving}><legend>{t(locale, 'account.preferences')}</legend><div className="form-fields"><label>{t(locale, 'account.language')}<select value={form.language} onChange={event => setForm({ ...form, language: event.target.value })}>{Object.entries(languageNames).map(([code, label]) => <option key={code} value={code}>{label}</option>)}</select></label><label>{t(locale, 'account.provider')}<select value={form.provider} onChange={event => setForm({ ...form, provider: event.target.value })}>{data.availableProviders.map(provider => <option key={provider} value={provider}>{provider === 'openai' ? 'OpenAI' : provider === 'deepseek' ? 'DeepSeek' : provider[0].toUpperCase() + provider.slice(1)}</option>)}</select></label></div></fieldset>
       <div className="form-actions"><p role={status === 'error.save' ? 'alert' : 'status'} className={`save-status${status === 'error.save' ? ' save-error' : ''}`}>{status ? t(locale, status) : w(locale, dirty ? 'unsavedChanges' : 'allSaved')}</p><button className="button primary" type="submit" disabled={saving || !dirty}>{t(locale, saving ? 'account.saving' : 'account.save')}</button><button className="button secondary" type="button" disabled={saving || !dirty} onClick={() => { setForm(savedForm); setStatus(null) }}>{w(locale, 'discardChanges')}</button></div>
     </form>
-    {data.hostedFeaturesEnabled && <button className="subscription-row" onClick={() => selectTab('plans')}><strong>{t(locale, 'account.subscription')}</strong><span>{currentPlanName(data, locale)}</span><b>{t(locale, 'home.viewPlans')}</b><Icon name="arrow" size={20} /></button>}
+    {data.hostedFeaturesEnabled && <button className="subscription-row" onClick={() => selectTab('plans')}><span className="row-copy"><strong>{t(locale, 'account.subscription')}</strong><span className="row-meta"><span>{currentPlanName(data, locale)}</span><b>{t(locale, 'home.viewPlans')}</b></span></span><Icon name="arrow" size={20} /></button>}
   </main>
 }
 
 function BottomNav({ tab, locale, select, hostedFeaturesEnabled }: { tab: Tab; locale: Locale; select: (tab: Tab) => void; hostedFeaturesEnabled: boolean }) {
-  return <nav className="bottom-nav" aria-label={t(locale, 'nav.primary')}><button type="button" className={tab === 'home' ? 'active' : ''} aria-current={tab === 'home' ? 'page' : undefined} onClick={() => select('home')}><Icon name="home" /><span>{t(locale, 'nav.home')}</span></button><button type="button" className={tab === 'kitchen' ? 'active' : ''} aria-current={tab === 'kitchen' ? 'page' : undefined} onClick={() => select('kitchen')}><Icon name="pantry" /><span>{w(locale, 'kitchen')}</span></button>{hostedFeaturesEnabled && <button type="button" className={tab === 'plans' ? 'active' : ''} aria-current={tab === 'plans' ? 'page' : undefined} onClick={() => select('plans')}><Icon name="plan" /><span>{t(locale, 'nav.plans')}</span></button>}<button type="button" className={tab === 'account' ? 'active' : ''} aria-current={tab === 'account' ? 'page' : undefined} onClick={() => select('account')}><Icon name="account" /><span>{t(locale, 'nav.account')}</span></button></nav>
+  const navRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const nav = navRef.current
+    if (!nav) return
+    // Reserve the actual height when translated labels or enlarged text add a row.
+    const observer = new ResizeObserver(() => {
+      document.documentElement.style.setProperty('--bottom-nav-height', `${nav.getBoundingClientRect().height}px`)
+    })
+    observer.observe(nav)
+    return () => {
+      observer.disconnect()
+      document.documentElement.style.removeProperty('--bottom-nav-height')
+    }
+  }, [])
+  return <nav ref={navRef} className="bottom-nav" aria-label={t(locale, 'nav.primary')}><button type="button" className={tab === 'home' ? 'active' : ''} aria-current={tab === 'home' ? 'page' : undefined} onClick={() => select('home')}><Icon name="home" /><span>{t(locale, 'nav.home')}</span></button><button type="button" className={tab === 'kitchen' ? 'active' : ''} aria-current={tab === 'kitchen' ? 'page' : undefined} onClick={() => select('kitchen')}><Icon name="pantry" /><span>{w(locale, 'kitchen')}</span></button>{hostedFeaturesEnabled && <button type="button" className={tab === 'plans' ? 'active' : ''} aria-current={tab === 'plans' ? 'page' : undefined} onClick={() => select('plans')}><Icon name="plan" /><span>{t(locale, 'nav.plans')}</span></button>}<button type="button" className={tab === 'account' ? 'active' : ''} aria-current={tab === 'account' ? 'page' : undefined} onClick={() => select('account')}><Icon name="account" /><span>{t(locale, 'nav.account')}</span></button></nav>
 }
 
 function ManageSheet({ data, locale, close, cancel }: { data: AccountData; locale: Locale; close: () => void; cancel: () => void }) {

@@ -70,6 +70,8 @@ async def handle_item_callback(
                 today,
                 lang=user.lang,
                 translation_llm=translation_llm,
+                expanded=action.back_to == "due",
+                page=action.page,
             )
 
         async def refresh_for_origin() -> None:
@@ -82,6 +84,7 @@ async def handle_item_callback(
                     lang=user.lang,
                     translation_llm=translation_llm,
                     sort_by=action.sort_by,
+                    page=action.page,
                 )
                 return
             await refresh()
@@ -127,6 +130,7 @@ async def handle_item_callback(
                     build_correct_menu_keyboard(
                         item_id, lang=user.lang,
                         back_to=action.back_to, sort_by=action.sort_by,
+                        page=action.page,
                     )
                 ),
             )
@@ -175,6 +179,7 @@ async def handle_item_callback(
                         lang=user.lang,
                         back_to=action.back_to,
                         sort_by=action.sort_by,
+                        page=action.page,
                     )
                 ),
             )
@@ -187,6 +192,7 @@ async def handle_item_callback(
                     build_correct_menu_keyboard(
                         item_id, lang=user.lang,
                         back_to=action.back_to, sort_by=action.sort_by,
+                        page=action.page,
                     )
                 ),
             )
@@ -199,6 +205,7 @@ async def handle_item_callback(
                     build_remove_confirm_keyboard(
                         item_id, lang=user.lang,
                         back_to=action.back_to, sort_by=action.sort_by,
+                        page=action.page,
                     )
                 ),
             )
@@ -212,11 +219,14 @@ async def _refresh_digest_message(
     *,
     lang: str = "en",
     translation_llm=None,
+    expanded: bool = False,
+    page: int = 0,
 ) -> None:
     remaining = list_digest_due(session, household_id=household_id, today=today)
     if remaining:
         view = views.digest_cached(
-            session, remaining, lang=lang, today=today, household_id=household_id
+            session, remaining, lang=lang, today=today, household_id=household_id,
+            cap=None if expanded else 10, page=page,
         )
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
@@ -225,6 +235,10 @@ async def _refresh_digest_message(
                 today=today,
                 lang=lang,
                 names=view.names,
+                back_to="due" if expanded else "digest",
+                sort_by="expires",
+                page=view.page,
+                page_count=view.page_count,
             )
         )
         await edit_or_resend(cb, view.text, keyboard)
@@ -241,6 +255,7 @@ async def _refresh_pantry_message(
     lang: str = "en",
     translation_llm=None,
     sort_by: PantrySort = "receipt",
+    page: int = 0,
 ) -> None:
     remaining = list_active(
         session,
@@ -252,7 +267,7 @@ async def _refresh_pantry_message(
     if remaining:
         view = views.digest_cached(
             session, remaining, lang=lang, today=today, household_id=household_id,
-            cap=None, sort_by=sort_by,
+            cap=None, sort_by=sort_by, page=page,
         )
         keyboard = to_aiogram_keyboard(
             build_digest_keyboard(
@@ -263,6 +278,8 @@ async def _refresh_pantry_message(
                 names=view.names,
                 back_to="all",
                 sort_by=sort_by,
+                page=view.page,
+                page_count=view.page_count,
             )
         )
         await edit_or_resend(cb, view.text, keyboard)

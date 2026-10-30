@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Literal
 
-from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlalchemy.dialects.sqlite import insert
+from sqlmodel import Session, col, select
 
 from app.cache import get_cached, put_cached
 from app.frozen_shelf_life import resolve_frozen_days
@@ -106,7 +106,8 @@ async def ingest_photo(
     # Keep domain keys English; only the shared display cache is multilingual.
     for parsed_item in parsed_receipt.items:
         translations = {entry.lang: entry.text for entry in parsed_item.name_translations}
-        parsed_item.name = translations.get("en", "").strip() or parsed_item.name
+        # The parser's English name is authoritative, even if an optional
+        # display translation incorrectly labels a different string as English.
         upsert_name_translations(
             session, source_text=parsed_item.name, translations=translations,
         )
@@ -151,7 +152,7 @@ async def ingest_photo(
         return summary
 
     try:
-        receipt = Receipt(
+        receipt_id = session.connection().execute(insert(Receipt).values(
             household_id=household_id,
             photo_file_id=photo_file_id,
             purchase_date=purchase_date,
@@ -159,9 +160,13 @@ async def ingest_photo(
             scanned_at=scanned_at,
             llm_cost_micros_usd=llm_result.cost_micros_usd,
             store_name=parsed_receipt.store_name,
-        )
-        session.add(receipt)
-        session.flush()
+        ).on_conflict_do_nothing(
+            index_elements=["household_id", "photo_file_id"],
+        ).returning(col(Receipt.id))).scalar_one_or_none()
+        if receipt_id is None:
+            raise DuplicateReceipt(f"Receipt already logged (file_id={photo_file_id})")
+        receipt = session.get(Receipt, receipt_id)
+        assert receipt is not None
 
         for parsed_item, is_low_confidence in to_insert:
             normalized_name = normalize(parsed_item.name)
@@ -173,6 +178,8 @@ async def ingest_photo(
                     food_name=parsed_item.name,
                     search=search,
                 )
+                if frozen.cost_micros_usd:
+                    summary.cost_micros_usd = (summary.cost_micros_usd or 0) + frozen.cost_micros_usd
                 shelf_life_days = frozen.days
                 shelf_life_source = "cache" if frozen.cache_was_hit else frozen.source
                 ingest_source = "cache" if frozen.cache_was_hit else "llm"
@@ -230,10 +237,9 @@ async def ingest_photo(
             now=scanned_at,
             commit=False,
         )
+        receipt.llm_cost_micros_usd = summary.cost_micros_usd
+        session.add(receipt)
         session.commit()
-    except IntegrityError:
-        session.rollback()
-        raise DuplicateReceipt(f"Receipt already logged (concurrent insert for file_id={photo_file_id})")
     except Exception:
         session.rollback()
         raise

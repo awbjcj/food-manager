@@ -33,7 +33,6 @@ from app.i18n import DEFAULT_LANG, t
 from app.pantry_service import (
     NotOwnerOrMissing,
     active_pantry_names,
-    list_digest_due,
     mark_eaten,
     mark_tossed,
     move_to_storage,
@@ -42,7 +41,6 @@ from app.pantry_service import (
     undo_receipt,
 )
 from app.renderer import (
-    build_digest_keyboard,
     build_shopping_keyboard,
     render_undo_result,
 )
@@ -91,6 +89,7 @@ async def handle_callback(
                     lang=user.lang,
                     translation_llm=translation_llm,
                     sort_by=action.sort_by,
+                    page=action.page,
                 )
                 return
             await _refresh_digest_message(
@@ -100,6 +99,8 @@ async def handle_callback(
                 today,
                 lang=user.lang,
                 translation_llm=translation_llm,
+                expanded=action.back_to == "due",
+                page=action.page,
             )
 
         if action.verb in ("cook_like", "cook_dislike"):
@@ -236,29 +237,10 @@ async def handle_callback(
             return
 
         if action.verb == "show_all":
-            rows = list_digest_due(session, household_id=user.household_id, today=today)
-            if not rows:
-                await cb.answer(t("toast.nothing_due", user.lang))
-                return
-            view = views.digest_cached(
-                session,
-                rows,
-                lang=user.lang,
-                today=today,
-                household_id=user.household_id,
-                cap=None,
-            )
-            keyboard = to_aiogram_keyboard(
-                build_digest_keyboard(
-                    view.rendered_items,
-                    has_more=False,
-                    today=today,
-                    lang=user.lang,
-                    names=view.names,
-                )
-            )
-            await edit_or_resend(cb, view.text, keyboard)
             await cb.answer()
+            await _refresh_digest_message(
+                cb, session, user.household_id, today, lang=user.lang, expanded=True,
+            )
             return
 
         if action.verb in ("apply", "cancel"):

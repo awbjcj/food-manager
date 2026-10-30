@@ -14,7 +14,11 @@ from datetime import datetime, timedelta
 
 from sqlmodel import Session
 
-from app.billing.entitlement import get_or_create_subscription, utc_naive
+from app.billing.entitlement import (
+    get_or_create_subscription,
+    roll_period_if_due,
+    utc_naive,
+)
 from app.billing.ledger import record_payment
 from app.billing.plans import PERIOD_DAYS, TIERS, PlanTier, limits_for
 from app.models import User
@@ -69,8 +73,12 @@ def set_user_tier(
     sub = get_or_create_subscription(
         session, household_id=user.household_id, now=moment
     )
+    roll_period_if_due(session, sub=sub, now=moment)
     previous_tier = sub.tier if sub.status == "active" else "free"
-    if previous_tier == tier:
+    requested_end = moment + timedelta(days=duration_days if tier == "family" else PERIOD_DAYS)
+    if previous_tier == tier and (
+        tier != "family" or sub.period_end == requested_end
+    ):
         return TierChange(telegram_id, user.household_id, previous_tier, tier, False)
     if sub.status == "active" and sub.telegram_charge_id is not None:
         raise PaidSubscriptionConflict(
@@ -83,9 +91,7 @@ def set_user_tier(
     sub.payer_telegram_id = None
     sub.cancel_at_period_end = False
     sub.period_start = moment
-    sub.period_end = moment + timedelta(
-        days=duration_days if tier == "family" else PERIOD_DAYS
-    )
+    sub.period_end = requested_end
     sub.seat_cap = limits_for(tier).seats
     sub.updated_at = moment
     session.add(sub)

@@ -56,7 +56,7 @@ from app.shopping_service import (
     list_pending,
 )
 from app.telegram_ui import to_aiogram_keyboard
-from app.translation_service import cached_name_translations, translate_texts
+from app.translation_service import translate_for_user
 
 log = logging.getLogger(__name__)
 HELP_TOPICS = ("pantry", "cook", "household", "settings")
@@ -522,17 +522,14 @@ async def handle_llm(
         await msg.answer(f"LLM provider set to {provider}")
 
 
-async def _render_preferences(session, user, profile, *, translation_llm):
+async def _render_preferences(session, user, profile, *, translation_llm, now):
     personal = build_preference_profile(
         session, household_id=user.household_id, user_id=user.telegram_id,
     )
     household = build_preference_profile(session, household_id=user.household_id)
     texts = [food.name for taste in (personal, household)
              for food in (*taste.liked[:5], *taste.disliked[:5])]
-    if translation_llm is None:
-        names = cached_name_translations(session, texts, lang=user.lang)
-    else:
-        names = await translate_texts(session, texts, lang=user.lang, llm=translation_llm)
+    names = await translate_for_user(session, texts, user=user, now=now, llm=translation_llm)
     return render_profile(profile, lang=user.lang) + "\n\n" + render_learned_preferences(
         personal, household, lang=user.lang, names=names,
     )
@@ -559,13 +556,13 @@ async def handle_prefs(
             await msg.answer("couldn't load your household profile")
             return
         parts = (msg.text or "").split(maxsplit=1)
+        now = now_provider(user.tz) if now_provider is not None else datetime.now(UTC)
         if len(parts) != 2 or not parts[1].strip():
             await msg.answer(
                 await _render_preferences(session, user, profile_from_household(household),
-                                          translation_llm=clients.translation)
+                                          translation_llm=clients.translation, now=now)
             )
             return
-        now = now_provider(user.tz) if now_provider is not None else datetime.now(UTC)
         decision = admit(
             session,
             household_id=user.household_id,
@@ -576,7 +573,7 @@ async def handle_prefs(
         if not decision.allowed:
             await msg.answer(
                 await _render_preferences(session, user, profile_from_household(household),
-                                          translation_llm=clients.translation)
+                                          translation_llm=None, now=now)
                 + "\n\n"
                 + t("quota.degraded.profile", user.lang)
             )
@@ -616,7 +613,7 @@ async def handle_prefs(
             t("prefs.updated", user.lang)
             + "\n\n"
             + await _render_preferences(session, user, profile,
-                                        translation_llm=clients.translation)
+                                        translation_llm=clients.translation, now=now)
         )
 
 

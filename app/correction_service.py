@@ -38,6 +38,7 @@ class AddPayload(BaseModel):
     unit: str | None = None
     shelf_life_days: int = Field(ge=1, le=730)
     expires_on: date
+    purchased_on: date | None = None
     shelf_life_source: Literal["user_correction", "cache", "manual_fallback", "llm", "websearch"]
     ingest_shelf_life_source: Literal[
         "manual_user_hint", "cache", "manual_fallback", "llm"
@@ -413,6 +414,7 @@ async def propose_add(
                     unit=parsed.unit,
                     shelf_life_days=days,
                     expires_on=expires_on,
+                    purchased_on=today,
                     shelf_life_source=shelf_life_source,
                     ingest_shelf_life_source=ingest_source,
                     explicit_user_expiry=parsed.explicit_user_expiry,
@@ -440,7 +442,10 @@ def apply_add(
         category=payload.category,
         qty=payload.qty,
         unit=payload.unit,
-        purchased_on=today,
+        # Legacy proposals encode their origin in the expiry/duration pair.
+        purchased_on=payload.purchased_on or (
+            payload.expires_on - timedelta(days=payload.shelf_life_days)
+        ),
         shelf_life_days=payload.shelf_life_days,
         shelf_life_source=payload.shelf_life_source,
         ingest_shelf_life_source=payload.ingest_shelf_life_source,

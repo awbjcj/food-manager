@@ -106,11 +106,13 @@ class _DeepSeekResponsesClient:
     """Shared DeepSeek Responses-API call: structured output, retry, cost."""
 
     def __init__(
-        self, sdk, model: str, *, web_search: bool = False, sleep=asyncio.sleep
+        self, sdk, model: str, *, web_search: bool = False, sleep=asyncio.sleep,
+        search_sdk=None,
     ):
         self._sdk = sdk
         self._model = model
         self._web_search = web_search
+        self._search_sdk = search_sdk if search_sdk is not None else sdk
         self._sleep = sleep
 
     async def _search(self, call) -> tuple[dict, int]:
@@ -125,11 +127,11 @@ class _DeepSeekResponsesClient:
             # duplicating /v1 for gateways whose base URL already includes it.
             path = (
                 "/tools/search"
-                if self._sdk.base_url.path.rstrip("/").endswith("/v1")
+                if self._search_sdk.base_url.path.rstrip("/").endswith("/v1")
                 else "/v1/tools/search"
             )
             result = await with_transport_retry(
-                lambda: self._sdk.post(
+                lambda: self._search_sdk.post(
                     path,
                     cast_to=dict,
                     body={"query": query, "count": 5, "need_content": False},
@@ -225,9 +227,9 @@ class _DeepSeekResponsesClient:
 
 
 class DeepSeekTextLLMClient:
-    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
+    def __init__(self, sdk, model: str, sleep=asyncio.sleep, *, web_search=True, search_sdk=None):
         self._client = _DeepSeekResponsesClient(
-            sdk, model, web_search=True, sleep=sleep
+            sdk, model, web_search=web_search, search_sdk=search_sdk, sleep=sleep
         )
 
     async def parse_correct(
@@ -267,9 +269,9 @@ class DeepSeekTextLLMClient:
 
 
 class DeepSeekProfileLLMClient:
-    def __init__(self, sdk, model: str, sleep=asyncio.sleep):
+    def __init__(self, sdk, model: str, sleep=asyncio.sleep, *, web_search=True, search_sdk=None):
         self._client = _DeepSeekResponsesClient(
-            sdk, model, web_search=True, sleep=sleep
+            sdk, model, web_search=web_search, search_sdk=search_sdk, sleep=sleep
         )
 
     async def parse_profile_update(

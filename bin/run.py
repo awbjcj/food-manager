@@ -343,15 +343,24 @@ def _build_llm_clients(settings: Settings, modes: ModeMap | None = None) -> LLMB
             api_key=deepseek_credentials.api_key,
             base_url=deepseek_credentials.base_url,
         )
+        search_credentials = settings.credentials_for("deepseek", "api")
+        search_sdk = None
+        if search_credentials is not None:
+            search_sdk = (
+                deepseek_sdk if deepseek_credentials.mode == "api"
+                else AsyncOpenAI(api_key=search_credentials.api_key, base_url=search_credentials.base_url)
+            )
         # Still image-incapable: no image extraction / search-backed recipe
         # client here; those fall back to a capable provider via the selectors.
         # Search uses the standalone Search API via bounded function calls,
         # supported by both Pro and Flash.
         text_clients["deepseek"] = DeepSeekTextLLMClient(
-            deepseek_sdk, settings.deepseek_model
+            deepseek_sdk, settings.deepseek_model,
+            web_search=search_sdk is not None, search_sdk=search_sdk,
         )
         profile_clients["deepseek"] = DeepSeekProfileLLMClient(
-            deepseek_sdk, settings.deepseek_model
+            deepseek_sdk, settings.deepseek_model,
+            web_search=search_sdk is not None, search_sdk=search_sdk,
         )
         selection_clients["deepseek"] = DeepSeekSelectionLLM(
             deepseek_sdk, settings.deepseek_model
@@ -362,9 +371,12 @@ def _build_llm_clients(settings: Settings, modes: ModeMap | None = None) -> LLMB
         translation_clients["deepseek"] = DeepSeekTranslationLLMClient(
             deepseek_sdk, settings.deepseek_model
         )
-        search_clients["deepseek"] = DeepSeekSearchClient(
-            deepseek_sdk, settings.deepseek_model
-        )
+        # The standalone Search API is a first-party endpoint, not part of
+        # Sub2API's Responses proxy. Never send a subscription token there.
+        if search_sdk is not None:
+            search_clients["deepseek"] = DeepSeekSearchClient(
+                search_sdk, settings.deepseek_model
+            )
 
     default = settings.llm_provider
     translation_llm = (

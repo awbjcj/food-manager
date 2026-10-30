@@ -1,0 +1,55 @@
+name: Version and release
+
+on:
+  workflow_run:
+    workflows: [CI/CD]
+    types: [completed]
+    branches: [master]
+  schedule:
+    - cron: "23 14 * * 5"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Create a version tag, or publish the weekly batch (seven-day minimum)"
+        type: choice
+        options: [tag, publish]
+        default: tag
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-version-and-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      # The default branch is dev. Always execute reviewed production code;
+      # never check out a PR head in this workflow with write permissions.
+      - name: Check out production history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: master
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Create version tag or publish weekly release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          MODE: ${{ github.event_name == 'workflow_run' && 'tag' || inputs.mode || 'publish' }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || '' }}
+        run: >-
+          python3 bin/release.py "$MODE" --repo "$GH_REPO"
+          --expected-sha "$EXPECTED_SHA" --apply

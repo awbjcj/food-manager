@@ -45,6 +45,10 @@ guessing. Resolve it by hand:
 
 ## GitHub Actions and Railway
 
+Production SemVer tags are automatic after successful CI; public GitHub releases
+are batched weekly. See [versions and releases](releases.md) for bump rules,
+manual dispatch, and the historical tag backfill.
+
 `.github/workflows/ci.yml` runs on pull requests and pushes to `master`, plus a
 weekly schedule. It enforces Ruff, Pyright, an empty-database Alembic upgrade,
 the full test suite, Python and Docker builds, and a locked-dependency audit.

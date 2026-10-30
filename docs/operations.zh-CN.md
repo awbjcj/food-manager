@@ -25,6 +25,9 @@
 
 ## GitHub Actions 与 Railway
 
+生产提交在 CI 通过后自动生成 SemVer 标签，GitHub Release 每周集中发布。
+版本升级规则、手动触发和历史补齐说明见[版本标签与发布](releases.zh-CN.md)。
+
 `.github/workflows/ci.yml` 会在拉取请求、推送到 `master` 以及每周定时任务中运行。它会检查 Ruff、Pyright、空数据库上的 Alembic 升级、完整测试套件、Python 和 Docker 构建，以及锁定依赖的安全审计。
 
 该工作流仅负责 CI：Railway 直接连接 `master` 并负责每次部署。

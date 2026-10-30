@@ -3,6 +3,8 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 [![CI/CD](https://github.com/awbjcj/food-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/awbjcj/food-manager/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/v/tag/awbjcj/food-manager?sort=semver&label=version)](https://github.com/awbjcj/food-manager/tags)
+[![Release](https://img.shields.io/github/v/release/awbjcj/food-manager?label=release)](https://github.com/awbjcj/food-manager/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 一个 Telegram 机器人和 Mini App，用于跟踪家庭食品库、将购物小票转换为结构化条目、规划膳食，并在食物过期前提醒所有家庭成员。支持 Anthropic、OpenAI、Gemini 和 DeepSeek，共享家庭、Telegram Stars 订阅，以及英语、中文、法语和西班牙语。
@@ -65,6 +67,11 @@ docker compose logs -f food-manager
 - 对食品库条目的任何修改（标记为已食用、已丢弃、已移除、延后提醒、已修正，或移至冷藏/冷冻）都会在同一事务中使该条目的待处理修正失效。
 - `/stats` 报告过去 30 天的收据准确率、修正次数、浪费情况、预计节省金额、烹饪执行情况和 LLM 成本。
 - `/lang [en|zh|fr|es]` 设置语言；每位家庭成员都可以单独选择。底层数据始终以英语保存，并在渲染消息时翻译。
+
+## 版本标签与发布
+
+生产提交在 CI 通过后自动生成 `主版本.次版本.修订版本` 标签，GitHub Release
+每周集中发布。规则与历史版本说明见[版本标签与发布](docs/releases.zh-CN.md)。
 
 ## 测试
 

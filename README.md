@@ -3,6 +3,8 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 [![CI/CD](https://github.com/awbjcj/food-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/awbjcj/food-manager/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/github/v/tag/awbjcj/food-manager?sort=semver&label=version)](https://github.com/awbjcj/food-manager/tags)
+[![Release](https://img.shields.io/github/v/release/awbjcj/food-manager?label=release)](https://github.com/awbjcj/food-manager/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A Telegram bot and Mini App that track your household's grocery pantry, turn
@@ -110,6 +112,11 @@ For native Windows, macOS, and Linux instructions, direct `docker build` /
   caches them for pantry views and digests. Units and item details follow the
   selected language. Mini App receipt result cards also update when you change
   your saved language, without rescanning the receipt.
+
+## Versions and releases
+
+Production commits receive automatic `major.minor.patch` version tags after CI
+passes. GitHub releases are batched weekly; see [versions and releases](docs/releases.md).
 
 ## Tests
 

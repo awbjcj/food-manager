@@ -189,9 +189,8 @@ async def test_refine_skips_items_already_moved_to_storage(session, state):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("state", ["fridge", "frozen"])
-async def test_refine_preserves_storage_change_during_search(tmp_path, state):
-    engine = create_engine(f"sqlite:///{(tmp_path / 'food.db').as_posix()}")
-    SQLModel.metadata.create_all(engine)
+async def test_refine_preserves_storage_change_during_search(sqlite_db_path, state):
+    engine = create_engine(f"sqlite:///{sqlite_db_path.as_posix()}")
     today = date(2026, 6, 8)
     try:
         with Session(engine) as session:

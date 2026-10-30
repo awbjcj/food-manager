@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 from types import SimpleNamespace
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, create_engine, select
 
 from app import views
 from app.i18n import LANGS, t
@@ -17,7 +17,7 @@ NAMES = {"en": "Carrots", "zh": "胡萝卜", "fr": "Carottes", "es": "Zanahorias
 
 
 @pytest.mark.parametrize("insert", [True, False])
-async def test_recognition_caches_all_languages_for_rendering(tmp_path, insert):
+async def test_recognition_caches_all_languages_for_rendering(sqlite_db_path, insert):
     parsed = ParsedItem(
         is_food=True, name="Carrots", unit="bunch", category="produce",
         est_shelf_life_days=7, confidence=0.9,
@@ -30,8 +30,7 @@ async def test_recognition_caches_all_languages_for_rendering(tmp_path, insert):
     unclear.name_translations = [
         NameTranslationItem(lang=lang, text=f"{text}?") for lang, text in NAMES.items()
     ]
-    engine = create_engine(f"sqlite:///{tmp_path / 'languages.db'}")
-    SQLModel.metadata.create_all(engine)
+    engine = create_engine(f"sqlite:///{sqlite_db_path.as_posix()}")
     try:
         with Session(engine) as session:
             session.add(Household(id=1, created_at=datetime(2026, 10, 16, tzinfo=UTC)))

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, create_engine
 
 from app.gemini_llm import GeminiLLMClient
 from app.ingest_service import ingest_photo
@@ -91,7 +91,7 @@ async def test_receipt_parsers_receive_local_scan_date_through_selector(provider
 
 @pytest.mark.parametrize("purchase_date", [date(2026, 9, 22), date(2024, 9, 22)])
 async def test_ingest_passes_scan_context_and_preserves_receipt_date(
-    tmp_path, purchase_date
+    sqlite_db_path, purchase_date
 ):
     reference_dates = []
 
@@ -115,8 +115,7 @@ async def test_ingest_passes_scan_context_and_preserves_receipt_date(
             )
         ],
     )
-    engine = create_engine(f"sqlite:///{(tmp_path / 'food.db').as_posix()}")
-    SQLModel.metadata.create_all(engine)
+    engine = create_engine(f"sqlite:///{sqlite_db_path.as_posix()}")
     try:
         with Session(engine) as session:
             session.add(Household(created_at=datetime.now(UTC)))

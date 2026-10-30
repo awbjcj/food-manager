@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, create_engine, select
 
 from app import handler_support, views
 from app.batch_service import (
@@ -60,9 +60,8 @@ def item(session, name="Milk", *, household=1, receipt=None, status="active"):
 
 
 @pytest.fixture
-def sessions(tmp_path, monkeypatch):
-    engine = create_engine(f"sqlite:///{(tmp_path / 'pantry.db').as_posix()}")
-    SQLModel.metadata.create_all(engine)
+def sessions(sqlite_db_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{sqlite_db_path.as_posix()}")
     with Session(engine) as session:
         session.add_all(
             [Household(id=1, created_at=NOW), Household(id=2, created_at=NOW)]

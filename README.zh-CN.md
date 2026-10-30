@@ -79,6 +79,9 @@ docker compose logs -f food-manager
 # 运行全部测试
 uv run pytest
 
+# 运行全部测试并报告最慢的准备、执行和清理阶段（与 CI 相同）
+uv run pytest -q --durations=15
+
 # 运行与 CI 相同的静态检查
 uv run ruff check app tests bin migrations
 uv run pyright app bin
@@ -94,6 +97,10 @@ uv run pytest tests/test_core_services.py
 # 按名称运行单个测试
 uv run pytest tests/test_core_services.py::test_shelf_life_defaults
 ```
+
+仍会执行全部测试。数据库测试复用空白表结构，每个测试复制到自己的临时 SQLite
+文件中，数据、连接、提交和回滚相互隔离；迁移测试仍从头执行真实的升级和降级。
+测量结果和 fixture 使用说明见[测试性能](docs/testing-performance.md)。
 
 ## 部署到 Railway
 

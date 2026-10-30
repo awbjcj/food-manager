@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import Session, select
 
 from app import handler_support
 from app.batch_service import change_selection, create_batch
@@ -23,9 +23,8 @@ NOW = datetime(2026, 10, 4, 12, tzinfo=UTC)
 
 
 @pytest.fixture
-def sessions(tmp_path):
-    engine = make_engine(str(tmp_path / "preferences.db"))
-    SQLModel.metadata.create_all(engine)
+def sessions(sqlite_db_path):
+    engine = make_engine(str(sqlite_db_path))
     with Session(engine) as db:
         db.add_all([Household(id=n, created_at=NOW) for n in (1, 2)])
         db.commit()

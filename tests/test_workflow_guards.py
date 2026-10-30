@@ -100,7 +100,7 @@ def test_rebased_dev_is_published_only_after_validation_passes(bash, tmp_path, v
     stubs.mkdir()
     uv = stubs / "uv"
     uv.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "$VALIDATION_LOG"\n'
-                  'if [ "$*" = "run pytest -q" ] && [ "$FAIL_VALIDATION" = "1" ]; then exit 1; fi\n')
+                  'if [ "$*" = "run pytest -q --durations=15" ] && [ "$FAIL_VALIDATION" = "1" ]; then exit 1; fi\n')
     uv.chmod(0o755)
     log = tmp_path / "validation.log"
     environment.update(VALIDATION_LOG=bash_path(log),
@@ -109,7 +109,8 @@ def test_rebased_dev_is_published_only_after_validation_passes(bash, tmp_path, v
                             cwd=repo, env=environment, capture_output=True, text=True, check=False)
     assert (result.returncode == 0) == validation_succeeds, result.stderr
     assert log.read_text().splitlines() == [
-        "sync --all-groups", "run ruff check app tests bin migrations", "run pytest -q",
+        "sync --all-groups", "run ruff check app tests bin migrations",
+        "run pytest -q --durations=15",
     ]
     if result.returncode == 0:
         environment.update(BEFORE=outputs["before"], AFTER=outputs["after"])

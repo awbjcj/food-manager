@@ -124,6 +124,9 @@ passes. GitHub releases are batched weekly; see [versions and releases](docs/rel
 # Run all tests
 uv run pytest
 
+# Run all tests and report slow setup/call/teardown phases (same command as CI)
+uv run pytest -q --durations=15
+
 # Run the same static checks used by CI
 uv run ruff check app tests bin migrations
 uv run pyright app bin
@@ -139,6 +142,11 @@ uv run pytest tests/test_core_services.py
 # Run a single test by name
 uv run pytest tests/test_core_services.py::test_shelf_life_defaults
 ```
+
+Every test still runs. Database-heavy tests copy an empty schema into their own
+temporary SQLite file; data, connections, commits, and rollbacks stay isolated.
+Migration tests continue to run real upgrades and downgrades from scratch. See
+[test performance](docs/testing-performance.md) for measurements and fixture guidance.
 
 ## Deploy to Railway
 

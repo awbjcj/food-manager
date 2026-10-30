@@ -87,7 +87,7 @@ jobs:
           set -euo pipefail
           uv sync --all-groups
           uv run ruff check app tests bin migrations
-          uv run pytest -q
+          uv run pytest -q --durations=15
 
       - name: Publish validated dev
         if: steps.rebase.outputs.changed == 'true'

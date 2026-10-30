@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, create_engine
 
 from app.models import Household, Subscription, User
 from app.webapp import build_web_app
@@ -33,11 +33,10 @@ def _auth(user_id: int) -> str:
 
 
 @pytest.fixture
-def web_state(tmp_path):
+def web_state(tmp_path, sqlite_db_path):
     engine = create_engine(
-        f"sqlite:///{tmp_path / 'web.db'}", connect_args={"check_same_thread": False}
+        f"sqlite:///{sqlite_db_path.as_posix()}", connect_args={"check_same_thread": False}
     )
-    SQLModel.metadata.create_all(engine)
 
     def sessions():
         return Session(engine)
@@ -83,7 +82,10 @@ def web_state(tmp_path):
         bot_username="food_manager_bot",
         static_dir=Path(tmp_path / "missing-static"),
     )
-    return sessions, payments, app
+    try:
+        yield sessions, payments, app
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.asyncio

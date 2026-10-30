@@ -11,6 +11,9 @@ uv sync
 # Run all tests
 uv run pytest
 
+# Include slow-test timings (same command as CI)
+uv run pytest -q --durations=15
+
 # Run a single test file
 uv run pytest tests/test_core_services.py
 

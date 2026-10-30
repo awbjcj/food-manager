@@ -15,7 +15,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "typescript": "latest",
-    "vite": "latest"
+    "vite": "8.2.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

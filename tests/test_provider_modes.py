@@ -77,9 +77,9 @@ def test_deepseek_subscription_search_uses_separate_direct_credentials():
     search_sdk = bundle.search.for_provider("deepseek")._client._sdk
     text_sdk = cast(Any, bundle.text.for_provider("deepseek"))._client._sdk
     assert search_sdk.api_key == "direct-test-key"
-    assert str(search_sdk.base_url).startswith("https://api.deepseek.com")
+    assert search_sdk.base_url.host == "api.deepseek.com"
     assert text_sdk.api_key == "subscription-test-token"
-    assert str(text_sdk.base_url).startswith(GATEWAY)
+    assert text_sdk.base_url.host == "gw.example"
     assert cast(Any, bundle.text.for_provider("deepseek"))._client._search_sdk is search_sdk
     assert cast(Any, bundle.profile.for_provider("deepseek"))._client._search_sdk is search_sdk
 

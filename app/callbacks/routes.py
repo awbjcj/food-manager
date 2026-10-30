@@ -21,6 +21,7 @@ def build_callback_registry() -> CallbackRegistry:
             await handle_batch_callback(
                 context.callback, session_factory=context.session_factory,
                 now_provider=context.now_provider,
+                translation_llm=context.translation_llm,
             )
 
         return CallbackResult(deferred=run)

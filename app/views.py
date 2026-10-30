@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 from sqlmodel import Session
 
@@ -28,12 +28,17 @@ from app.renderer import (
     render_ingest_reply,
     render_item_card,
     render_list,
+    render_pantry_page,
     render_plan,
     render_recook,
     render_remove_confirm,
     render_shopping_list,
 )
-from app.translation_service import cached_name_translations, translate_texts
+from app.translation_service import (
+    cached_name_translations,
+    translate_for_user,
+    translate_texts,
+)
 
 
 @dataclass(frozen=True)
@@ -60,6 +65,17 @@ def pantry_batch(session: Session, batch: PantryBatch, *, lang: str) -> Localize
     return LocalizedBatchView(text, rows)
 
 
+async def prepare_pantry_batch(session: Session, batch: PantryBatch, *, user, now: datetime,
+                               translation_llm) -> LocalizedBatchView:
+    # Warm all candidate names once at entry. Page/selection callbacks stay
+    # cache-only, even when opened directly or from a card in another language.
+    await translate_for_user(
+        session, (item.raw_name for item in batch_items(session, batch)),
+        user=user, now=now, llm=translation_llm,
+    )
+    return pantry_batch(session, batch, lang=user.lang)
+
+
 @dataclass(frozen=True)
 class LocalizedDigestView:
     text: str
@@ -69,6 +85,8 @@ class LocalizedDigestView:
     total_count: int
     has_more: bool
     names: dict[str, str]
+    page: int = 0
+    page_count: int = 1
 
 
 @dataclass(frozen=True)
@@ -111,7 +129,15 @@ def _digest_view(rendered, names: dict[str, str]) -> LocalizedDigestView:
         total_count=rendered.total_count,
         has_more=rendered.has_more,
         names=names,
+        page=rendered.page,
+        page_count=rendered.page_count,
     )
+
+
+def _render_digest(items, *, cap, page, **kwargs):
+    if cap is None:
+        return render_pantry_page(items, page=page, **kwargs)
+    return render_digest(items, cap=cap, **kwargs)
 
 
 def _tonight_title(session: Session, *, household_id: int, today: date) -> str | None:
@@ -130,6 +156,7 @@ async def digest(
     translation_llm,
     cap: int | None = DIGEST_CAP,
     sort_by: PantrySort = "expires",
+    page: int = 0,
 ) -> LocalizedDigestView:
     title = _tonight_title(session, household_id=user.household_id, today=today)
     names = await _names_for(
@@ -139,12 +166,13 @@ async def digest(
         translation_llm=translation_llm,
     )
     return _digest_view(
-        render_digest(
+        _render_digest(
             items,
             today=today,
             lang=user.lang,
             names=names,
             cap=cap,
+            page=page,
             tonight=None if title is None else names.get(title, title),
             sort_by=sort_by,
             stores=(receipt_stores(session, household_id=user.household_id, items=items)
@@ -163,18 +191,20 @@ def digest_cached(
     household_id: int,
     cap: int | None = DIGEST_CAP,
     sort_by: PantrySort = "expires",
+    page: int = 0,
 ) -> LocalizedDigestView:
     title = _tonight_title(session, household_id=household_id, today=today)
     names = cached_names(
         session, lang=lang, texts=[*(item.raw_name for item in items), title]
     )
     return _digest_view(
-        render_digest(
+        _render_digest(
             items,
             today=today,
             lang=lang,
             names=names,
             cap=cap,
+            page=page,
             tonight=None if title is None else names.get(title, title),
             sort_by=sort_by,
             stores=(receipt_stores(session, household_id=household_id, items=items)

@@ -13,7 +13,8 @@ on one token conflict.
 `dev` is the default branch and where everything lands first; `master` is what
 Railway deploys. Only `dev` or a `hotfix/*` branch may open a pull request
 against `master` — `.github/workflows/guard-main-merge.yml` fails any other
-source branch.
+source branch. The guard also requires the source branch to belong to this
+repository; a fork named `dev` or `hotfix/*` cannot satisfy the policy.
 
 **Merges into `master` use "Rebase and merge".** Squash merging and merge
 commits are disabled at the repository level, so the rebase button is the only
@@ -25,7 +26,9 @@ Rebasing rewrites commit SHAs, so `dev` would drift from `master` after every
 merge. `.github/workflows/sync-dev-with-master.yml` closes that loop: on every
 push to `master` it rebases `dev` onto `master` — commits already on `master`
 drop out by patch-id, any newer `dev` work is preserved — and force-pushes the
-result with `--force-with-lease`. Steady state is `master` being an ancestor of
+result with `--force-with-lease` only after installing locked dependencies,
+running Ruff, and passing the full test suite on the combined rebased tree.
+A validation failure leaves remote `dev` unchanged. Steady state is `master` being an ancestor of
 `dev`, with identical trees.
 
 Two consequences worth knowing:
@@ -33,8 +36,9 @@ Two consequences worth knowing:
 - `dev` is force-pushed by CI. Update local clones with `git pull --rebase`
   (or `git fetch && git reset --hard origin/dev`), not a plain merge.
 - The sync push uses `GITHUB_TOKEN`, which by design does not trigger further
-  workflows, so Dev CI does not re-run on the synced commits. They already
-  passed on the pull request.
+  push workflows, so Dev CI does not start a separate run on the synced commits.
+  The sync workflow runs the same lint and test checks before publishing them;
+  this also validates newer `dev` work combined with a `master` hotfix.
 
 If the rebase conflicts, the workflow aborts and fails loudly rather than
 guessing. Resolve it by hand:

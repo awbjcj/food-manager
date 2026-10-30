@@ -13,6 +13,7 @@ from app.pantry_service import ALLOWED_CATEGORIES, PantrySort, Stats
 from app.preference_service import PreferenceProfile
 from app.profile_service import FoodProfile
 from app.storage_state import next_storage_options
+from app.telegram_text import bounded_text, text_units
 
 
 def _name(names: Mapping[str, str] | None, text: str) -> str:
@@ -66,10 +67,13 @@ def _receipt_badge(item) -> str:
     return f"{colour}R{receipt_id} "
 
 
-def _item_origin_suffix(*, back_to: str, sort_by: PantrySort) -> str:
+def _item_origin_suffix(*, back_to: str, sort_by: PantrySort, page: int = 0) -> str:
+    if back_to == "due":
+        return f":due:p:{page}"
     if back_to != "all":
         return ""
-    return ":all" if sort_by == "receipt" else f":all:{sort_by}"
+    suffix = ":all" if sort_by == "receipt" else f":all:{sort_by}"
+    return suffix + (f":p:{page}" if page else "")
 
 
 def _category_label(category: str | None, *, lang: str) -> str:
@@ -196,6 +200,8 @@ class DigestRender:
     rendered_count: int = 0
     total_count: int = 0
     has_more: bool = False
+    page: int = 0
+    page_count: int = 1
 
 
 DIGEST_CAP = 10
@@ -211,8 +217,9 @@ def render_digest(
     tonight: str | None = None,
     sort_by: PantrySort = "expires",
     stores: Mapping[int, str] | None = None,
+    total_count: int | None = None,
 ) -> DigestRender:
-    total = len(items)
+    total = len(items) if total_count is None else total_count
     if total == 0:
         return DigestRender(text="", rendered_count=0, total_count=0, has_more=False)
 
@@ -236,7 +243,7 @@ def render_digest(
                 buckets["later"].append(item)
 
     def line_for(item) -> str:
-        return "  " + render_item_line(item, today=today, lang=lang, names=names)
+        return bounded_text("  " + render_item_line(item, today=today, lang=lang, names=names), 256)
 
     title = t("digest.title", lang, weekday=weekday_abbr(today, lang=lang), date=_fmt_date(today, today=today, lang=lang))
     summary_key = "digest.attention" if cap is not None else "pantry.tracked"
@@ -269,7 +276,7 @@ def render_digest(
         for item in capped:
             category = getattr(item, "category", None)
             if category != previous_category:
-                lines.append(f"🏷 {_category_label(category, lang=lang).upper()}")
+                lines.append(bounded_text(f"🏷 {_category_label(category, lang=lang).upper()}", 128))
                 previous_category = category
             lines.append(line_for(item))
     else:
@@ -282,7 +289,7 @@ def render_digest(
 
     text = "\n".join(lines).rstrip()
     if tonight:
-        text = f"{text}\n\n{t('digest.tonight', lang, dish=tonight)}"
+        text = f"{text}\n\n{bounded_text(t('digest.tonight', lang, dish=tonight), 256)}"
 
     return DigestRender(
         text=text,
@@ -294,6 +301,40 @@ def render_digest(
     )
 
 
+def render_pantry_page(
+    items: list, *, today: date, lang: str = "en", names=None,
+    tonight: str | None = None, sort_by: PantrySort = "expires",
+    stores: Mapping[int, str] | None = None, page: int = 0,
+) -> DigestRender:
+    """Bound every list page by both item count and rendered UTF-16 length."""
+    def render(rows):
+        return render_digest(rows, today=today, lang=lang, names=names, cap=None,
+                             tonight=tonight, sort_by=sort_by, stores=stores,
+                             total_count=len(items))
+
+    pages: list[list] = []
+    current: list = []
+    for item in items:
+        candidate = [*current, item]
+        if current and (len(candidate) > 20 or text_units(render(candidate).text) > 3800):
+            pages.append(current)
+            current = []
+        current.append(item)
+    if current:
+        pages.append(current)
+    if not pages:
+        return render_digest([], today=today, lang=lang)
+    page = min(max(page, 0), len(pages) - 1)
+    result = render(pages[page])
+    result.text = bounded_text(result.text, 3800)
+    result.page = page
+    result.page_count = len(pages)
+    result.has_more = page < len(pages) - 1
+    if len(pages) > 1:
+        result.text += "\n\n" + t("pantry.page", lang, page=page + 1, pages=len(pages))
+    return result
+
+
 def build_digest_keyboard(
     items: list,
     *,
@@ -303,17 +344,19 @@ def build_digest_keyboard(
     names=None,
     back_to: str = "digest",
     sort_by: PantrySort = "receipt",
+    page: int = 0,
+    page_count: int = 1,
 ) -> list[list[CallbackButton]]:
     def _open_data(item_id: int) -> str:
-        suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by)
+        suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by, page=page)
         return f"item:open:{item_id}{suffix}"
 
     buttons = [
         CallbackButton(
-            text=(
+            text=bounded_text((
                 f"{_urgency_icon(item.expires_on, today=today)} "
                 f"{_receipt_badge(item)}#{item.id} {_name(names, item.raw_name)}"
-            ),
+            ), 100),
             callback_data=_open_data(item.id),
         )
         for item in items
@@ -344,7 +387,16 @@ def build_digest_keyboard(
             CallbackButton(text=t("batch.select", lang), callback_data=f"batch:start:{sort_by}"),
         ])
     rows.extend([button] for button in buttons)
-    if has_more:
+    if page_count > 1:
+        navigation = []
+        if page:
+            suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by, page=page - 1)
+            navigation.append(CallbackButton(t("pantry.previous", lang), f"item:list{suffix}"))
+        if page < page_count - 1:
+            suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by, page=page + 1)
+            navigation.append(CallbackButton(t("pantry.next", lang), f"item:list{suffix}"))
+        rows.append(navigation)
+    elif has_more:
         rows.append(
             [
                 CallbackButton(
@@ -387,10 +439,10 @@ def render_remove_confirm(item, *, lang: str = "en", names=None) -> str:
 
 
 def build_item_card_keyboard(
-    item, *, lang: str = "en", back_to: str = "digest", sort_by: PantrySort = "receipt"
+    item, *, lang: str = "en", back_to: str = "digest", sort_by: PantrySort = "receipt", page: int = 0
 ) -> list[list[CallbackButton]]:
     item_id = item.id
-    origin_suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by)
+    origin_suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by, page=page)
     back_data = f"item:list{origin_suffix}"
     rows: list[list[CallbackButton]] = [
         [
@@ -419,9 +471,9 @@ def build_item_card_keyboard(
 
 
 def build_correct_menu_keyboard(
-    item_id: int, *, lang: str = "en", back_to: str = "digest", sort_by: PantrySort = "receipt"
+    item_id: int, *, lang: str = "en", back_to: str = "digest", sort_by: PantrySort = "receipt", page: int = 0
 ) -> list[list[CallbackButton]]:
-    origin_suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by)
+    origin_suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by, page=page)
     return [
         [
             CallbackButton(text=t("btn.nudge_plus_week", lang), callback_data=f"item:nudge:{item_id}:p7{origin_suffix}"),
@@ -437,9 +489,9 @@ def build_correct_menu_keyboard(
 
 
 def build_remove_confirm_keyboard(
-    item_id: int, *, lang: str = "en", back_to: str = "digest", sort_by: PantrySort = "receipt"
+    item_id: int, *, lang: str = "en", back_to: str = "digest", sort_by: PantrySort = "receipt", page: int = 0
 ) -> list[list[CallbackButton]]:
-    origin_suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by)
+    origin_suffix = _item_origin_suffix(back_to=back_to, sort_by=sort_by, page=page)
     return [[
         CallbackButton(text=t("btn.remove_yes", lang), callback_data=f"item:rmok:{item_id}{origin_suffix}"),
         CallbackButton(text=t("btn.cancel", lang), callback_data=f"item:open:{item_id}{origin_suffix}"),

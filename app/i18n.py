@@ -11,6 +11,9 @@ DEFAULT_LANG = "en"
 # Catalog. English is mandatory for every key; other languages are optional and
 # fall back to English. Keys are added incrementally by later tasks.
 MESSAGES: dict[str, dict[str, str]] = {
+    "pantry.page": {"en": "Page {page} of {pages}", "zh": "第 {page} 页，共 {pages} 页", "fr": "Page {page} sur {pages}", "es": "Página {page} de {pages}"},
+    "pantry.previous": {"en": "⬅ Previous", "zh": "⬅ 上一页", "fr": "⬅ Précédente", "es": "⬅ Anterior"},
+    "pantry.next": {"en": "Next ➡", "zh": "下一页 ➡", "fr": "Suivante ➡", "es": "Siguiente ➡"},
     "unit.gal": {"en": "gal", "zh": "加仑", "fr": "gal", "es": "gal"},
     "unit.lb": {"en": "lb", "zh": "磅", "fr": "lb", "es": "lb"},
     "unit.oz": {"en": "oz", "zh": "盎司", "fr": "oz", "es": "oz"},

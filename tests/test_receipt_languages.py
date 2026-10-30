@@ -19,13 +19,14 @@ NAMES = {"en": "Carrots", "zh": "胡萝卜", "fr": "Carottes", "es": "Zanahorias
 @pytest.mark.parametrize("insert", [True, False])
 async def test_recognition_caches_all_languages_for_rendering(tmp_path, insert):
     parsed = ParsedItem(
-        is_food=True, name="Carottes", unit="bunch", category="produce",
+        is_food=True, name="Carrots", unit="bunch", category="produce",
         est_shelf_life_days=7, confidence=0.9,
         name_translations=[NameTranslationItem(lang=lang, text=text) for lang, text in NAMES.items()],
         track_worthy=insert,
     )
     unclear = parsed.model_copy(update={"name": "Unclear carrots", "confidence": 0.1})
-    # Each item's English translation is its stable identity.
+    # The parsed English name remains its stable identity.
+    unclear.name = "Carrots?"
     unclear.name_translations = [
         NameTranslationItem(lang=lang, text=f"{text}?") for lang, text in NAMES.items()
     ]

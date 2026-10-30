@@ -49,6 +49,78 @@ def _settings(**overrides) -> Settings:
     return Settings(**base)  # type: ignore[arg-type]
 
 
+def test_deepseek_subscription_search_falls_back_without_a_first_party_key():
+    from bin.run import _build_llm_clients
+
+    settings = _settings(
+        ANTHROPIC_API_KEY="anthropic-test", SUB2API_BASE_URL=GATEWAY,
+        SUB2API_DEEPSEEK_TOKEN="subscription-only-token",
+    )
+    bundle = _build_llm_clients(settings)
+    assert bundle.search is not None
+    assert "deepseek" not in bundle.search.available_providers
+    assert bundle.search.for_provider("deepseek") is bundle.search.for_provider("anthropic")
+    assert cast(Any, bundle.text.for_provider("deepseek"))._client._sdk.api_key == "subscription-only-token"
+    assert not cast(Any, bundle.text.for_provider("deepseek"))._client._web_search
+    assert not cast(Any, bundle.profile.for_provider("deepseek"))._client._web_search
+
+
+def test_deepseek_subscription_search_uses_separate_direct_credentials():
+    from bin.run import _build_llm_clients
+
+    settings = _settings(
+        ANTHROPIC_API_KEY="anthropic-test", DEEPSEEK_API_KEY="direct-test-key",
+        SUB2API_BASE_URL=GATEWAY, SUB2API_DEEPSEEK_TOKEN="subscription-test-token",
+    )
+    bundle = _build_llm_clients(settings)
+    assert bundle.search is not None
+    search_sdk = bundle.search.for_provider("deepseek")._client._sdk
+    text_sdk = cast(Any, bundle.text.for_provider("deepseek"))._client._sdk
+    assert search_sdk.api_key == "direct-test-key"
+    assert str(search_sdk.base_url).startswith("https://api.deepseek.com")
+    assert text_sdk.api_key == "subscription-test-token"
+    assert str(text_sdk.base_url).startswith(GATEWAY)
+    assert cast(Any, bundle.text.for_provider("deepseek"))._client._search_sdk is search_sdk
+    assert cast(Any, bundle.profile.for_provider("deepseek"))._client._search_sdk is search_sdk
+
+
+def test_deepseek_api_search_reuses_the_direct_sdk():
+    from bin.run import _build_llm_clients
+
+    bundle = _build_llm_clients(_settings(
+        ANTHROPIC_API_KEY="anthropic-test", DEEPSEEK_API_KEY="direct-test-key",
+    ))
+    assert bundle.search is not None
+    assert bundle.search.for_provider("deepseek")._client._sdk is cast(Any, bundle.text.for_provider("deepseek"))._client._sdk
+
+
+async def test_deepseek_text_search_executes_with_the_direct_key_and_endpoint():
+    from types import SimpleNamespace
+
+    import httpx2 as httpx
+    from openai import AsyncOpenAI
+
+    from app.deepseek_llm import DeepSeekTextLLMClient
+
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={"results": [{"url": "https://example.invalid/evidence"}]})
+
+    async with AsyncOpenAI(api_key="subscription-test-token", base_url=GATEWAY,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))) as gateway, \
+        AsyncOpenAI(api_key="direct-test-key", base_url="https://api.deepseek.com",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(respond))) as direct:
+        client = DeepSeekTextLLMClient(gateway, "deepseek-v4-pro", search_sdk=direct)
+        result, _cost = await client._client._search(SimpleNamespace(
+            name="web_search", arguments='{"query":"milk shelf life"}'))
+    assert result["results"]
+    assert len(requests) == 1
+    assert str(requests[0].url) == "https://api.deepseek.com/v1/tools/search"
+    assert requests[0].headers["authorization"] == "Bearer direct-test-key"
+
+
 @pytest.fixture
 def session():
     engine = create_engine("sqlite://")

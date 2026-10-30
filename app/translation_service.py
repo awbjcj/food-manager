@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from datetime import datetime
 
+from sqlalchemy.dialects.sqlite import insert
 from sqlmodel import Session, col, select
 
+from app.billing.meter import admit, commit
 from app.i18n import LANGS
-from app.models import NameTranslation
+from app.models import NameTranslation, User
 from app.translation_llm import TranslationLLMClient
 
 log = logging.getLogger(__name__)
@@ -30,18 +34,16 @@ def upsert_name_translations(
         translated_text = translated_text.strip()
         if not translated_text:
             continue
+        session.flush()
+        session.connection().execute(insert(NameTranslation).values(
+            lang=lang, source_text=source_text, translated_text=translated_text,
+        ).on_conflict_do_update(
+            index_elements=["lang", "source_text"],
+            set_={"translated_text": translated_text},
+        ))
         row = session.get(NameTranslation, (lang, source_text))
-        if row is None:
-            session.add(
-                NameTranslation(
-                    lang=lang,
-                    source_text=source_text,
-                    translated_text=translated_text,
-                )
-            )
-        else:
-            row.translated_text = translated_text
-            session.add(row)
+        if row is not None:
+            session.refresh(row)
 
 
 def cached_name_translations(
@@ -98,10 +100,8 @@ async def translate_texts(
             translations, _cost = await llm.translate(texts=misses, lang=lang)
             if len(translations) != len(misses):
                 raise ValueError("translation count mismatch")
-            session.add_all(
-                NameTranslation(lang=lang, source_text=src, translated_text=dst)
-                for src, dst in zip(misses, translations)
-            )
+            for src, dst in zip(misses, translations):
+                upsert_name_translations(session, source_text=src, translations={lang: dst})
             session.commit()
             # Populate the result only after a successful commit so a failure
             # leaves every miss to fall back to English consistently.
@@ -118,3 +118,46 @@ async def translate_texts(
                 result.setdefault(src, src)  # English fallback
 
     return result
+
+
+@dataclass
+class _TranslationAttempt:
+    client: TranslationLLMClient
+    attempted: bool = False
+    cost: int | None = None
+
+    async def translate(self, *, texts: list[str], lang: str) -> tuple[list[str], int | None]:
+        self.attempted = True
+        translated, self.cost = await self.client.translate(texts=texts, lang=lang)
+        return translated, self.cost
+
+
+async def translate_for_user(
+    session: Session,
+    texts: Iterable[str],
+    *,
+    user: User,
+    now: datetime,
+    llm: TranslationLLMClient | None,
+) -> dict[str, str]:
+    """Translate admitted misses and meter attempts, including failed responses.
+
+    Cached/English rendering remains free. Callers commit domain writes before
+    entering this seam, since translation may roll back on a provider failure.
+    """
+    unique = list(dict.fromkeys(text for text in texts if text))
+    cached = cached_name_translations(session, unique, lang=user.lang)
+    if user.lang == "en" or llm is None or all(text in cached for text in unique):
+        return cached
+    provider = getattr(llm, "_default_provider", user.llm_provider)
+    decision = admit(session, household_id=user.household_id, op="edit", provider=provider, now=now)
+    if not decision.allowed:
+        session.commit()
+        return cached
+    attempt = _TranslationAttempt(llm)
+    try:
+        return await translate_texts(session, unique, lang=user.lang, llm=attempt)
+    finally:
+        if attempt.attempted:
+            commit(session, household_id=user.household_id, op="edit", provider=provider,
+                   cost_micros=attempt.cost, now=now)

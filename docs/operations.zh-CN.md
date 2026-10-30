@@ -6,16 +6,16 @@
 
 ## 分支与合并策略
 
-`dev` 是默认分支，所有改动都先合入这里；`master` 是 Railway 部署的分支。只有 `dev` 或 `hotfix/*` 分支可以向 `master` 发起拉取请求——`.github/workflows/guard-main-merge.yml` 会让其他来源分支失败。
+`dev` 是默认分支，所有改动都先合入这里；`master` 是 Railway 部署的分支。只有本仓库的 `dev` 或 `hotfix/*` 分支可以向 `master` 发起拉取请求——`.github/workflows/guard-main-merge.yml` 会检查来源仓库和分支，fork 中的同名分支也无法通过。
 
 **合并到 `master` 一律使用「Rebase and merge」（变基合并）。** 仓库级别已禁用 squash 合并和合并提交，因此只剩下变基按钮可用，并且 `master` 要求线性历史。这样不会产生合并提交，也不会生成新的提交信息：`master` 得到的正是在 `dev` 上评审过的那些提交，只是重放到了最新位置。
 
-变基会改写提交 SHA，因此每次合并后 `dev` 都会与 `master` 产生偏离。`.github/workflows/sync-dev-with-master.yml` 负责闭环：每次推送到 `master` 后，它会把 `dev` 变基到 `master` 之上——已经进入 `master` 的提交会按 patch-id 自动丢弃，`dev` 上更新的工作则会保留——然后用 `--force-with-lease` 强制推送结果。稳定状态是 `master` 为 `dev` 的祖先，且两者内容完全一致。
+变基会改写提交 SHA，因此每次合并后 `dev` 都会与 `master` 产生偏离。`.github/workflows/sync-dev-with-master.yml` 负责闭环：每次推送到 `master` 后，它会把 `dev` 变基到 `master` 之上——已经进入 `master` 的提交会按 patch-id 自动丢弃，`dev` 上更新的工作则会保留。工作流随后安装锁定的依赖，并对变基后的完整代码运行 Ruff 和全部测试；只有检查通过，才会用 `--force-with-lease` 强制推送结果。检查失败时，远程 `dev` 保持不变。稳定状态是 `master` 为 `dev` 的祖先，且两者内容完全一致。
 
 有两点需要注意：
 
 - `dev` 会被 CI 强制推送。更新本地克隆请使用 `git pull --rebase`（或 `git fetch && git reset --hard origin/dev`），不要使用普通合并。
-- 同步推送使用 `GITHUB_TOKEN`，按设计不会触发后续工作流，因此 Dev CI 不会在同步后的提交上重跑——这些提交已经在拉取请求中通过了检查。
+- 同步推送使用 `GITHUB_TOKEN`，按设计不会触发后续的 push 工作流，因此不会额外启动一次 Dev CI。同步工作流会在推送前运行相同的 lint 和测试检查，确保 `dev` 上的新改动与 `master` 热修复组合后也能通过。
 
 如果变基发生冲突，工作流会中止并明确报错，而不会自行猜测。请手工解决：
 

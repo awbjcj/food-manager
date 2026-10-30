@@ -587,28 +587,40 @@ class AnthropicLLMClient(LLMClient):
             {"type": "text", "text": receipt_user_prompt(today)},
         ]
 
-        message = await self._create_message(user_content)
-        cost = _cost_micros(message, self._model)
-
-        try:
-            if self._model in {"claude-opus-5-5", "claude-sonnet-5-5"} and not any(
-                getattr(block, "type", None) == "tool_use" for block in message.content
-            ):
-                # Auto tool choice can return JSON text instead of a tool call.
-                parsed = ParseResult.model_validate_json(_extract_json_text(message))
-            else:
-                parsed = ParseResult.model_validate(_extract_tool_input(message))
-        except Exception as exc:
-            log.warning(
-                "llm_json_validation_failed_final",
-                extra={"error_class": type(exc).__name__, "error": str(exc)},
-            )
-            raise
-
-        return LLMResult(
-            parse=parsed,
-            cost_micros_usd=cost,
-        )
+        cost: int | None = 0
+        for attempt in range(2):
+            message = await self._create_message(user_content)
+            attempt_cost = _cost_micros(message, self._model)
+            cost = None if cost is None or attempt_cost is None else cost + attempt_cost
+            try:
+                if self._model in {"claude-opus-5-5", "claude-sonnet-5-5"} and not any(
+                    getattr(block, "type", None) == "tool_use" for block in message.content
+                ):
+                    # Auto tool choice can return JSON text instead of a tool call.
+                    parsed = ParseResult.model_validate_json(_extract_json_text(message))
+                else:
+                    parsed = ParseResult.model_validate(_extract_tool_input(message))
+            except (ValueError, TypeError) as exc:
+                log.warning(
+                    "llm_json_validation_failed_final" if attempt else "llm_json_validation_retry",
+                    extra={"error_class": type(exc).__name__},
+                )
+                if attempt:
+                    raise
+                # Keep correction context in user content, with the original
+                # image still present. Never log model output or receipt data.
+                errors = getattr(exc, "errors", None)
+                detail = (
+                    json.dumps(errors(include_input=False, include_url=False), default=str)
+                    if callable(errors) else str(exc)
+                )
+                user_content.append({"type": "text", "text": (
+                    "The previous receipt parse failed validation: " + detail[:2000]
+                    + ". Correct these errors and return the complete receipt using the schema."
+                )})
+                continue
+            return LLMResult(parse=parsed, cost_micros_usd=cost)
+        raise AssertionError("unreachable receipt retry state")
 
 
 class OpenAILLMClient(LLMClient):

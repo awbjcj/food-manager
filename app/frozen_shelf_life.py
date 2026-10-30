@@ -125,9 +125,11 @@ _STATE_CONFIG: dict[str, _StateConfig] = {
     ),
 }
 
-# Cache keys use a stable, search-independent prefix so a state's learned days
-# never collide with the default (counter/pantry) shelf-life cache entry.
-_CACHE_PREFIX: dict[str, str] = {"frozen": "frozen", "fridge": "fridge"}
+# The leading separator is stripped by normalize(), so normalized natural names
+# cannot produce an internal state key, even if they contain "storage:frozen:".
+# Old space-prefixed keys are ambiguous: leave them intact for default storage
+# and resolve state durations afresh, rather than importing a possibly fresh TTL.
+_CACHE_PREFIX: dict[str, str] = {"frozen": "\x1fstorage:frozen:", "fridge": "\x1fstorage:fridge:"}
 
 
 def _strip_prefixes(value: str) -> str:
@@ -150,7 +152,7 @@ def storage_cache_key(normalized_name: str, storage: str) -> str:
     prefix = _CACHE_PREFIX.get(storage)
     if prefix is None:
         return normalized_name
-    return f"{prefix} {_canonical_name(normalized_name)}"
+    return f"{prefix}{_canonical_name(normalized_name)}"
 
 
 @dataclass(frozen=True)
@@ -158,6 +160,7 @@ class StorageDecision:
     days: int
     source: StorageSource
     cache_was_hit: bool
+    cost_micros_usd: int | None = 0
 
 
 async def resolve_storage_days(
@@ -188,6 +191,7 @@ async def resolve_storage_days(
             days=table_days, source=config.source_foodkeeper, cache_was_hit=False
         )
 
+    search_cost: int | None = 0
     if search is not None:
         try:
             result = await search.lookup_shelf_life(
@@ -195,6 +199,7 @@ async def resolve_storage_days(
             )
         except Exception:  # noqa: BLE001 - search is best-effort, falls back to default
             result = None
+        search_cost = result.cost_micros_usd if result is not None else None
         days = resolve_search_days(result) if result is not None else None
         if days is not None:
             assert result is not None
@@ -204,7 +209,8 @@ async def resolve_storage_days(
                 source="llm", commit=False,
             )
             return StorageDecision(
-                days=days, source=config.source_llm, cache_was_hit=False
+                days=days, source=config.source_llm, cache_was_hit=False,
+                cost_micros_usd=search_cost,
             )
 
     put_cached(
@@ -213,7 +219,8 @@ async def resolve_storage_days(
         source="llm", commit=False,
     )
     return StorageDecision(
-        days=config.default_days, source=config.source_default, cache_was_hit=False
+        days=config.default_days, source=config.source_default, cache_was_hit=False,
+        cost_micros_usd=search_cost,
     )
 
 

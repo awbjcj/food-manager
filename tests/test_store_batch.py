@@ -159,7 +159,8 @@ async def test_batch_command_opens_a_large_pantry_within_telegram_limits(session
             translation_llm=None,
             cap=None,
         )
-        assert len(full.text) > 4096
+        assert len(full.text) < 4096
+        assert full.page_count > 1
     msg = MagicMock()
     msg.from_user.id = 1
     msg.chat.id = 1

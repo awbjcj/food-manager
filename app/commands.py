@@ -196,20 +196,29 @@ class CallbackAction:
     round_name: str | None = None
     back_to: str = "digest"
     sort_by: PantrySort = "receipt"
+    page: int = 0
 
 
 def _parse_pantry_origin(
     parts: list[str], *, start: int, data: str
-) -> tuple[str, PantrySort]:
+) -> tuple[str, PantrySort, int]:
     if len(parts) == start:
-        return "digest", "receipt"
-    if parts[start] != "all":
+        return "digest", "receipt", 0
+    origin = parts[start]
+    if origin not in ("all", "due"):
         raise CommandError(f"bad action origin {parts[start]!r}")
-    if len(parts) == start + 1:
-        return "all", "receipt"
-    if len(parts) == start + 2 and parts[start + 1] in PANTRY_SORTS:
-        return "all", cast(PantrySort, parts[start + 1])
-    raise CommandError(f"bad item callback {data!r}")
+    rest = parts[start + 1:]
+    sort_by: PantrySort = "expires" if origin == "due" else "receipt"
+    if rest and origin == "all" and rest[0] in PANTRY_SORTS:
+        sort_by = cast(PantrySort, rest.pop(0))
+    page = 0
+    if rest:
+        if len(rest) != 2 or rest[0] != "p" or not rest[1].isascii() or not rest[1].isdigit():
+            raise CommandError(f"bad item callback {data!r}")
+        if len(rest[1]) > 7 or int(rest[1]) > 1_000_000:
+            raise CommandError(f"bad page {data!r}")
+        page = int(rest[1])
+    return origin, sort_by, page
 
 
 def parse_callback(data: str) -> CallbackAction:
@@ -382,12 +391,12 @@ def parse_callback(data: str) -> CallbackAction:
     verb = parts[1]
     if verb not in ("ate", "toss", "snooze2", "freeze", "fridge"):
         raise CommandError(f"unknown verb {verb!r}")
-    back_to, sort_by = _parse_pantry_origin(parts, start=3, data=data)
+    back_to, sort_by, page = _parse_pantry_origin(parts, start=3, data=data)
     try:
         item_id = int(parts[2])
     except ValueError as exc:
         raise CommandError(f"bad item id {parts[2]!r}") from exc
-    return CallbackAction(verb=verb, item_id=item_id, back_to=back_to, sort_by=sort_by)
+    return CallbackAction(verb=verb, item_id=item_id, back_to=back_to, sort_by=sort_by, page=page)
 
 
 ItemKind = Literal["open", "list", "corr", "nudge", "ctext", "rm", "rmok"]
@@ -400,6 +409,7 @@ class ItemAction:
     nudge_code: str | None = None
     back_to: str = "digest"
     sort_by: PantrySort = "receipt"
+    page: int = 0
 
 
 def parse_item_callback(data: str) -> ItemAction:
@@ -408,16 +418,16 @@ def parse_item_callback(data: str) -> ItemAction:
         raise CommandError(f"not an item callback {data!r}")
     kind = parts[1]
     if kind == "list":
-        back_to, sort_by = _parse_pantry_origin(parts, start=2, data=data)
-        return ItemAction(kind="list", back_to=back_to, sort_by=sort_by)
+        back_to, sort_by, page = _parse_pantry_origin(parts, start=2, data=data)
+        return ItemAction(kind="list", back_to=back_to, sort_by=sort_by, page=page)
     if kind == "nudge":
         if len(parts) < 4 or parts[3] not in NUDGE_CODES:
             raise CommandError(f"bad item nudge {data!r}")
         try:
-            back_to, sort_by = _parse_pantry_origin(parts, start=4, data=data)
+            back_to, sort_by, page = _parse_pantry_origin(parts, start=4, data=data)
             return ItemAction(
                 kind="nudge", item_id=int(parts[2]), nudge_code=parts[3],
-                back_to=back_to, sort_by=sort_by,
+                back_to=back_to, sort_by=sort_by, page=page,
             )
         except ValueError as exc:
             raise CommandError(f"bad item id {parts[2]!r}") from exc
@@ -425,10 +435,10 @@ def parse_item_callback(data: str) -> ItemAction:
         if len(parts) < 3:
             raise CommandError(f"bad item callback {data!r}")
         try:
-            back_to, sort_by = _parse_pantry_origin(parts, start=3, data=data)
+            back_to, sort_by, page = _parse_pantry_origin(parts, start=3, data=data)
             return ItemAction(
                 kind=cast(ItemKind, kind), item_id=int(parts[2]),
-                back_to=back_to, sort_by=sort_by,
+                back_to=back_to, sort_by=sort_by, page=page,
             )
         except ValueError as exc:
             raise CommandError(f"bad item id {parts[2]!r}") from exc

@@ -17,7 +17,7 @@ from app.renderer import CallbackButton
 from app.telegram_ui import to_aiogram_keyboard
 
 
-async def handle_batch_callback(cb, *, session_factory, now_provider) -> None:
+async def handle_batch_callback(cb, *, session_factory, now_provider, translation_llm=None) -> None:
     try:
         request = parse_batch_callback(cb.data or "")
     except CommandError:
@@ -67,7 +67,12 @@ async def handle_batch_callback(cb, *, session_factory, now_provider) -> None:
                     notice = t(str(exc), user.lang)
                 else:
                     notice = ""
-            view = views.pantry_batch(session, batch, lang=user.lang)
+            if request.action == "start":
+                view = await views.prepare_pantry_batch(
+                    session, batch, user=user, now=now, translation_llm=translation_llm,
+                )
+            else:
+                view = views.pantry_batch(session, batch, lang=user.lang)
             text, keyboard = view.text, view.rows
             if request.action != "start" and notice:
                 text = notice + "\n\n" + text

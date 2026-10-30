@@ -353,13 +353,15 @@ async def test_show_all_callback_edits_due_items_in_place(session, monkeypatch):
     cb.message.answer.assert_not_awaited()
     cb.message.edit_text.assert_awaited_once()
     assert cb.message.edit_text.await_args is not None
-    assert "Item 24" in cb.message.edit_text.await_args.args[0]
+    assert "Item 19" in cb.message.edit_text.await_args.args[0]
+    assert "Page 1 of 2" in cb.message.edit_text.await_args.args[0]
     datas = {
         button.callback_data
         for row in cb.message.edit_text.await_args.kwargs["reply_markup"].inline_keyboard
         for button in row
     }
     assert any(data.startswith("item:open:") for data in datas)
+    assert "item:list:due:p:1" in datas
 
 
 @pytest.mark.asyncio

@@ -18,11 +18,18 @@ concurrency:
   group: sync-dev-with-master
   cancel-in-progress: false
 
+env:
+  UV_FROZEN: "true"
+  UV_NO_PROGRESS: "true"
+  TELEGRAM_BOT_TOKEN: ci-placeholder
+  ALLOWED_TELEGRAM_USER_ID: "1"
+  ANTHROPIC_API_KEY: ci-placeholder
+
 jobs:
   sync:
     name: Rebase dev onto master
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,6 +40,7 @@ jobs:
           persist-credentials: true
 
       - name: Rebase dev onto master
+        id: rebase
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -60,8 +68,38 @@ jobs:
             exit 0
           fi
 
-          echo "Syncing dev: ${before} -> ${after}"
-          git push --force-with-lease="refs/heads/dev:${before}" origin dev
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "before=${before}" >> "$GITHUB_OUTPUT"
+          echo "after=${after}" >> "$GITHUB_OUTPUT"
+
+      - name: Install uv and Python
+        if: steps.rebase.outputs.changed == 'true'
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.16"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Validate the rebased tree
+        if: steps.rebase.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          uv sync --all-groups
+          uv run ruff check app tests bin migrations
+          uv run pytest -q
+
+      - name: Publish validated dev
+        if: steps.rebase.outputs.changed == 'true'
+        env:
+          BEFORE: ${{ steps.rebase.outputs.before }}
+          AFTER: ${{ steps.rebase.outputs.after }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$AFTER"
+          git diff --quiet
+          git diff --cached --quiet
+          git push --force-with-lease="refs/heads/dev:${BEFORE}" origin HEAD:refs/heads/dev
 
       - name: Report result
         if: always()

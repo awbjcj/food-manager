@@ -98,7 +98,7 @@ async def refine_receipt_items(
         put_cached(
             session, household_id, item.normalized_name,
             days=days, category=item.category, confidence=result.confidence,
-            source="llm", commit=False,
+            source="llm", commit=False, replace_automatic=True,
         )
         assert item.id is not None
         updated.append(item.id)

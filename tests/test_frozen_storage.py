@@ -92,7 +92,7 @@ async def test_resolver_foodkeeper_hit_and_caches(session):
     assert decision.source == "frozen_foodkeeper"
     assert decision.cache_was_hit is False
     assert decision.days == 270
-    cached = get_cached(session, 1, "frozen chicken")
+    cached = get_cached(session, 1, "\x1fstorage:frozen:chicken")
     assert cached is not None and cached.days == 270
 
 
@@ -107,7 +107,7 @@ async def test_resolver_handles_already_frozen_normalized_names(session):
     assert decision.source == "frozen_foodkeeper"
     assert decision.days == 300
     assert get_cached(session, 1, "frozen frozen peas") is None
-    cached = get_cached(session, 1, "frozen peas")
+    cached = get_cached(session, 1, "\x1fstorage:frozen:peas")
     assert cached is not None and cached.days == 300
 
 
@@ -116,7 +116,7 @@ async def test_resolver_cache_hit(session):
     put_cached(
         session,
         1,
-        "frozen chicken",
+        "\x1fstorage:frozen:chicken",
         days=200,
         category=None,
         confidence=0.9,
@@ -152,7 +152,7 @@ async def test_resolver_search_fallback_for_unknown_food(session):
     assert decision.source == "frozen_llm"
     assert decision.days == 150
     assert search.calls == ["frozen Durian"]
-    assert get_cached(session, 1, "frozen durian") is not None
+    assert get_cached(session, 1, "\x1fstorage:frozen:durian") is not None
 
 
 @pytest.mark.asyncio
@@ -167,7 +167,7 @@ async def test_resolver_search_name_does_not_double_frozen_prefix(session):
     decision = await resolve_frozen_days(
         session,
         household_id=1,
-        normalized_name="frozen durian",
+        normalized_name="\x1fstorage:frozen:durian",
         food_name="Frozen Durian",
         search=search,
     )
@@ -186,7 +186,7 @@ async def test_resolver_default_when_no_search_and_unknown(session):
     )
     assert decision.source == "frozen_default"
     assert decision.days == FROZEN_DEFAULT_DAYS
-    cached = get_cached(session, 1, "frozen durian")
+    cached = get_cached(session, 1, "\x1fstorage:frozen:durian")
     assert cached is not None and cached.days == FROZEN_DEFAULT_DAYS
 
 
@@ -386,7 +386,7 @@ def test_correct_item_updates_frozen_cache_key(session):
         today=freeze_day,
     )
     assert get_cached(session, 1, "chicken") is None
-    cached = get_cached(session, 1, "frozen chicken")
+    cached = get_cached(session, 1, "\x1fstorage:frozen:chicken")
     assert cached is not None and cached.days == 100
 
 
@@ -402,7 +402,7 @@ async def test_propose_correct_uses_frozen_on_origin(session):
     put_cached(
         session,
         1,
-        "frozen chicken",
+        "\x1fstorage:frozen:chicken",
         days=120,
         category="meat",
         confidence=1.0,
@@ -430,7 +430,7 @@ async def test_propose_correct_uses_frozen_on_origin(session):
     assert cost == 5
     assert payload.back_computed_days is True
     assert payload.diff["shelf_life_days"] == {"old": 2, "new": 100}
-    assert llm.correct_calls[0]["cache_snapshot"]["normalized_name"] == "frozen chicken"
+    assert llm.correct_calls[0]["cache_snapshot"]["normalized_name"] == "\x1fstorage:frozen:chicken"
 
 
 def test_apply_correct_moves_frozen_cache_key(session):
@@ -443,7 +443,7 @@ def test_apply_correct_moves_frozen_cache_key(session):
     put_cached(
         session,
         1,
-        "frozen chicken",
+        "\x1fstorage:frozen:chicken",
         days=270,
         category="meat",
         confidence=1.0,
@@ -462,9 +462,9 @@ def test_apply_correct_moves_frozen_cache_key(session):
     )
     apply_correct(session, household_id=1, item=item, payload=payload)
     session.flush()
-    assert get_cached(session, 1, "frozen chicken") is None
+    assert get_cached(session, 1, "\x1fstorage:frozen:chicken") is None
     assert get_cached(session, 1, "turkey") is None
-    cached = get_cached(session, 1, "frozen turkey")
+    cached = get_cached(session, 1, "\x1fstorage:frozen:turkey")
     assert cached is not None and cached.days == 240
 
 

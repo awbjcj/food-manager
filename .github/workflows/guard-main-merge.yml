@@ -16,7 +16,14 @@ jobs:
       - name: Enforce dev/hotfix-only merges into master
         env:
           HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPOSITORY: ${{ github.repository }}
         run: |
+          set -euo pipefail
+          if [ "$HEAD_REPOSITORY" != "$BASE_REPOSITORY" ]; then
+            echo "::error::Only branches from this repository may merge into master."
+            exit 1
+          fi
           echo "Source branch: $HEAD_REF"
           case "$HEAD_REF" in
             dev|hotfix/*)

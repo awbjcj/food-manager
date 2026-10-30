@@ -136,7 +136,10 @@ async def handle_pantry(
                 session, household_id=user.household_id, user_id=user.telegram_id,
                 sort_by="store", today=today, now=now_provider(user.tz),
             )
-            view = views.pantry_batch(session, batch, lang=user.lang)
+            view = await views.prepare_pantry_batch(
+                session, batch, user=user, now=now_provider(user.tz),
+                translation_llm=translation_llm,
+            )
             await msg.answer(view.text, reply_markup=to_aiogram_keyboard(view.rows))
             return
 
@@ -209,6 +212,8 @@ async def handle_pantry(
                 names=view.names,
                 back_to=back_to,
                 sort_by=sort_by,
+                page=view.page,
+                page_count=view.page_count,
             )
         )
         await msg.answer(view.text, reply_markup=keyboard)

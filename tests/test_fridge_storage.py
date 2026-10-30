@@ -98,13 +98,13 @@ async def test_fridge_resolver_foodkeeper_hit_and_caches(session):
     )
     assert decision.source == "fridge_foodkeeper"
     assert decision.days == 2
-    cached = get_cached(session, 1, "fridge chicken")
+    cached = get_cached(session, 1, "\x1fstorage:fridge:chicken")
     assert cached is not None and cached.days == 2
 
 
 @pytest.mark.asyncio
 async def test_fridge_resolver_cache_key_isolated_from_frozen(session):
-    put_cached(session, 1, "fridge chicken", days=4, category=None,
+    put_cached(session, 1, "\x1fstorage:fridge:chicken", days=4, category=None,
                confidence=0.9, source="llm")
     decision = await resolve_storage_days(
         session, household_id=1, state="fridge",
@@ -113,7 +113,7 @@ async def test_fridge_resolver_cache_key_isolated_from_frozen(session):
     assert decision.source == "cache"
     assert decision.days == 4
     # The frozen entry is a different key, untouched.
-    assert get_cached(session, 1, "frozen chicken") is None
+    assert get_cached(session, 1, "\x1fstorage:frozen:chicken") is None
 
 
 @pytest.mark.asyncio

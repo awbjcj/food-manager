@@ -242,7 +242,8 @@ def test_remove_member_requires_owner(session):
     # owner (1) removes member (2)
     removed = remove_member(session, household_id=1, actor_id=1, target_id=2)
     assert removed.telegram_id == 2
-    assert session.get(User, 2) is None
+    assert session.get(User, 2).membership_active is False
+    assert session.get(User, 2).membership_generation == 1
 
 
 def test_remove_member_self_and_missing(session):
@@ -265,7 +266,8 @@ def test_leave_household_member_ok_owner_blocked(session):
         llm_provider="anthropic",
     )
     leave_household(session, telegram_user_id=2)
-    assert session.get(User, 2) is None
+    assert session.get(User, 2).membership_active is False
+    assert session.get(User, 2).membership_generation == 1
     with pytest.raises(OwnerCannotLeave):
         leave_household(session, telegram_user_id=1)
 
@@ -724,7 +726,8 @@ async def test_handle_leave_member_unschedules(session, monkeypatch):
     unschedule = MagicMock()
     msg = _msg("/leave", user_id=2, chat_id=22)
     await handle_leave(msg, session_factory=lambda: session, unschedule=unschedule)
-    assert session.get(User, 2) is None
+    assert session.get(User, 2).membership_active is False
+    assert session.get(User, 2).membership_generation == 1
     unschedule.assert_called_once_with(2)
 
 
@@ -751,7 +754,8 @@ async def test_handle_remove_owner_removes_member(session, monkeypatch):
     unschedule = MagicMock()
     msg = _msg("/remove 2", user_id=1)
     await handle_remove(msg, session_factory=lambda: session, unschedule=unschedule)
-    assert session.get(User, 2) is None
+    assert session.get(User, 2).membership_active is False
+    assert session.get(User, 2).membership_generation == 1
     unschedule.assert_called_once_with(2)
 
 

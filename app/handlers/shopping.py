@@ -7,16 +7,17 @@ from datetime import datetime
 from sqlmodel import Session
 
 from app import handler_support, views
+from app.application.context import keyboard as to_keyboard
 from app.cook import (
     list_saved,
 )
+from app.messaging.adapters.legacy import message_entry
 from app.models import User
 from app.renderer import (
     build_favorites_keyboard,
     build_shopping_keyboard,
 )
 from app.shopping_service import list_pending
-from app.telegram_ui import to_aiogram_keyboard
 
 _SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
@@ -27,6 +28,7 @@ _noop_user_created = handler_support.noop_user_created
 _request = handler_support.request
 
 
+@message_entry
 async def handle_shopping(
     msg,
     *,
@@ -48,15 +50,16 @@ async def handle_shopping(
             session, items, user=user, translation_llm=translation_llm
         )
         keyboard = (
-            to_aiogram_keyboard(
+            to_keyboard(
                 build_shopping_keyboard([i.id for i in items if i.id], lang=user.lang)
             )
             if items
             else None
         )
-        await msg.answer(view.text, reply_markup=keyboard)
+        await msg.reply(view.text, actions=keyboard)
 
 
+@message_entry
 async def handle_favorites(
     msg,
     *,
@@ -77,7 +80,7 @@ async def handle_favorites(
             session, recipes, user=user, translation_llm=translation_llm
         )
         keyboard = (
-            to_aiogram_keyboard(
+            to_keyboard(
                 build_favorites_keyboard(
                     [r.id for r in recipes if r.id], lang=user.lang
                 )
@@ -85,7 +88,7 @@ async def handle_favorites(
             if recipes
             else None
         )
-        await msg.answer(view.text, reply_markup=keyboard)
+        await msg.reply(view.text, actions=keyboard)
 
 
 COMMANDS = (

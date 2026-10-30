@@ -83,6 +83,9 @@ from app.llm import (
     SelectionLLMProviderSelector,
     TextLLMProviderSelector,
 )
+from app.messaging.bootstrap import import_legacy, serve_connections, verify_legacy
+from app.messaging.contracts import MessagingError
+from app.messaging.runtime import MessagingRuntime
 from app.nl_intent import IntentAgentSelector, build_intent_agent
 from app.operator import auth as operator_auth
 from app.operator.bot import build_operator_dispatcher
@@ -471,8 +474,12 @@ async def _amain(settings: Settings) -> None:
         raise SystemExit(3)
     log.info("migration_ok")
 
-    bot = Bot(token=settings.telegram_bot_token)
-    payments = StarsPaymentProvider(bot) if settings.effective_billing_enabled else None
+    if not settings.has_credentials(settings.llm_provider):
+        await serve_connections(MessagingRuntime(session_factory=session_factory, settings=settings, clients=PerUserClients()))
+        return
+
+    bot = Bot(token=settings.telegram_bot_token) if settings.telegram_bot_token else None
+    payments = StarsPaymentProvider(bot) if bot is not None and settings.effective_billing_enabled else None
     alerter = OwnerAlerter(bot, settings.allowed_telegram_user_id)
     recipe_http = httpx.AsyncClient()
     recipe_sources = [
@@ -543,7 +550,17 @@ async def _amain(settings: Settings) -> None:
     cook_service_mod.COOK_COST_CEILING_MICROS = settings.cook_cost_ceiling_micros
     plan_service_mod.PLAN_COST_CEILING_MICROS = settings.plan_cost_ceiling_micros
 
+    messaging_runtime = MessagingRuntime(session_factory=session_factory, settings=settings, clients=clients,
+        recipe_sources=recipe_sources, intent_agent=intent_agent, composer=composer)
+    if bot is None:
+        try:
+            await serve_connections(messaging_runtime, available_providers=bundle.text.available_providers)
+        finally:
+            await recipe_http.aclose()
+        return
+    import_legacy(messaging_runtime)
     scheduler = AsyncIOScheduler()
+    legacy_verified = False
 
     translation_llm = bundle.translation
 
@@ -553,6 +570,8 @@ async def _amain(settings: Settings) -> None:
         )
 
     async def send(user_id: int) -> None:
+        if not legacy_verified:
+            return
         await send_digest_with_retry(
             user_id=user_id,
             bot=bot,
@@ -583,6 +602,8 @@ async def _amain(settings: Settings) -> None:
     bot_username = None
     try:
         bot_identity = await bot.get_me()
+        verify_legacy(messaging_runtime, bot_identity)
+        legacy_verified = True
         bot_username = bot_identity.username
         if settings.web_app_url:
             await bot.set_chat_menu_button(
@@ -591,6 +612,13 @@ async def _amain(settings: Settings) -> None:
                     web_app=WebAppInfo(url=settings.web_app_url),
                 )
             )
+    except MessagingError:
+        # An environment token may rotate for the same bot, never silently
+        # replace the account bound to existing identities and conversations.
+        await recipe_http.aclose()
+        await messaging_runtime.close()
+        await bot.session.close()
+        raise
     except Exception as exc:  # noqa: BLE001 - polling can still recover later
         log.warning(
             "mini_app_menu_setup_failed",
@@ -616,7 +644,9 @@ async def _amain(settings: Settings) -> None:
             recipe_sources=recipe_sources,
             intent_agent=intent_agent,
             composer=composer,
-        )
+            messaging_runtime=messaging_runtime,
+        ),
+        access_log=None,
     )
     await web_runner.setup()
     web_site = web.TCPSite(web_runner, "0.0.0.0", settings.port)
@@ -655,9 +685,11 @@ async def _amain(settings: Settings) -> None:
         composer=composer,
         payments=payments,
         hosted_features_enabled=settings.hosted_features_enabled,
+        messaging_runtime=messaging_runtime,
     )
 
     scheduler.start()
+    await messaging_runtime.start()
     log.info("scheduler_started")
 
     caught_up = await catch_up_missed_digests(
@@ -692,11 +724,14 @@ async def _amain(settings: Settings) -> None:
     async def _alert_operator_crash(exc: Exception) -> None:
         await alerter.alert("operator_polling_crashed", f"{type(exc).__name__}: {exc}")
 
-    loops = [
-        run_with_restart(
-            lambda: dispatcher.start_polling(bot), on_crash=_alert_polling_crash
-        )
-    ]
+    async def poll_primary():
+        nonlocal legacy_verified
+        legacy_verified = False
+        verify_legacy(messaging_runtime, await bot.get_me())
+        legacy_verified = True
+        await dispatcher.start_polling(bot)
+
+    loops = [run_with_restart(poll_primary, on_crash=_alert_polling_crash)]
     if operator_bot is not None and operator_dispatcher is not None:
         loops.append(
             run_with_restart(
@@ -708,6 +743,7 @@ async def _amain(settings: Settings) -> None:
     try:
         await asyncio.gather(*loops)
     finally:
+        await messaging_runtime.close()
         scheduler.shutdown(wait=False)
         await web_runner.cleanup()
         await recipe_http.aclose()

@@ -6,6 +6,7 @@ from app.callback_dispatch import CallbackResult
 from app.callbacks import CallbackContext, CallbackRegistry
 from app.client_set import PerUserClients
 from app.commands import parse_callback_request
+from app.messaging.adapters.legacy import action_context
 
 
 class _CallbackUser:
@@ -28,7 +29,7 @@ class _Callback:
 
 def _context():
     return CallbackContext(
-        callback=_Callback(),
+        callback=action_context(_Callback()),
         session_factory=lambda: None,  # type: ignore[arg-type,return-value]
         now_provider=lambda _tz: datetime(2026, 7, 17, tzinfo=UTC),
         clients=PerUserClients.for_tests(),

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import secrets
 from datetime import date, datetime
 from typing import Literal
+from uuid import uuid4
 
 from sqlalchemy import DateTime, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
@@ -57,8 +59,9 @@ class Household(SQLModel, table=True):
 
 
 class User(SQLModel, table=True):
-    telegram_id: int = Field(primary_key=True)
-    chat_id: int
+    id: int = Field(default_factory=lambda: secrets.randbits(62), primary_key=True)
+    telegram_id: int | None = Field(default=None, unique=True)
+    chat_id: int | None = None
     household_id: int = Field(foreign_key="household.id", index=True)
     tz: str = "America/Detroit"
     digest_hour: int = 8
@@ -69,6 +72,15 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(sa_type=DateTime(timezone=False))
     # Last date (user tz) a digest run completed — silent days count. None = never.
     last_digest_date: date | None = None
+    membership_active: bool = True
+    membership_generation: int = 0
+
+    def __init__(self, **data):
+        # Preserve the legacy constructor and historical actor references. New
+        # channel users have an independent ID and no fabricated Telegram ID.
+        if "id" not in data and data.get("telegram_id") is not None:
+            data["id"] = data["telegram_id"]
+        super().__init__(**data)
 
 
 class GroupBinding(SQLModel, table=True):
@@ -77,7 +89,7 @@ class GroupBinding(SQLModel, table=True):
 
     chat_id: int = Field(primary_key=True)
     household_id: int = Field(foreign_key="household.id", index=True)
-    bound_by_user_id: int = Field(foreign_key="user.telegram_id")
+    bound_by_user_id: int = Field(foreign_key="user.id")
     created_at: datetime = Field(sa_type=DateTime(timezone=False))
 
 
@@ -375,3 +387,141 @@ class ProviderModeOverride(SQLModel, table=True):
     mode: str  # "api" | "subscription"
     updated_at: datetime = Field(sa_type=DateTime(timezone=False))
     updated_by: int | None = None  # operator telegram_id, when known
+
+
+class MessagingConnection(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("provider", "external_account"),)
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
+    provider: str
+    label: str
+    settings_json: str = "{}"
+    secret_ciphertext: str | None = None
+    credential_source: str = "managed"
+    external_account: str | None = None
+    enabled: bool = False
+    state: str = "unconfigured"
+    revision: int = 1
+    inbound_verified: bool = False
+    last_checked_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=False))
+    last_error_code: str | None = None
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
+
+
+class ExternalIdentity(SQLModel, table=True):
+    connection_id: str = Field(foreign_key="messagingconnection.id", primary_key=True)
+    external_user_id: str = Field(primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+
+
+class ConversationBinding(SQLModel, table=True):
+    connection_id: str = Field(foreign_key="messagingconnection.id", primary_key=True)
+    external_conversation_id: str = Field(primary_key=True)
+    household_id: int = Field(foreign_key="household.id")
+    bound_by_user_id: int = Field(foreign_key="user.id")
+
+
+class NotificationDestination(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("connection_id", "external_conversation_id"),)
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    connection_id: str = Field(foreign_key="messagingconnection.id")
+    external_conversation_id: str
+    opted_in: bool = False
+    last_customer_message_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=False))
+
+
+class MessagingInbox(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("connection_id", "event_key"),)
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
+    connection_id: str = Field(foreign_key="messagingconnection.id")
+    event_key: str
+    event_json: str
+    status: str = Field(default="pending", index=True)
+    attempts: int = 0
+    lease_until: datetime | None = Field(default=None, sa_type=DateTime(timezone=False))
+    error_code: str | None = None
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
+
+
+class MessagingOutbox(SQLModel, table=True):
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
+    delivery_key: str = Field(unique=True)
+    connection_id: str = Field(foreign_key="messagingconnection.id")
+    user_id: int | None = Field(default=None, foreign_key="user.id")
+    household_id: int | None = None
+    membership_generation: int = 0
+    request_json: str
+    status: str = Field(default="pending", index=True)
+    attempts: int = 0
+    next_attempt_at: datetime | None = Field(default=None, sa_type=DateTime(timezone=False))
+    receipts_json: str = "[]"
+    error_code: str | None = None
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
+
+
+class MessagingAction(SQLModel, table=True):
+    token_hash: str = Field(primary_key=True)
+    connection_id: str = Field(foreign_key="messagingconnection.id")
+    conversation_id: str
+    thread_id: str | None = None
+    user_id: int = Field(foreign_key="user.id")
+    household_id: int
+    membership_generation: int
+    command: str
+    expires_at: datetime = Field(sa_type=DateTime(timezone=False))
+
+
+class IdentityLink(SQLModel, table=True):
+    token_hash: str = Field(primary_key=True)
+    user_id: int = Field(foreign_key="user.id")
+    origin_connection_id: str = Field(foreign_key="messagingconnection.id")
+    target_connection_id: str | None = None
+    target_external_user_id: str | None = None
+    expires_at: datetime = Field(sa_type=DateTime(timezone=False))
+    used: bool = False
+
+
+class DigestRun(SQLModel, table=True):
+    user_id: int = Field(foreign_key="user.id", primary_key=True)
+    local_date: date = Field(primary_key=True)
+    status: str
+    delivery_id: str | None = None
+
+
+class ConnectionAdminSession(SQLModel, table=True):
+    token_hash: str = Field(primary_key=True)
+    csrf_hash: str
+    authority_hash: str
+    expires_at: datetime = Field(sa_type=DateTime(timezone=False))
+
+
+class ConnectionOAuthState(SQLModel, table=True):
+    token_hash: str = Field(primary_key=True)
+    session_hash: str
+    connection_id: str = Field(foreign_key="messagingconnection.id")
+    revision: int
+    expires_at: datetime = Field(sa_type=DateTime(timezone=False))
+
+
+class MessagingOperation(SQLModel, table=True):
+    key: str = Field(primary_key=True)
+    result_json: str
+    created_at: datetime = Field(sa_type=DateTime(timezone=False))
+
+
+class MessagingAddress(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("connection_id", "conversation_id", "thread_id"),)
+    id: int = Field(default_factory=lambda: secrets.randbits(62), primary_key=True)
+    connection_id: str = Field(foreign_key="messagingconnection.id")
+    conversation_id: str
+    thread_id: str = ""
+    kind: str = "direct"
+
+
+class MessagingMessage(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("address_id", "external_message_id"),)
+    id: int = Field(default_factory=lambda: secrets.randbits(62), primary_key=True)
+    address_id: int = Field(foreign_key="messagingaddress.id", index=True)
+    external_message_id: str | None = None
+    outbox_id: str | None = Field(default=None, foreign_key="messagingoutbox.id")
+    text: str = ""

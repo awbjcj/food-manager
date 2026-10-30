@@ -209,8 +209,21 @@ def build_dispatcher(
     composer=None,
     payments=None,
     hosted_features_enabled: bool = True,
+    messaging_runtime=None,
 ) -> Dispatcher:
     dispatcher = Dispatcher()
+    if messaging_runtime is not None:
+        from app.models import MessagingConnection
+
+        async def connection_enabled(handler, event, data):
+            with session_factory() as session:
+                connection = session.get(MessagingConnection, "legacy-telegram")
+                enabled = connection is not None and connection.enabled
+            if enabled:
+                return await handler(event, data)
+            return None
+
+        dispatcher.update.outer_middleware(connection_enabled)
 
     async def downloader(file_id: str) -> bytes:
         telegram_file = await bot.get_file(file_id)
@@ -257,6 +270,16 @@ def build_dispatcher(
         return True
 
     deps["quick_access"] = quick_access
+
+    if messaging_runtime is not None:
+        from app.messaging.bootstrap import relay_legacy
+
+        async def connection_command(message):
+            await relay_legacy(messaging_runtime, message)
+
+        dispatcher.message.register(
+            connection_command, Command("link", "confirm_link", "reminders")
+        )
 
     for _name, _handler, _dep_names in _MESSAGE_COMMANDS:
         dispatcher.message.register(_bind(_handler, *_dep_names), Command(_name))
@@ -313,6 +336,9 @@ def build_dispatcher(
     callback_registry = build_callback_registry()
 
     async def on_callback(callback):
+        from app.messaging.adapters.legacy import TelegramMessenger, action_context
+
+        callback = action_context(callback)
         try:
             request = parse_callback_request(callback.data or "")
         except CommandError:
@@ -324,7 +350,7 @@ def build_dispatcher(
             now_provider=now_provider,
             clients=clients,
             translation_llm=translation_llm,
-            bot=bot,
+            bot=TelegramMessenger(bot=bot),
             spawn=asyncio.create_task,
             recipe_sources=recipe_sources,
         )

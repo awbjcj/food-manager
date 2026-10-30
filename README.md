@@ -12,6 +12,11 @@ receipts into structured items, plan meals, and remind everyone before food
 expires. It supports Anthropic, OpenAI, Gemini, and DeepSeek, shared households,
 Telegram Stars subscriptions, and English, Chinese, French, and Spanish.
 
+Self-hosted deployments can also connect Slack and WhatsApp through the
+deployment owner's [connection setup console](docs/messaging-connections.md).
+Connections share the same pantry workflows and household permissions. Telegram
+remains the entry point for the Mini App and Stars payments.
+
 ## Try the hosted bot
 
 Use the live service at [@foodie_manager_bot](https://t.me/foodie_manager_bot).

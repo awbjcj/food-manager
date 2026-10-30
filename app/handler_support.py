@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractContextManager, asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
@@ -11,6 +11,7 @@ from sqlmodel import Session
 from app.client_set import PerUserClients
 from app.group_service import get_group_binding
 from app.household_service import provision_solo_household, restore_household_for_user
+from app.messaging.identity_service import telegram_user
 from app.models import Household, User
 from app.providers import ALL_PROVIDERS, supports
 
@@ -24,7 +25,7 @@ OPEN_REGISTRATION: bool = False
 # explicitly sets it false before polling begins.
 MULTI_TENANT_ENABLED: bool = True
 
-SessionFactory = Callable[[], Session]
+SessionFactory = Callable[[], AbstractContextManager[Session]]
 NowProvider = Callable[[str], datetime]
 log = logging.getLogger(__name__)
 
@@ -53,11 +54,11 @@ def resolve_authorization(
     open_registration: bool = False,
     multi_tenant_enabled: bool = True,
 ) -> AuthStatus:
-    existing = session.get(User, telegram_user_id)
+    existing = telegram_user(session, telegram_user_id)
     if existing is not None:
         if not multi_tenant_enabled and telegram_user_id != allowed_user_id:
             return AuthStatus(False, None, is_bootstrap=False)
-        if existing.banned:
+        if existing.banned or not existing.membership_active:
             return AuthStatus(False, None, is_bootstrap=False)
         return AuthStatus(True, existing, is_bootstrap=False)
     if (
@@ -130,6 +131,9 @@ def authorize_and_get_user(
         role="owner",
         created_at=now,
     )
+    if session.get(User, user.id) is not None:
+        import secrets
+        user.id = secrets.randbits(62)
     household = provision_solo_household(session, user, created_at=now)
     return AuthDecision(True, user, True, "created", household=household)
 
@@ -183,6 +187,28 @@ def authorized_callback_user(session: Session, telegram_id: int) -> User | None:
 
 
 def authorized_callback_query_user(session: Session, callback) -> User | None:
+    from app.application.context import ActionContext
+    from app.messaging.identity_service import stamped_user
+
+    if isinstance(callback, ActionContext):
+        if callback.telegram_identity is None:
+            return stamped_user(session, callback.authorization)
+        status = resolve_authorization(session, allowed_user_id=ALLOWED_TELEGRAM_USER_ID,
+            telegram_user_id=callback.telegram_identity, open_registration=OPEN_REGISTRATION,
+            multi_tenant_enabled=MULTI_TENANT_ENABLED)
+        if not status.allowed or status.user is None:
+            return None
+        source = callback.source
+        decision = authorize_and_get_user(
+            session, allowed_user_id=ALLOWED_TELEGRAM_USER_ID,
+            telegram_user_id=callback.telegram_identity,
+            chat_id=source.conversation_key if source else callback.telegram_identity,
+            chat_type="private" if source is None or source.is_private else "group",
+            open_registration=OPEN_REGISTRATION, multi_tenant_enabled=MULTI_TENANT_ENABLED,
+        )
+        if decision.user is not None:
+            callback.actor_id = decision.user.id
+        return decision.user if decision.allowed else None
     message = getattr(callback, "message", None)
     chat = getattr(message, "chat", None)
     raw_chat_type = getattr(chat, "type", None)
@@ -211,6 +237,29 @@ async def guard(
     *,
     on_user_created: Callable[[User], None] = noop_user_created,
 ) -> User | None:
+    from app.application.context import CommandContext
+    from app.messaging.identity_service import stamped_user
+
+    if isinstance(msg, CommandContext):
+        if msg.telegram_identity is None:
+            user = stamped_user(session, msg.authorization)
+            if user is None:
+                await msg.reply("not authorized")
+            return user
+        decision = authorize_and_get_user(
+            session, allowed_user_id=ALLOWED_TELEGRAM_USER_ID,
+            telegram_user_id=msg.telegram_identity, chat_id=msg.conversation_key,
+            chat_type="private" if msg.is_private else "group",
+            multi_tenant_enabled=MULTI_TENANT_ENABLED,
+        )
+        if not decision.allowed:
+            await msg.reply(decision.reason)
+            return None
+        user = require_user(decision.user)
+        msg.actor_id = user.id
+        if decision.created:
+            on_user_created(user)
+        return user
     decision = authorize_and_get_user(
         session,
         allowed_user_id=ALLOWED_TELEGRAM_USER_ID,

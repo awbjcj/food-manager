@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from app import handler_support
+from app.application.context import keyboard as to_keyboard
 from app.callback_dispatch import (
     answer as dispatch_answer,
 )
@@ -14,10 +15,10 @@ from app.handlers.meta import (
     _help_topics_keyboard,
 )
 from app.i18n import t
+from app.messaging.adapters.legacy import action_entry
 from app.renderer import (
     CallbackButton,
 )
-from app.telegram_ui import to_aiogram_keyboard
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ log = logging.getLogger(__name__)
 _authorized_callback_user = handler_support.authorized_callback_query_user
 
 
+@action_entry
 async def handle_help_callback(cb, *, session_factory) -> None:
     with session_factory() as session:
         user = _authorized_callback_user(session, cb)
@@ -40,7 +42,7 @@ async def handle_help_callback(cb, *, session_factory) -> None:
         else tuple(item for item in HELP_TOPICS if item != "household")
     )
     if topic in visible_topics:
-        keyboard = to_aiogram_keyboard(
+        keyboard = to_keyboard(
             [[CallbackButton(text=t("btn.help.back", lang), callback_data="help:menu")]]
         )
         await edit_or_resend(cb, t(f"help.topic.{topic}", lang), keyboard)

@@ -11,7 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlmodel import Session, select
 
 from app import views
-from app.models import PantryItem, User
+from app.models import MessagingConnection, NotificationDestination, PantryItem, User
 from app.pantry_service import list_digest_due
 from app.pending_service import sweep_expired
 from app.renderer import build_digest_keyboard
@@ -53,8 +53,14 @@ async def send_digest_once(
         if user is None:
             log.warning("digest_skip_unknown_user", extra={"user_id": user_id})
             return False
-        if user.banned:
+        if user.banned or not user.membership_active or user.chat_id is None:
             log.info("digest_skip_banned_user", extra={"user_id": user_id})
+            return False
+        destinations = session.exec(select(NotificationDestination).where(NotificationDestination.user_id == user.id)).all()
+        if destinations and not any(d.opted_in and d.connection_id == "legacy-telegram" for d in destinations):
+            return False
+        connection = session.get(MessagingConnection, "legacy-telegram")
+        if connection is not None and not connection.enabled:
             return False
         today = today_provider(user.tz)
         payload = build_digest_payload(session, user_id=user_id, today=today)
@@ -176,9 +182,9 @@ async def catch_up_missed_digests(
             continue
         log.info(
             "digest_catch_up",
-            extra={"user_id": user.telegram_id, "today": str(now.date())},
+            extra={"user_id": user.id, "today": str(now.date())},
         )
-        await send(user.telegram_id)
+        await send(user.id)
         sent += 1
     return sent
 
@@ -189,7 +195,9 @@ def schedule_user_digest(
     *,
     send: Callable[..., Awaitable[None]],
 ) -> None:
-    job_id = f"digest:{user.telegram_id}"
+    if not user.membership_active or user.chat_id is None:
+        return
+    job_id = f"digest:{user.id}"
     if scheduler.get_job(job_id) is not None:
         try:
             scheduler.remove_job(job_id)
@@ -201,7 +209,7 @@ def schedule_user_digest(
         hour=user.digest_hour,
         minute=0,
         timezone=user.tz,
-        args=[user.telegram_id],
+        args=[user.id],
         id=job_id,
         replace_existing=True,
     )

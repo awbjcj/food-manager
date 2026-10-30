@@ -13,7 +13,8 @@ from sqlmodel import select
 from app.billing.entitlement import apply_refund, apply_topup, revoke_topup
 from app.billing.ledger import find_event, record_payment, revenue_stars
 from app.billing.plans import PlanTier, Sku, sku_for
-from app.models import Household, PaymentEvent, User
+from app.messaging.identity_service import telegram_user
+from app.models import Household, PaymentEvent
 from app.operator.auth import require_operator
 from app.operator.queries import describe_household
 from app.operator.tiers import (
@@ -238,7 +239,7 @@ async def _set_banned(msg, *, session_factory, banned: bool):
         )
         return
     with session_factory() as session:
-        user = session.get(User, telegram_id)
+        user = telegram_user(session, telegram_id)
         if user is None:
             await msg.answer(f"no user {telegram_id}")
             return

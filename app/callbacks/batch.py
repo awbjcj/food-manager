@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import cast
 
 from app import handler_support, views
+from app.application.context import keyboard as to_keyboard
 from app.batch_service import (
     BatchError,
     change_selection,
@@ -12,11 +13,12 @@ from app.batch_service import (
 from app.callback_dispatch import answer, edit_or_resend
 from app.commands import CommandError, parse_batch_callback
 from app.i18n import t
+from app.messaging.adapters.legacy import action_entry
 from app.pantry_service import PantrySort
 from app.renderer import CallbackButton
-from app.telegram_ui import to_aiogram_keyboard
 
 
+@action_entry
 async def handle_batch_callback(cb, *, session_factory, now_provider, translation_llm=None) -> None:
     try:
         request = parse_batch_callback(cb.data or "")
@@ -37,7 +39,7 @@ async def handle_batch_callback(cb, *, session_factory, now_provider, translatio
                 batch = create_batch(
                     session,
                     household_id=user.household_id,
-                    user_id=user.telegram_id,
+                    user_id=user.id,
                     sort_by=cast(PantrySort, request.value),
                     today=now.date(),
                     now=now,
@@ -48,7 +50,7 @@ async def handle_batch_callback(cb, *, session_factory, now_provider, translatio
                     session,
                     batch_id=request.batch_id,
                     household_id=user.household_id,
-                    user_id=user.telegram_id,
+                    user_id=user.id,
                     now=now,
                 )
                 try:
@@ -79,4 +81,4 @@ async def handle_batch_callback(cb, *, session_factory, now_provider, translatio
         except BatchError as exc:
             text = t(str(exc), user.lang)
             keyboard = [[CallbackButton(t("btn.back", user.lang), "item:list:all")]]
-        await edit_or_resend(cb, text, to_aiogram_keyboard(keyboard))
+        await edit_or_resend(cb, text, to_keyboard(keyboard))

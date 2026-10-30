@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from types import SimpleNamespace
 
 from app import handler_support, views
+from app.application.context import keyboard as to_keyboard
 from app.billing.meter import admit, commit
 from app.cache import get_cached
 from app.client_set import EMPTY_CLIENTS, PerUserClients
@@ -21,6 +21,7 @@ from app.handlers.plan import handle_plan
 from app.i18n import DEFAULT_LANG, t
 from app.ingest_service import DuplicateReceipt, ingest_photo
 from app.llm import LLMProviderNotConfigured
+from app.messaging.adapters.legacy import message_entry
 from app.models import Household, User
 from app.nl_intent import MAX_CONTEXT_NAMES, match_items
 from app.normalization import normalize
@@ -55,7 +56,6 @@ from app.shopping_service import (
     check_off_purchased_names,
     list_pending,
 )
-from app.telegram_ui import to_aiogram_keyboard
 from app.translation_service import translate_for_user
 
 log = logging.getLogger(__name__)
@@ -69,6 +69,7 @@ _render_llm_status = handler_support.render_llm_status
 _request = handler_support.request
 
 
+@message_entry
 async def handle_nl_message(
     msg,
     *,
@@ -102,7 +103,7 @@ async def handle_nl_message(
             now=now,
         )
         if not decision.allowed:
-            await msg.answer(t("nl.hint", user.lang))
+            await msg.reply(t("nl.hint", user.lang))
             return
         progress = await start_progress(msg, t("nl.thinking", user.lang))
         try:
@@ -130,7 +131,7 @@ async def handle_nl_message(
             log.warning(
                 "nl_intent_failed",
                 extra={
-                    "user_id": user.telegram_id,
+                    "user_id": user.id,
                     "error_class": type(exc).__name__,
                 },
             )
@@ -166,7 +167,7 @@ async def handle_nl_message(
             log.warning(
                 "nl_dispatch_failed",
                 extra={
-                    "user_id": user.telegram_id,
+                    "user_id": user.id,
                     "intent_kind": intent.kind,
                     "error_class": type(exc).__name__,
                 },
@@ -178,12 +179,12 @@ async def _apply_mark(session, *, user, item_id, action, today, clients):
     if action == "ate":
         return mark_eaten(
             session, household_id=user.household_id, item_id=item_id, today=today,
-            user_id=user.telegram_id,
+            user_id=user.id,
         )
     if action == "tossed":
         return mark_tossed(
             session, household_id=user.household_id, item_id=item_id, today=today,
-            user_id=user.telegram_id,
+            user_id=user.id,
         )
     if action == "snooze":
         return snooze_item(
@@ -199,15 +200,7 @@ async def _apply_mark(session, *, user, item_id, action, today, clients):
 
 
 def _nl_command_msg(msg, text: str):
-    return SimpleNamespace(
-        text=text,
-        from_user=msg.from_user,
-        chat=msg.chat,
-        answer=msg.answer,
-        photo=None,
-        reply_to_message=None,
-        bot=getattr(msg, "bot", None),
-    )
+    return msg.with_text(text)
 
 
 async def _run_cook_from_nl(
@@ -278,7 +271,7 @@ async def _dispatch_nl_intent(
                 user=user,
                 translation_llm=translation_llm,
             )
-            keyboard = to_aiogram_keyboard(picker.rows)
+            keyboard = to_keyboard(picker.rows)
             await finish_progress(progress, msg, t("nl.which_one", user.lang), keyboard)
             return
         item = matches[0]
@@ -322,7 +315,7 @@ async def _dispatch_nl_intent(
                 progress,
                 msg,
                 t("nl.which_one", user.lang),
-                to_aiogram_keyboard(picker.rows),
+                to_keyboard(picker.rows),
             )
             return
         now = now_provider(user.tz)
@@ -366,7 +359,7 @@ async def _dispatch_nl_intent(
                 session, items, user=user, translation_llm=translation_llm
             )
             keyboard = (
-                to_aiogram_keyboard(
+                to_keyboard(
                     build_shopping_keyboard(
                         [item.id for item in items if item.id], lang=user.lang
                     )
@@ -426,7 +419,7 @@ async def _dispatch_nl_intent(
             today=today,
             translation_llm=translation_llm,
         )
-        keyboard = to_aiogram_keyboard(
+        keyboard = to_keyboard(
             build_digest_keyboard(
                 view.rendered_items,
                 has_more=view.has_more,
@@ -449,7 +442,7 @@ async def _dispatch_nl_intent(
         view = await views.cooked_sheet(
             session, sheet, user=user, translation_llm=translation_llm
         )
-        keyboard = to_aiogram_keyboard(
+        keyboard = to_keyboard(
             build_cooked_sheet_keyboard(sheet, lang=user.lang, names=view.names)
         )
         await finish_progress(progress, msg, view.text, keyboard)
@@ -486,6 +479,7 @@ async def _dispatch_nl_intent(
     await finish_progress(progress, msg, t("nl.hint", user.lang))
 
 
+@message_entry
 async def handle_llm(
     msg,
     *,
@@ -504,14 +498,14 @@ async def handle_llm(
         try:
             provider = parse_llm_provider((msg.text or "").split()[1:])
         except CommandError as exc:
-            await msg.answer(str(exc))
+            await msg.reply(str(exc))
             return
         if provider is None:
-            await msg.answer(_render_llm_status(user, clients))
+            await msg.reply(_render_llm_status(user, clients))
             return
         available = _available_llm_providers(clients)
         if provider not in available:
-            await msg.answer(
+            await msg.reply(
                 f"LLM provider {provider!r} is not configured. "
                 f"Available: {', '.join(available) if available else 'none'}"
             )
@@ -519,12 +513,12 @@ async def handle_llm(
         user.llm_provider = provider
         session.add(user)
         session.commit()
-        await msg.answer(f"LLM provider set to {provider}")
+        await msg.reply(f"LLM provider set to {provider}")
 
 
 async def _render_preferences(session, user, profile, *, translation_llm, now):
     personal = build_preference_profile(
-        session, household_id=user.household_id, user_id=user.telegram_id,
+        session, household_id=user.household_id, user_id=user.id,
     )
     household = build_preference_profile(session, household_id=user.household_id)
     texts = [food.name for taste in (personal, household)
@@ -535,6 +529,7 @@ async def _render_preferences(session, user, profile, *, translation_llm, now):
     )
 
 
+@message_entry
 async def handle_prefs(
     msg,
     *,
@@ -553,12 +548,12 @@ async def handle_prefs(
         session, user = ctx.session, ctx.user
         household = session.get(Household, user.household_id)
         if household is None:
-            await msg.answer("couldn't load your household profile")
+            await msg.reply("couldn't load your household profile")
             return
         parts = (msg.text or "").split(maxsplit=1)
         now = now_provider(user.tz) if now_provider is not None else datetime.now(UTC)
         if len(parts) != 2 or not parts[1].strip():
-            await msg.answer(
+            await msg.reply(
                 await _render_preferences(session, user, profile_from_household(household),
                                           translation_llm=clients.translation, now=now)
             )
@@ -571,7 +566,7 @@ async def handle_prefs(
             now=now,
         )
         if not decision.allowed:
-            await msg.answer(
+            await msg.reply(
                 await _render_preferences(session, user, profile_from_household(household),
                                           translation_llm=None, now=now)
                 + "\n\n"
@@ -587,7 +582,7 @@ async def handle_prefs(
                 sentence=parts[1].strip(),
             )
         except LLMProviderNotConfigured:
-            await msg.answer(
+            await msg.reply(
                 f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
             )
             return
@@ -595,11 +590,11 @@ async def handle_prefs(
             log.warning(
                 "prefs_update_failed",
                 extra={
-                    "user_id": user.telegram_id,
+                    "user_id": user.id,
                     "error_class": type(exc).__name__,
                 },
             )
-            await msg.answer("couldn't update your profile - try simpler wording")
+            await msg.reply("couldn't update your profile - try simpler wording")
             return
         commit(
             session,
@@ -609,7 +604,7 @@ async def handle_prefs(
             cost_micros=cost,
             now=now,
         )
-        await msg.answer(
+        await msg.reply(
             t("prefs.updated", user.lang)
             + "\n\n"
             + await _render_preferences(session, user, profile,
@@ -623,7 +618,7 @@ def _help_topics_keyboard(lang: str):
         if handler_support.MULTI_TENANT_ENABLED
         else tuple(topic for topic in HELP_TOPICS if topic != "household")
     )
-    return to_aiogram_keyboard(
+    return to_keyboard(
         [
             [
                 CallbackButton(
@@ -635,6 +630,7 @@ def _help_topics_keyboard(lang: str):
     )
 
 
+@message_entry
 async def handle_help(
     msg,
     *,
@@ -649,11 +645,12 @@ async def handle_help(
         if ctx is None:
             return
         user = ctx.user
-    await msg.answer(
-        t("help.overview", user.lang), reply_markup=_help_topics_keyboard(user.lang)
+    await msg.reply(
+        t("help.overview", user.lang), actions=_help_topics_keyboard(user.lang)
     )
 
 
+@message_entry
 async def handle_photo(
     msg,
     *,
@@ -667,11 +664,11 @@ async def handle_photo(
     translation_llm=None,
     on_receipt_rendered=None,
 ) -> None:
-    if msg.chat.type != "private":
+    if not msg.is_private:
         with session_factory() as session:
-            existing = session.get(User, msg.from_user.id)
+            existing = session.get(User, msg.actor_id)
             lang = existing.lang if existing is not None else DEFAULT_LANG
-        await msg.answer(t("group.receipts_private", lang))
+        await msg.reply(t("group.receipts_private", lang))
         return
     async with _request(
         msg,
@@ -691,7 +688,7 @@ async def handle_photo(
             now=now,
         )
         if not decision.allowed:
-            await msg.answer(
+            await msg.reply(
                 t(
                     "quota.receipts_exhausted",
                     user.lang,
@@ -699,13 +696,13 @@ async def handle_photo(
                 )
             )
             return
-        if not msg.photo:
-            await msg.answer("send a photo of a receipt")
+        if not msg.images:
+            await msg.reply("send a photo of a receipt")
             return
-        file_id = msg.photo[-1].file_id
+        file_id = msg.images[-1]
         log.info(
             "receipt_ingest_started",
-            extra={"user_id": user.telegram_id, "photo_file_id": file_id},
+            extra={"user_id": user.id, "photo_file_id": file_id},
         )
         progress = await start_progress(msg, t("progress.reading_receipt", user.lang))
         try:
@@ -735,7 +732,7 @@ async def handle_photo(
             log.warning(
                 "receipt_ingest_failed",
                 extra={
-                    "user_id": user.telegram_id,
+                    "user_id": user.id,
                     "photo_file_id": file_id,
                     "error_class": type(exc).__name__,
                 },
@@ -757,7 +754,7 @@ async def handle_photo(
         log.info(
             "receipt_ingest_succeeded",
             extra={
-                "user_id": user.telegram_id,
+                "user_id": user.id,
                 "receipt_id": summary.receipt_id,
                 "inserted_food_count": summary.inserted_food_count,
             },
@@ -771,7 +768,7 @@ async def handle_photo(
             translation_llm=translation_llm,
         )
         keyboard = (
-            to_aiogram_keyboard(
+            to_keyboard(
                 build_undo_keyboard(receipt_id=summary.receipt_id, lang=user_lang)
             )
             if summary.receipt_id is not None and summary.inserted_food_count
@@ -795,8 +792,8 @@ async def handle_photo(
         and summary.receipt_id is not None
         and summary.uncached_item_ids
     ):
-        chat_id = msg.chat.id
-        message_id = sent.message_id
+        chat_id = msg.conversation_key
+        message_id = sent.message_key
         receipt_id = summary.receipt_id
         item_ids = list(summary.uncached_item_ids)
 
@@ -820,11 +817,11 @@ async def handle_photo(
                 names=view.names,
             )
             try:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=message_id,
+                await bot.update_text(
+                    conversation_key=chat_id,
+                    message_key=message_id,
                     text=text,
-                    reply_markup=to_aiogram_keyboard(
+                    actions=to_keyboard(
                         build_undo_keyboard(receipt_id=receipt_id, lang=user_lang)
                     ),
                 )

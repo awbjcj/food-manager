@@ -25,6 +25,7 @@ from app.handlers.plan import (
     _render_plan_message,
 )
 from app.i18n import t
+from app.messaging.adapters.legacy import action_entry
 from app.models import Household, MealPlan
 from app.plan_service import aggregate_shopping, swap_day
 from app.profile_service import profile_from_household
@@ -36,6 +37,7 @@ log = logging.getLogger(__name__)
 _authorized_callback_user = handler_support.authorized_callback_query_user
 
 
+@action_entry
 async def handle_plan_callback(
     cb,
     *,

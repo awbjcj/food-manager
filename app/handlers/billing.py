@@ -111,8 +111,9 @@ def _validate_checkout(
     sku = sku_for(sku_code)
     if sku is None or query.currency != "XTR" or query.total_amount != sku.stars:
         raise ValueError("invoice does not match SKU")
-    payer = session.get(User, payer_id if payer_id is not None else query.from_user.id)
-    if payer is None or payer.banned or payer.household_id != household_id:
+    from app.messaging.identity_service import telegram_user
+    payer = telegram_user(session, payer_id if payer_id is not None else query.from_user.id)
+    if payer is None or payer.banned or not payer.membership_active or payer.household_id != household_id:
         raise ValueError("payer is not eligible for household")
     if session.get(Household, household_id) is None:
         raise ValueError("unknown household")
@@ -166,6 +167,7 @@ async def handle_successful_payment(msg, *, session_factory, now_provider: NowPr
                     payment.subscription_expiration_date, UTC
                 )
             now = now_provider(payer.tz)
+            assert payer.telegram_id is not None  # checkout resolves a real Telegram payer
             if expires is not None and expires <= now:
                 raise ValueError("subscription expiration must be in the future")
             if not record_payment(

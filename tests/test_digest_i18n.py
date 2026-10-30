@@ -60,7 +60,7 @@ def _seed_zh_user(eng):
         )
         db.add(item)
         db.commit()
-        uid = user.telegram_id
+        uid = user.id
     return uid
 
 
@@ -100,7 +100,7 @@ def _seed_en_user(eng):
         )
         db.add(item)
         db.commit()
-        uid = user.telegram_id
+        uid = user.id
     return uid
 
 

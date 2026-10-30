@@ -11,6 +11,7 @@ from app.billing.entitlement import (
     get_or_create_usage,
     roll_period_if_due,
 )
+from app.messaging.identity_service import telegram_user
 from app.models import User
 
 
@@ -31,7 +32,7 @@ class HouseholdReport:
 def describe_household(
     session: Session, *, telegram_id: int, now: datetime
 ) -> HouseholdReport | None:
-    user = session.get(User, telegram_id)
+    user = telegram_user(session, telegram_id)
     if user is None:
         return None
     sub = get_or_create_subscription(session, household_id=user.household_id, now=now)
@@ -40,15 +41,15 @@ def describe_household(
         session, household_id=user.household_id, period_start=sub.period_start
     )
     members = session.exec(
-        select(User).where(User.household_id == user.household_id)
+        select(User).where(User.household_id == user.household_id, User.membership_active == True)
     ).all()
     report = HouseholdReport(
         user.household_id,
         effective_tier(sub),
         sub.status,
         sub.seat_cap,
-        tuple(sorted(member.telegram_id for member in members)),
-        tuple(sorted(member.telegram_id for member in members if member.banned)),
+        tuple(sorted(member.id for member in members)),
+        tuple(sorted(member.id for member in members if member.banned)),
         usage.receipts_used,
         usage.actions_used,
         usage.cost_micros_used,

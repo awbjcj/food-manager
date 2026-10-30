@@ -21,7 +21,7 @@ from app.billing.entitlement import (
 )
 from app.billing.ledger import record_payment
 from app.billing.plans import PERIOD_DAYS, TIERS, PlanTier, limits_for
-from app.models import User
+from app.messaging.identity_service import telegram_user
 
 
 class TierAdminError(ValueError):
@@ -66,7 +66,7 @@ def set_user_tier(
     if duration_days < 1:
         raise TierAdminError("duration_days must be positive")
 
-    user = session.get(User, telegram_id)
+    user = telegram_user(session, telegram_id)
     if user is None:
         raise UserNotFound(f"no user {telegram_id}")
     moment = utc_naive(now)

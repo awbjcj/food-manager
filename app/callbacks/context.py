@@ -3,45 +3,30 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine, Sequence
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any
 
-from aiogram import Bot
 from sqlmodel import Session
 
+from app.application.context import ActionContext, Messenger
 from app.client_set import PerUserClients
 from app.cook.recipe_source import RecipeSource
 from app.translation_llm import TranslationLLMClient
 
-
-class CallbackUser(Protocol):
-    @property
-    def id(self) -> int: ...
-
-
-class CallbackQuery(Protocol):
-    data: str | None
-    message: object | None
-
-    @property
-    def from_user(self) -> CallbackUser: ...
-
-    async def answer(self, text: str = "", *, show_alert: bool = False) -> object: ...
-
-
-SessionFactory = Callable[[], Session]
+SessionFactory = Callable[[], AbstractContextManager[Session]]
 NowProvider = Callable[[str], datetime]
 Spawn = Callable[[Coroutine[Any, Any, object]], object]
 
 
 @dataclass(frozen=True)
 class CallbackContext:
-    callback: CallbackQuery
+    callback: ActionContext
     session_factory: SessionFactory
     now_provider: NowProvider
     clients: PerUserClients
     translation_llm: TranslationLLMClient | None = None
-    bot: Bot | None = None
+    bot: Messenger | None = None
     spawn: Spawn | None = None
     recipe_sources: Sequence[RecipeSource] = field(default_factory=tuple)

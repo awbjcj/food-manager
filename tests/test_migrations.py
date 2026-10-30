@@ -46,7 +46,7 @@ def test_alembic_upgrade_creates_all_tables(tmp_path, monkeypatch):
         for row in cur.execute("PRAGMA foreign_key_list('groupbinding')").fetchall()
     }
     assert ("household_id", "household", "id") in group_foreign_keys
-    assert ("bound_by_user_id", "user", "telegram_id") in group_foreign_keys
+    assert ("bound_by_user_id", "user", "id") in group_foreign_keys
 
     indexes = {
         row[1]: bool(row[2])
@@ -116,10 +116,11 @@ def test_preference_migration_preserves_undated_history_and_reverses(tmp_path, m
     import sys
     from datetime import UTC, date, datetime
 
+    from sqlalchemy import text
     from sqlmodel import Session, select
 
     from app.db import make_engine
-    from app.models import Household, PantryItem, PantryOutcome, User
+    from app.models import Household, PantryItem, PantryOutcome
     from app.pantry_service import mark_eaten
 
     db_path = tmp_path / "preferences-migration.db"
@@ -136,7 +137,12 @@ def test_preference_migration_preserves_undated_history_and_reverses(tmp_path, m
         now = datetime(2026, 10, 1, tzinfo=UTC)
         db.add(Household(id=1, created_at=now))
         db.commit()
-        db.add(User(telegram_id=1, chat_id=1, household_id=1, created_at=now))
+        # Populate the historical schema, independently of today's User model.
+        db.execute(text("""INSERT INTO user
+            (telegram_id, chat_id, household_id, tz, digest_hour, llm_provider,
+             lang, role, banned, created_at)
+            VALUES (1, 1, 1, 'UTC', 8, 'anthropic', 'en', 'owner', 0, :now)"""),
+            {"now": now.replace(tzinfo=None)})
         for item_id, status in ((1, "eaten"), (2, "tossed"), (3, "active")):
             db.add(PantryItem(
                 id=item_id, household_id=1, raw_name="apple", normalized_name="apple",

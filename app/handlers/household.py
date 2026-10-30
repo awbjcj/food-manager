@@ -33,6 +33,7 @@ from app.invite_service import (
     redeem_invite,
     remove_member,
 )
+from app.messaging.identity_service import telegram_user
 from app.models import User
 
 _SessionFactory = Callable[[], Session]
@@ -65,7 +66,7 @@ async def _notify_household_join(
         if member.telegram_id == joiner_id:
             continue
         member_user = session.get(User, member.telegram_id)
-        if member_user is None:
+        if member_user is None or member_user.chat_id is None:
             continue
         try:
             await bot.send_message(
@@ -105,7 +106,7 @@ async def _try_redeem_invite(
         )
     except AlreadyMember:
         # The sender already has a row, so honour their language preference.
-        existing = session.get(User, msg.from_user.id)
+        existing = telegram_user(session, msg.from_user.id)
         lang = existing.lang if existing is not None else DEFAULT_LANG
         await msg.answer(t("join.already_member", lang))
         return True
@@ -119,7 +120,7 @@ async def _try_redeem_invite(
     on_user_created(result.user)
     await msg.answer(t("join.success", result.user.lang))
     await _notify_household_join(
-        bot, session, household_id=result.household_id, joiner_id=msg.from_user.id
+        bot, session, household_id=result.household_id, joiner_id=result.user.id
     )
     return True
 
@@ -135,7 +136,7 @@ async def handle_start(
 ) -> None:
     with session_factory() as session:
         token = _start_token(msg.text)
-        existing_user = session.get(User, msg.from_user.id)
+        existing_user = telegram_user(session, msg.from_user.id)
         if (
             token is not None
             and existing_user is not None
@@ -147,7 +148,7 @@ async def handle_start(
         # existing members ignore any token and get the normal start message
         # (unlike /join, which tells an existing member they're already in a
         # household — a deep-link re-tap should just be a friendly no-op).
-        if token is not None and existing_user is None and hosted_features_enabled:
+        if token is not None and (existing_user is None or not existing_user.membership_active) and hosted_features_enabled:
             await _try_redeem_invite(
                 msg, session, token=token, on_user_created=on_user_created, bot=bot
             )
@@ -209,7 +210,7 @@ async def handle_invite(
             result = create_invite(
                 session,
                 household_id=user.household_id,
-                created_by=user.telegram_id,
+                created_by=user.id,
                 now=datetime.now(UTC),
                 max_uses=max_uses,
             )
@@ -277,7 +278,7 @@ async def handle_bind(
             session,
             chat_id=msg.chat.id,
             household_id=user.household_id,
-            bound_by_user_id=user.telegram_id,
+            bound_by_user_id=user.id,
             created_at=datetime.now(UTC),
         )
         await msg.answer(t("group.bind.success", user.lang, id=msg.chat.id))
@@ -307,7 +308,7 @@ async def handle_household(
             role_label = t(f"household.role.{member.role}", user.lang)
             you = (
                 t("household.you", user.lang)
-                if member.telegram_id == user.telegram_id
+                if member.telegram_id == user.id
                 else ""
             )
             lines.append(f"  {member.telegram_id} - {role_label}{you}")
@@ -333,10 +334,9 @@ async def handle_leave(
         if ctx is None:
             return
         session, user = ctx.session, ctx.user
-        # Capture before leave_household deletes the row — `user` is detached
-        # after the delete+commit, so reading user.* below would raise.
+        # Retain the internal identity while revoking household membership.
         lang = user.lang
-        telegram_id = user.telegram_id
+        telegram_id = user.id
         try:
             leave_household(session, telegram_user_id=telegram_id)
         except OwnerCannotLeave:
@@ -375,7 +375,7 @@ async def handle_remove(
             removed = remove_member(
                 session,
                 household_id=user.household_id,
-                actor_id=user.telegram_id,
+                actor_id=user.id,
                 target_id=target_id,
             )
         except NotOwner:

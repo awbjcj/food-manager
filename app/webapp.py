@@ -17,6 +17,7 @@ from app.billing.plans import SKUS, TIERS, sku_for
 from app.client_set import EMPTY_CLIENTS
 from app.handler_support import resolve_authorization
 from app.i18n import LANGS, t
+from app.messaging.identity_service import telegram_user
 from app.miniapp_workspace import COMMANDS, MAX_IMAGE_BYTES, WorkspaceRuntime
 from app.models import Household, Subscription, User
 from app.webapp_auth import MiniAppAuthError, MiniAppIdentity, validate_init_data
@@ -68,7 +69,7 @@ def _hosted_account_payload(
     members = session.exec(
         select(func.count())
         .select_from(User)
-        .where(User.household_id == user.household_id)
+        .where(User.household_id == user.household_id, User.membership_active == True)
     ).one()
     return {
         "household": {
@@ -146,9 +147,11 @@ class MiniAppApi:
     def workspace_identity(self, request):
         identity = self.identity(request)
         with self.session_factory() as session:
-            user = session.get(User, identity.telegram_id)
-            if user is not None:
+            user = telegram_user(session, identity.telegram_id)
+            if user is not None and (user.membership_active or user.banned):
                 user = self.authorized_user(session, identity)
+            elif user is not None:
+                user = None
             elif (
                 not self.hosted_features_enabled
                 and identity.telegram_id != self.allowed_telegram_user_id
@@ -398,6 +401,7 @@ def build_web_app(
     recipe_sources=(),
     intent_agent=None,
     composer=None,
+    messaging_runtime=None,
 ) -> web.Application:
     workspace = WorkspaceRuntime(
         session_factory=session_factory,
@@ -428,6 +432,9 @@ def build_web_app(
         middlewares=[error_middleware], client_max_size=MAX_IMAGE_BYTES + 1
     )
     app.on_cleanup.append(workspace.close)
+    if messaging_runtime is not None:
+        from app.connection_admin import register_connection_routes
+        register_connection_routes(app, messaging_runtime)
 
     async def health(_request: web.Request) -> web.Response:
         return web.json_response({"ok": True})

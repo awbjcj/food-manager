@@ -9,6 +9,7 @@ place — the same edit-or-resend rule as `callback_dispatch` — or
 /add proposal cards). Everything here is best-effort: a failed ack, edit, or
 delete must never break the underlying command.
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,17 +21,20 @@ log = logging.getLogger(__name__)
 
 async def start_progress(msg, text: str):
     """Send the ack (plus a best-effort "typing" action); None if sending fails."""
-    bot = getattr(msg, "bot", None)
+    from app.messaging.adapters.legacy import command_context
+
+    msg = command_context(msg)
+    bot = msg.transport
     if bot is not None:
         try:
-            await bot.send_chat_action(chat_id=msg.chat.id, action="typing")
+            await bot.typing(conversation_key=msg.conversation_key)
         except Exception as exc:  # noqa: BLE001 - cosmetic only
             log.info(
                 "progress_chat_action_failed",
                 extra={"error_class": type(exc).__name__},
             )
     try:
-        return await msg.answer(text)
+        return await msg.reply(text)
     except Exception as exc:  # noqa: BLE001 - the ack is best-effort
         log.warning("progress_start_failed", extra={"error_class": type(exc).__name__})
         return None
@@ -42,9 +46,16 @@ async def finish_progress(progress, msg, text: str, keyboard=None):
     Returns the message object carrying the final text so callers that later
     edit the reply (post-ingest refine) keep a valid message_id.
     """
+    from app.application.context import CommandContext
+    from app.messaging.adapters.legacy import TelegramMessenger, command_context
+
+    msg = command_context(msg)
+    if progress is not None and not isinstance(progress, CommandContext):
+        assert isinstance(msg.transport, TelegramMessenger)
+        progress = msg.transport.context(progress)
     if progress is not None:
         try:
-            await progress.edit_text(text, reply_markup=keyboard)
+            await progress.edit(text, actions=keyboard)
             return progress
         except Exception as exc:  # noqa: BLE001 - classified below
             if is_not_modified(exc):
@@ -52,7 +63,7 @@ async def finish_progress(progress, msg, text: str, keyboard=None):
             log.info(
                 "progress_edit_fallback", extra={"error_class": type(exc).__name__}
             )
-    return await msg.answer(text, reply_markup=keyboard)
+    return await msg.reply(text, actions=keyboard)
 
 
 async def clear_progress(progress) -> None:
@@ -60,6 +71,11 @@ async def clear_progress(progress) -> None:
     if progress is None:
         return
     try:
-        await progress.delete()
+        from app.application.context import CommandContext
+
+        if isinstance(progress, CommandContext):
+            await progress.remove()
+        else:
+            await progress.delete()
     except Exception as exc:  # noqa: BLE001 - cosmetic only
         log.info("progress_clear_failed", extra={"error_class": type(exc).__name__})

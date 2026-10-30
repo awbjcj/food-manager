@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 from datetime import date
 
-from aiogram.types import ForceReply
-
 from app import handler_support, views
+from app.application.context import ReplyPrompt
+from app.application.context import keyboard as to_keyboard
 from app.callback_dispatch import (
     answer as dispatch_answer,
 )
@@ -17,6 +17,7 @@ from app.commands import (
     parse_item_callback,
 )
 from app.i18n import t
+from app.messaging.adapters.legacy import action_entry
 from app.models import PantryItem
 from app.pantry_service import (
     ListFilter,
@@ -34,7 +35,6 @@ from app.renderer import (
     build_remove_confirm_keyboard,
 )
 from app.storage_state import shelf_life_origin
-from app.telegram_ui import to_aiogram_keyboard
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ log = logging.getLogger(__name__)
 _authorized_callback_user = handler_support.authorized_callback_query_user
 
 
+@action_entry
 async def handle_item_callback(
     cb, *, session_factory, now_provider, translation_llm=None
 ) -> None:
@@ -126,7 +127,7 @@ async def handle_item_callback(
             await edit_or_resend(
                 cb,
                 view.text,
-                to_aiogram_keyboard(
+                to_keyboard(
                     build_correct_menu_keyboard(
                         item_id, lang=user.lang,
                         back_to=action.back_to, sort_by=action.sort_by,
@@ -158,7 +159,7 @@ async def handle_item_callback(
                 name=display_name,
             )
             try:
-                await cb.message.answer(prompt, reply_markup=ForceReply())
+                await cb.source.reply(prompt, actions=ReplyPrompt())
             except Exception as exc:  # noqa: BLE001 - prompt send is best-effort
                 log.warning(
                     "correct_prompt_failed",
@@ -173,7 +174,7 @@ async def handle_item_callback(
             await edit_or_resend(
                 cb,
                 view.text,
-                to_aiogram_keyboard(
+                to_keyboard(
                     build_item_card_keyboard(
                         item,
                         lang=user.lang,
@@ -188,7 +189,7 @@ async def handle_item_callback(
             await edit_or_resend(
                 cb,
                 view.text,
-                to_aiogram_keyboard(
+                to_keyboard(
                     build_correct_menu_keyboard(
                         item_id, lang=user.lang,
                         back_to=action.back_to, sort_by=action.sort_by,
@@ -201,7 +202,7 @@ async def handle_item_callback(
             await edit_or_resend(
                 cb,
                 view.text,
-                to_aiogram_keyboard(
+                to_keyboard(
                     build_remove_confirm_keyboard(
                         item_id, lang=user.lang,
                         back_to=action.back_to, sort_by=action.sort_by,
@@ -228,7 +229,7 @@ async def _refresh_digest_message(
             session, remaining, lang=lang, today=today, household_id=household_id,
             cap=None if expanded else 10, page=page,
         )
-        keyboard = to_aiogram_keyboard(
+        keyboard = to_keyboard(
             build_digest_keyboard(
                 view.rendered_items,
                 has_more=view.has_more,
@@ -269,7 +270,7 @@ async def _refresh_pantry_message(
             session, remaining, lang=lang, today=today, household_id=household_id,
             cap=None, sort_by=sort_by, page=page,
         )
-        keyboard = to_aiogram_keyboard(
+        keyboard = to_keyboard(
             build_digest_keyboard(
                 view.rendered_items,
                 has_more=False,

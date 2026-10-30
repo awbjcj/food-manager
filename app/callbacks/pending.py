@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime
 
 from sqlmodel import Session
 
+from app.application.context import keyboard as to_keyboard
 from app.callback_dispatch import edit_or_resend
 from app.correction_service import (
     add_payload_from_json,
@@ -27,7 +28,6 @@ from app.renderer import (
     render_applied_correction,
     render_terminal_state,
 )
-from app.telegram_ui import to_aiogram_keyboard
 
 log = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ async def _handle_pending_callback(
 ) -> None:
     pending = load_pending(session, household_id=household_id, pending_id=pending_id)
     if pending is None:
-        await cb.answer(t("toast.not_found", lang))
+        await cb.ack(t("toast.not_found", lang))
         return
 
     now = utc_naive(datetime.now(UTC))
@@ -55,14 +55,14 @@ async def _handle_pending_callback(
             session.add(pending)
             session.commit()
         await edit_or_resend(cb, render_terminal_state(terminal, lang=lang))
-        await cb.answer(t("toast.already_status", lang, status=terminal))
+        await cb.ack(t("toast.already_status", lang, status=terminal))
         return
 
     if verb == "cancel":
         mark_cancelled(session, pending=pending)
         session.commit()
         await edit_or_resend(cb, render_terminal_state("cancelled", lang=lang))
-        await cb.answer(t("toast.cancelled", lang))
+        await cb.ack(t("toast.cancelled", lang))
         return
 
     if pending.action_type == "correct":
@@ -73,13 +73,13 @@ async def _handle_pending_callback(
             mark_cancelled(session, pending=pending)
             session.commit()
             await edit_or_resend(cb, t("pending.item_gone_body", lang))
-            await cb.answer(t("toast.item_gone", lang))
+            await cb.ack(t("toast.item_gone", lang))
             return
         if item.status != "active":
             mark_cancelled(session, pending=pending)
             session.commit()
             await edit_or_resend(cb, t("pending.item_inactive_body", lang))
-            await cb.answer(t("toast.item_inactive", lang))
+            await cb.ack(t("toast.item_inactive", lang))
             return
         assert item.id is not None
         expire_for_item(
@@ -97,19 +97,19 @@ async def _handle_pending_callback(
         log.info(
             "item_action_applied",
             extra={
-                "user_id": cb.from_user.id,
+                "user_id": cb.actor_id,
                 "item_id": item.id,
                 "action": "correct",
             },
         )
-        await cb.answer(t("toast.applied", lang))
+        await cb.ack(t("toast.applied", lang))
         return
 
     if pending.action_type != "add":
         log.warning(
             "unknown_pending_action_type", extra={"action_type": pending.action_type}
         )
-        await cb.answer(t("toast.unknown_action", lang))
+        await cb.ack(t("toast.unknown_action", lang))
         return
     payload = add_payload_from_json(pending.proposed_json)
     new_id = apply_add(session, household_id=household_id, payload=payload, today=today)
@@ -118,10 +118,10 @@ async def _handle_pending_callback(
     await edit_or_resend(
         cb,
         render_applied_add(item_id=new_id, payload=payload, lang=lang),
-        to_aiogram_keyboard(build_undo_add_keyboard(item_id=new_id, lang=lang)),
+        to_keyboard(build_undo_add_keyboard(item_id=new_id, lang=lang)),
     )
     log.info(
         "item_action_applied",
-        extra={"user_id": cb.from_user.id, "item_id": new_id, "action": "add"},
+        extra={"user_id": cb.actor_id, "item_id": new_id, "action": "add"},
     )
-    await cb.answer(t("toast.added", lang))
+    await cb.ack(t("toast.added", lang))

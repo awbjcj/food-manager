@@ -11,15 +11,16 @@ import logging
 from sqlmodel import select
 
 from app import handler_support, views
+from app.application.context import keyboard as to_keyboard
 from app.callback_dispatch import answer as dispatch_answer
 from app.callback_dispatch import edit_or_resend
 from app.commands import CommandError, parse_callback
 from app.cook import load_cook_session
 from app.cook.cooked_service import confirm, open_cook_sheet, open_sheet, toggle
 from app.i18n import t
+from app.messaging.adapters.legacy import action_entry
 from app.models import MealPlan, MealPlanEntry
 from app.renderer import build_cooked_sheet_keyboard
-from app.telegram_ui import to_aiogram_keyboard
 
 log = logging.getLogger(__name__)
 
@@ -38,12 +39,13 @@ async def _show(cb, session, *, user, sheet, translation_llm) -> None:
     view = await views.cooked_sheet(
         session, sheet, user=user, translation_llm=translation_llm
     )
-    keyboard = to_aiogram_keyboard(
+    keyboard = to_keyboard(
         build_cooked_sheet_keyboard(sheet, lang=user.lang, names=view.names)
     )
     await edit_or_resend(cb, view.text, keyboard)
 
 
+@action_entry
 async def handle_cooked_callback(
     cb, *, session_factory, now_provider, translation_llm=None
 ) -> None:
@@ -143,7 +145,7 @@ async def handle_cooked_callback(
             today=today,
             now=now,
             consume=action.verb == "cooked_confirm",
-            user_id=user.telegram_id,
+            user_id=user.id,
         )
         if result is None:
             await edit_or_resend(cb, t("plan.expired", user.lang))

@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from datetime import date
 
+from app.messaging.messages import MESSAGES as _MESSAGING_MESSAGES
+
 log = logging.getLogger(__name__)
 
 LANGS: tuple[str, ...] = ("en", "zh", "fr", "es")
@@ -2170,6 +2172,9 @@ _WEEKDAY_ABBR: dict[str, tuple[str, ...]] = {
 
 def _months(lang: str) -> tuple[str, ...]:
     return _MONTH_ABBR.get(lang, _MONTH_ABBR["en"])
+
+
+MESSAGES.update(_MESSAGING_MESSAGES)
 
 
 def weekday_abbr(value: date, *, lang: str) -> str:

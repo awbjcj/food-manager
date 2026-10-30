@@ -5,11 +5,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
-from aiogram.types import BufferedInputFile
 from sqlmodel import Session, select
 
 import app.plan_service as plan_service_mod
 from app import handler_support, views
+from app.application.context import Document
+from app.application.context import keyboard as to_keyboard
 from app.billing.meter import admit, commit
 from app.calendar_export import build_plan_calendar
 from app.client_set import EMPTY_CLIENTS, PerUserClients
@@ -22,6 +23,7 @@ from app.cook import (
 )
 from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
 from app.i18n import t
+from app.messaging.adapters.legacy import message_entry
 from app.models import Household, MealPlan, MealPlanEntry, User
 from app.plan_service import NotEnoughItemsToPlan, build_plan
 from app.profile_service import profile_from_household
@@ -29,7 +31,6 @@ from app.progress import finish_progress, start_progress
 from app.renderer import (
     build_plan_keyboard,
 )
-from app.telegram_ui import to_aiogram_keyboard
 from app.week_composer import DaySpec
 
 _SessionFactory = Callable[[], Session]
@@ -67,6 +68,7 @@ def _plan_source(
     )
 
 
+@message_entry
 async def handle_plan(
     msg,
     *,
@@ -88,16 +90,16 @@ async def handle_plan(
             return
         session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         if composer is None:
-            await msg.answer("plan is not configured yet")
+            await msg.reply("plan is not configured yet")
             return
         try:
             days = parse_plan_arg((msg.text or "").split()[1:])
         except CommandError as exc:
-            await msg.answer(str(exc))
+            await msg.reply(str(exc))
             return
         household = session.get(Household, user.household_id)
         if household is None:
-            await msg.answer("couldn't load your household profile")
+            await msg.reply("couldn't load your household profile")
             return
         profile = profile_from_household(household)
         now = now_provider(user.tz)
@@ -127,7 +129,7 @@ async def handle_plan(
             else ChainedRecipeSource(list(recipe_sources))
         )
         if not decision.allowed:
-            await msg.answer(t("quota.degraded.plan", user.lang))
+            await msg.reply(t("quota.degraded.plan", user.lang))
         try:
             plan, entries = await build_plan(
                 session,
@@ -137,7 +139,7 @@ async def handle_plan(
                 composer=selected_composer,
                 source=source,
                 today=today,
-                chat_id=msg.chat.id,
+                chat_id=msg.conversation_key,
                 cost_ceiling_micros=plan_service_mod.PLAN_COST_CEILING_MICROS,
                 created_at=datetime.now(UTC),
             )
@@ -147,7 +149,7 @@ async def handle_plan(
         except Exception as exc:  # noqa: BLE001 - /plan must never crash the bot
             log.warning(
                 "plan_build_failed",
-                extra={"user_id": user.telegram_id, "error_class": type(exc).__name__},
+                extra={"user_id": user.id, "error_class": type(exc).__name__},
             )
             await finish_progress(
                 progress, msg, "couldn't build a plan right now - try /plan again"
@@ -180,7 +182,7 @@ async def handle_plan(
         if had_active:
             text = f"{text}\n{t('plan.superseded', user.lang)}"
         assert plan.id is not None
-        keyboard = to_aiogram_keyboard(
+        keyboard = to_keyboard(
             build_plan_keyboard(
                 plan.id,
                 [(entry.day_index, entry.date) for entry in entries],
@@ -188,11 +190,12 @@ async def handle_plan(
             )
         )
         sent = await finish_progress(progress, msg, text, keyboard)
-        plan.message_id = sent.message_id
+        plan.message_id = sent.message_key
         session.add(plan)
         session.commit()
 
 
+@message_entry
 async def handle_plan_current(
     msg,
     *,
@@ -219,7 +222,7 @@ async def handle_plan_current(
             .order_by(MealPlan.created_at.desc())  # type: ignore[union-attr]
         ).first()
         if plan is None:
-            await msg.answer(t("plan.none_active", user.lang))
+            await msg.reply(t("plan.none_active", user.lang))
             return
         text, keyboard = await _render_plan_message(
             session,
@@ -227,9 +230,10 @@ async def handle_plan_current(
             lang=user.lang,
             translation_llm=translation_llm,
         )
-        await msg.answer(text, reply_markup=keyboard)
+        await msg.reply(text, actions=keyboard)
 
 
+@message_entry
 async def handle_calendar(
     msg,
     *,
@@ -253,7 +257,7 @@ async def handle_calendar(
             .order_by(MealPlan.created_at.desc())  # type: ignore[union-attr]
         ).first()
         if plan is None:
-            await msg.answer(t("plan.none_active", ctx.user.lang))
+            await msg.reply(t("plan.none_active", ctx.user.lang))
             return
         assert plan.id is not None
         entries = list(
@@ -263,11 +267,11 @@ async def handle_calendar(
                 .order_by(MealPlanEntry.day_index)  # type: ignore[arg-type]
             ).all()
         )
-        document = BufferedInputFile(
+        document = Document(
             build_plan_calendar(plan, entries).encode("utf-8"),
             filename=f"meal-plan-{plan.start_date.isoformat()}.ics",
         )
-        await msg.answer_document(
+        await msg.reply_document(
             document, caption=t("calendar.exported", ctx.user.lang)
         )
 
@@ -297,7 +301,7 @@ async def _render_plan_message(session, *, plan, lang, translation_llm):
         translation_llm=translation_llm,
     )
     text = view.text
-    keyboard = to_aiogram_keyboard(
+    keyboard = to_keyboard(
         build_plan_keyboard(
             plan.id, [(entry.day_index, entry.date) for entry in entries], lang=lang
         )

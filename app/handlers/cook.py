@@ -3,11 +3,13 @@ from __future__ import annotations
 import json as _json
 import logging
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from datetime import UTC, datetime
 
 from sqlmodel import Session
 
 from app import handler_support, views
+from app.application.context import keyboard as to_keyboard
 from app.billing.meter import admit, commit
 from app.client_set import PerUserClients
 from app.cook import (
@@ -31,6 +33,7 @@ from app.cook.options import (
 )
 from app.cook.recipe_source import ChainedRecipeSource, LlmRecipeSource
 from app.i18n import t
+from app.messaging.adapters.legacy import message_entry
 from app.models import Household, User
 from app.profile_service import profile_from_household
 from app.renderer import (
@@ -38,9 +41,8 @@ from app.renderer import (
     build_cook_result_keyboard,
     build_cook_round_keyboard,
 )
-from app.telegram_ui import to_aiogram_keyboard
 
-_SessionFactory = Callable[[], Session]
+_SessionFactory = Callable[[], AbstractContextManager[Session]]
 NowProvider = Callable[[str], datetime]
 log = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ _noop_user_created = handler_support.noop_user_created
 _request = handler_support.request
 
 
+@message_entry
 async def handle_cook(
     msg,
     *,
@@ -68,19 +71,20 @@ async def handle_cook(
         cook = create_cook_session(
             session,
             household_id=user.household_id,
-            chat_id=msg.chat.id,
+            chat_id=msg.conversation_key,
             now=now.astimezone(UTC),
         )
         assert cook.id is not None
-        keyboard = to_aiogram_keyboard(
+        keyboard = to_keyboard(
             build_cook_round_keyboard(
                 cook.id, localized_meal_types(user.lang), round_name="meal"
             )
         )
-        sent = await msg.answer(t("cook.what_cooking", user.lang), reply_markup=keyboard)
-        set_cook_message_id(session, cook=cook, message_id=sent.message_id)
+        sent = await msg.reply(t("cook.what_cooking", user.lang), actions=keyboard)
+        set_cook_message_id(session, cook=cook, message_id=sent.message_key)
 
 
+@message_entry
 async def handle_history(
     msg,
     *,
@@ -108,7 +112,7 @@ async def handle_history(
             today=ctx.today,
             translation_llm=translation_llm,
         )
-        await msg.answer(view.text)
+        await msg.reply(view.text)
 
 
 def _cuisine_options(household: Household) -> list[str]:
@@ -182,12 +186,15 @@ async def _safe_edit_bot(
 ) -> None:
     if bot is None or message_id is None:
         return
+    if not callable(getattr(type(bot), "update_text", None)):
+        from app.messaging.adapters.legacy import TelegramMessenger
+        bot = TelegramMessenger(bot=bot)
     try:
-        await bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
+        await bot.update_text(
+            conversation_key=chat_id,
+            message_key=message_id,
             text=text,
-            reply_markup=keyboard,
+            actions=keyboard,
         )
     except Exception as exc:  # noqa: BLE001 - background edit is best-effort
         log.warning("cook_edit_failed", extra={"error_class": type(exc).__name__})
@@ -306,7 +313,7 @@ async def run_cook_and_render(
         )
         text = view.text
         keyboard = (
-            to_aiogram_keyboard(
+            to_keyboard(
                 build_cook_result_keyboard(
                     cook_id,
                     has_alternatives=len(cards) > 1,

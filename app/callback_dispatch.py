@@ -48,7 +48,8 @@ def is_not_modified(exc: Exception) -> bool:
 async def answer(cb, text: str = "", *, show_alert: bool = False) -> None:
     """Acknowledge the callback query; never let a failed ack raise."""
     try:
-        await cb.answer(text, show_alert=show_alert)
+        from app.messaging.adapters.legacy import action_context
+        await action_context(cb).ack(text, alert=show_alert)
     except Exception as exc:  # noqa: BLE001 - acking is best-effort
         log.warning("callback_answer_failed", extra={"error_class": type(exc).__name__})
 
@@ -59,11 +60,12 @@ async def edit_or_resend(cb, text: str, keyboard=None) -> bool:
     Treats an identical-content edit as success and a genuine edit failure as a
     signal to resend, so tapping a button always lands the user on the new view.
     """
-    message = getattr(cb, "message", None)
+    from app.messaging.adapters.legacy import action_context
+    message = action_context(cb).source
     if message is None:
         return False
     try:
-        await message.edit_text(text, reply_markup=keyboard)
+        await message.edit(text, actions=keyboard)
         return True
     except Exception as exc:  # noqa: BLE001 - classified below
         if is_not_modified(exc):
@@ -73,7 +75,7 @@ async def edit_or_resend(cb, text: str, keyboard=None) -> bool:
             extra={"error_class": type(exc).__name__},
         )
     try:
-        await message.answer(text, reply_markup=keyboard)
+        await message.reply(text, actions=keyboard)
         return True
     except Exception as exc:  # noqa: BLE001 - last resort
         log.warning("callback_resend_failed", extra={"error_class": type(exc).__name__})

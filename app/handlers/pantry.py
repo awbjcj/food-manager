@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlmodel import Session
 
 from app import handler_support, views
-from app.batch_service import create_batch
+from app.application.context import keyboard as to_keyboard
 from app.billing.meter import admit, commit
 from app.cache import get_cached
 from app.client_set import PerUserClients
@@ -16,7 +16,6 @@ from app.commands import (
     parse_correct_reply_marker,
     parse_item_id_arg,
     parse_list_filter,
-    parse_pantry_arg,
     parse_snooze_args,
 )
 from app.correction_service import (
@@ -30,15 +29,13 @@ from app.correction_service import (
 )
 from app.i18n import t
 from app.llm import LLMProviderNotConfigured
+from app.messaging.adapters.legacy import message_entry
 from app.models import PantryItem, User
 from app.normalization import normalize
 from app.pantry_service import (
-    ListFilter,
     NotOwnerOrMissing,
-    PantrySort,
     compute_stats,
     list_active,
-    list_digest_due,
     mark_eaten,
     mark_removed,
     mark_tossed,
@@ -52,14 +49,11 @@ from app.pending_service import (
 from app.progress import clear_progress, finish_progress, start_progress
 from app.renderer import (
     build_apply_cancel_keyboard,
-    build_digest_keyboard,
-    build_item_card_keyboard,
     render_add_diff,
     render_correction_diff,
     render_stats,
 )
 from app.shelf_life_defaults import lookup_default
-from app.telegram_ui import to_aiogram_keyboard
 
 _SessionFactory = Callable[[], Session]
 NowProvider = Callable[[str], datetime]
@@ -71,6 +65,7 @@ _require_today = handler_support.require_today
 _request = handler_support.request
 
 
+@message_entry
 async def handle_list(
     msg,
     *,
@@ -91,7 +86,7 @@ async def handle_list(
         try:
             list_filter = parse_list_filter(list((msg.text or "").split()[1:]))
         except CommandError as exc:
-            await msg.answer(str(exc))
+            await msg.reply(str(exc))
             return
         items = list_active(
             session, household_id=user.household_id, f=list_filter, today=today
@@ -103,9 +98,10 @@ async def handle_list(
             today=today,
             translation_llm=translation_llm,
         )
-        await msg.answer(view.text)
+        await msg.reply(view.text)
 
 
+@message_entry
 async def handle_pantry(
     msg,
     *,
@@ -123,100 +119,14 @@ async def handle_pantry(
         if ctx is None:
             return
         session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
+        from app.application.pantry import pantry_view
+
         parts = (msg.text or "").split(maxsplit=1)
-        args = parts[1].split() if len(parts) == 2 else []
-        try:
-            mode = parse_pantry_arg(args)
-        except CommandError:
-            await msg.answer(t("pantry.usage", user.lang))
-            return
-
-        if mode == "batch":
-            batch = create_batch(
-                session, household_id=user.household_id, user_id=user.telegram_id,
-                sort_by="store", today=today, now=now_provider(user.tz),
-            )
-            view = await views.prepare_pantry_batch(
-                session, batch, user=user, now=now_provider(user.tz),
-                translation_llm=translation_llm,
-            )
-            await msg.answer(view.text, reply_markup=to_aiogram_keyboard(view.rows))
-            return
-
-        if isinstance(mode, int):
-            item = session.get(PantryItem, mode)
-            if item is None or item.household_id != user.household_id:
-                await msg.answer(t("pantry.no_item", user.lang, id=mode))
-                return
-            if item.status != "active":
-                await msg.answer(
-                    t("pantry.item_inactive", user.lang, id=mode, status=item.status)
-                )
-                return
-            view = await views.item_card(
-                session,
-                item,
-                user=user,
-                today=today,
-                translation_llm=translation_llm,
-            )
-            await msg.answer(
-                view.text,
-                reply_markup=to_aiogram_keyboard(
-                    build_item_card_keyboard(
-                        item, lang=user.lang, back_to="all", sort_by="receipt"
-                    )
-                ),
-            )
-            return
-
-        if mode == "digest":
-            items = list_digest_due(
-                session, household_id=user.household_id, today=today
-            )
-            back_to = "digest"
-            cap = 10
-            empty_key = "digest.pantry_clear"
-            sort_by: PantrySort = "expires"
-        else:
-            sort_by = "receipt" if mode == "all" else mode
-            items = list_active(
-                session,
-                household_id=user.household_id,
-                f=ListFilter.default(),
-                today=today,
-                sort_by=sort_by,
-            )
-            back_to = "all"
-            cap = None
-            empty_key = "pantry.all_clear"
-
-        view = await views.digest(
-            session,
-            items,
-            user=user,
-            today=today,
-            translation_llm=translation_llm,
-            cap=cap,
-            sort_by=sort_by,
+        view = await pantry_view(
+            session, user=user, args=parts[1].split() if len(parts) == 2 else [],
+            today=today, now=now_provider(user.tz), translation_llm=translation_llm,
         )
-        if not view.text:
-            await msg.answer(t(empty_key, user.lang))
-            return
-        keyboard = to_aiogram_keyboard(
-            build_digest_keyboard(
-                view.rendered_items,
-                has_more=view.has_more,
-                today=today,
-                lang=user.lang,
-                names=view.names,
-                back_to=back_to,
-                sort_by=sort_by,
-                page=view.page,
-                page_count=view.page_count,
-            )
-        )
-        await msg.answer(view.text, reply_markup=keyboard)
+        await msg.reply(view.text, actions=to_keyboard(view.rows))
 
 
 async def _run_add_flow(
@@ -252,7 +162,7 @@ async def _run_add_flow(
         log.warning(
             "add_propose_failed",
             extra={
-                "user_id": user.telegram_id,
+                "user_id": user.id,
                 "error_class": type(exc).__name__,
             },
         )
@@ -276,18 +186,18 @@ async def _run_add_flow(
             proposed_json=add_payload_to_json(proposal.payload),
             snapshot_json=None,
             cost_micros_usd=proposal.cost_share,
-            chat_id=msg.chat.id,
+            chat_id=msg.conversation_key,
             now=datetime.now(UTC),
         )
         assert pending.id is not None
         text = render_add_diff(
             pending_id=pending.id, payload=proposal.payload, lang=user.lang
         )
-        keyboard = to_aiogram_keyboard(
+        keyboard = to_keyboard(
             build_apply_cancel_keyboard(pending_id=pending.id, lang=user.lang)
         )
         try:
-            sent = await msg.answer(text, reply_markup=keyboard)
+            sent = await msg.reply(text, actions=keyboard)
         except Exception as exc:  # noqa: BLE001 - message send is best-effort
             log.warning(
                 "add_send_failed",
@@ -296,9 +206,10 @@ async def _run_add_flow(
             mark_cancelled(session, pending=pending)
             session.commit()
             continue
-        set_message_id(session, pending=pending, message_id=sent.message_id)
+        set_message_id(session, pending=pending, message_id=sent.message_key)
 
 
+@message_entry
 async def handle_add(
     msg,
     *,
@@ -318,7 +229,7 @@ async def handle_add(
         session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2 or not parts[1].strip():
-            await msg.answer("usage: /add <free text - name, category, expiry>")
+            await msg.reply("usage: /add <free text - name, category, expiry>")
             return
         now = now_provider(user.tz)
         decision = admit(
@@ -357,7 +268,7 @@ async def handle_add(
                 )
             )
             session.commit()
-            await msg.answer(
+            await msg.reply(
                 t("quota.degraded.add", user.lang, name=raw_text, days=days)
             )
             return
@@ -401,13 +312,13 @@ async def _terminal_cmd(
         session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         parts = (msg.text or "").split(maxsplit=1)
         if len(parts) != 2:
-            await msg.answer(f"usage: /{action_word} <item_id>")
+            await msg.reply(f"usage: /{action_word} <item_id>")
             return
         item_id: int
         try:
             item_id = parse_item_id_arg(parts[1].strip())
         except CommandError as exc:
-            await msg.answer(str(exc))
+            await msg.reply(str(exc))
             return
         try:
             result = fn(
@@ -415,25 +326,26 @@ async def _terminal_cmd(
                 household_id=user.household_id,
                 item_id=item_id,
                 today=today,
-                user_id=user.telegram_id,
+                user_id=user.id,
             )
         except NotOwnerOrMissing:
-            await msg.answer(t("pantry.no_item", user.lang, id=item_id))
+            await msg.reply(t("pantry.no_item", user.lang, id=item_id))
             return
         if result.applied:
             log.info(
                 "item_action_applied",
                 extra={
-                    "user_id": user.telegram_id,
+                    "user_id": user.id,
                     "item_id": item_id,
                     "action": action_word,
                 },
             )
-            await msg.answer(t(f"pantry.marked.{action_word}", user.lang, id=item_id))
+            await msg.reply(t(f"pantry.marked.{action_word}", user.lang, id=item_id))
         elif result.was_already:
-            await msg.answer(t("pantry.already_inactive", user.lang, id=item_id))
+            await msg.reply(t("pantry.already_inactive", user.lang, id=item_id))
 
 
+@message_entry
 async def handle_ate(
     msg,
     *,
@@ -451,6 +363,7 @@ async def handle_ate(
     )
 
 
+@message_entry
 async def handle_toss(
     msg,
     *,
@@ -468,6 +381,7 @@ async def handle_toss(
     )
 
 
+@message_entry
 async def handle_delete(
     msg,
     *,
@@ -485,6 +399,7 @@ async def handle_delete(
     )
 
 
+@message_entry
 async def handle_snooze(
     msg,
     *,
@@ -505,7 +420,7 @@ async def handle_snooze(
         try:
             item_id, days = parse_snooze_args(list((msg.text or "").split()[1:]))
         except CommandError as exc:
-            await msg.answer(str(exc))
+            await msg.reply(str(exc))
             return
         try:
             result = snooze_item(
@@ -516,23 +431,23 @@ async def handle_snooze(
                 days=days,
             )
         except NotOwnerOrMissing:
-            await msg.answer(t("pantry.no_item", user.lang, id=item_id))
+            await msg.reply(t("pantry.no_item", user.lang, id=item_id))
             return
         except ValueError as exc:
-            await msg.answer(str(exc))
+            await msg.reply(str(exc))
             return
         if result.applied:
             log.info(
                 "item_action_applied",
                 extra={
-                    "user_id": user.telegram_id,
+                    "user_id": user.id,
                     "item_id": item_id,
                     "action": "snooze",
                 },
             )
-            await msg.answer(t("pantry.snoozed", user.lang, id=item_id, days=days))
+            await msg.reply(t("pantry.snoozed", user.lang, id=item_id, days=days))
         else:
-            await msg.answer(t("pantry.not_active", user.lang, id=item_id))
+            await msg.reply(t("pantry.not_active", user.lang, id=item_id))
 
 
 async def _propose_and_send_correction(
@@ -558,26 +473,26 @@ async def _propose_and_send_correction(
             today=today,
         )
     except LLMProviderNotConfigured:
-        await msg.answer(
+        await msg.reply(
             f"LLM provider {user.llm_provider!r} is not configured. Use /llm."
         )
         return
     except NullDiff:
-        await msg.answer(t("correct.no_changes", user.lang))
+        await msg.reply(t("correct.no_changes", user.lang))
         return
     except ProposeCorrectError as exc:
-        await msg.answer(str(exc))
+        await msg.reply(str(exc))
         return
     except Exception as exc:  # noqa: BLE001 - /correct must never crash the bot
         log.warning(
             "correction_propose_failed",
             extra={
-                "user_id": user.telegram_id,
+                "user_id": user.id,
                 "item_id": item_id,
                 "error_class": type(exc).__name__,
             },
         )
-        await msg.answer(t("correct.parse_failed", user.lang))
+        await msg.reply(t("correct.parse_failed", user.lang))
         return
 
     pending = create_pending(
@@ -588,7 +503,7 @@ async def _propose_and_send_correction(
         proposed_json=correct_payload_to_json(payload),
         snapshot_json=item_snapshot_to_json(item),
         cost_micros_usd=cost,
-        chat_id=msg.chat.id,
+        chat_id=msg.conversation_key,
         now=datetime.now(UTC),
     )
     assert pending.id is not None
@@ -599,11 +514,11 @@ async def _propose_and_send_correction(
         item_raw_name=item.raw_name,
         lang=user.lang,
     )
-    keyboard = to_aiogram_keyboard(
+    keyboard = to_keyboard(
         build_apply_cancel_keyboard(pending_id=pending.id, lang=user.lang)
     )
     try:
-        sent = await msg.answer(text, reply_markup=keyboard)
+        sent = await msg.reply(text, actions=keyboard)
     except Exception as exc:  # noqa: BLE001 - message send is best-effort
         log.warning(
             "correct_send_failed",
@@ -612,9 +527,10 @@ async def _propose_and_send_correction(
         mark_cancelled(session, pending=pending)
         session.commit()
         return
-    set_message_id(session, pending=pending, message_id=sent.message_id)
+    set_message_id(session, pending=pending, message_id=sent.message_key)
 
 
+@message_entry
 async def handle_correct(
     msg,
     *,
@@ -634,19 +550,19 @@ async def handle_correct(
         session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         parts = (msg.text or "").split(maxsplit=2)
         if len(parts) < 3 or not parts[2].strip():
-            await msg.answer("usage: /correct <item_id> <free text>")
+            await msg.reply("usage: /correct <item_id> <free text>")
             return
         try:
             item_id = parse_item_id_arg(parts[1].strip())
         except CommandError as exc:
-            await msg.answer(str(exc))
+            await msg.reply(str(exc))
             return
         item = session.get(PantryItem, item_id)
         if item is None or item.household_id != user.household_id:
-            await msg.answer(t("pantry.no_item", user.lang, id=item_id))
+            await msg.reply(t("pantry.no_item", user.lang, id=item_id))
             return
         if item.status != "active":
-            await msg.answer(t("correct.inactive", user.lang, id=item_id, status=t(f"item_status.{item.status}", user.lang)))
+            await msg.reply(t("correct.inactive", user.lang, id=item_id, status=t(f"item_status.{item.status}", user.lang)))
             return
         now = now_provider(user.tz)
         decision = admit(
@@ -657,7 +573,7 @@ async def handle_correct(
             now=now,
         )
         if not decision.allowed:
-            await msg.answer(
+            await msg.reply(
                 t("quota.degraded.correction", user.lang)
             )
             return
@@ -680,6 +596,7 @@ async def handle_correct(
         )
 
 
+@message_entry
 async def handle_correct_reply(
     msg,
     *,
@@ -688,7 +605,7 @@ async def handle_correct_reply(
     clients: PerUserClients,
     on_user_created: Callable[[User], None] = _noop_user_created,
 ):
-    marker_text = getattr(getattr(msg, "reply_to_message", None), "text", None)
+    marker_text = getattr(getattr(msg, "reply_to", None), "text", None)
     item_id = parse_correct_reply_marker(marker_text)
     if item_id is None:
         return
@@ -704,14 +621,14 @@ async def handle_correct_reply(
         session, user, today = ctx.session, ctx.user, _require_today(ctx.today)
         item = session.get(PantryItem, item_id)
         if item is None or item.household_id != user.household_id:
-            await msg.answer(t("pantry.no_item", user.lang, id=item_id))
+            await msg.reply(t("pantry.no_item", user.lang, id=item_id))
             return
         if item.status != "active":
-            await msg.answer(t("correct.inactive", user.lang, id=item_id, status=t(f"item_status.{item.status}", user.lang)))
+            await msg.reply(t("correct.inactive", user.lang, id=item_id, status=t(f"item_status.{item.status}", user.lang)))
             return
         user_text = (msg.text or "").strip()
         if not user_text:
-            await msg.answer(t("correct.reply_required", user.lang))
+            await msg.reply(t("correct.reply_required", user.lang))
             return
         now = now_provider(user.tz)
         decision = admit(
@@ -722,7 +639,7 @@ async def handle_correct_reply(
             now=now,
         )
         if not decision.allowed:
-            await msg.answer(
+            await msg.reply(
                 t("quota.degraded.correction", user.lang)
             )
             return
@@ -745,6 +662,7 @@ async def handle_correct_reply(
         )
 
 
+@message_entry
 async def handle_stats(
     msg,
     *,
@@ -766,7 +684,7 @@ async def handle_stats(
             household_id=user.household_id,
             now=now.astimezone(UTC),
         )
-        await msg.answer(render_stats(stats, lang=user.lang))
+        await msg.reply(render_stats(stats, lang=user.lang))
 
 
 COMMANDS = (

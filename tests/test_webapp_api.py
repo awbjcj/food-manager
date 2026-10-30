@@ -257,7 +257,7 @@ async def test_account_update_validates_persists_and_reschedules(web_state, tmp_
         available_providers=("gemini", "openai"),
         bot_username="food_manager_bot",
         static_dir=Path(tmp_path / "missing-static"),
-        reschedule=lambda user: rescheduled.append(user.telegram_id),
+        reschedule=lambda user: rescheduled.append(user.id),
     )
     payload = {
         "householdName": "Chen family pantry",

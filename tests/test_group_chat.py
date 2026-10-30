@@ -188,11 +188,11 @@ def test_departing_binder_transfers_reference_to_owner(session):
         session,
         chat_id=-100,
         household_id=owner.household_id,
-        bound_by_user_id=member.telegram_id,
+        bound_by_user_id=member.id,
         created_at=datetime.now(UTC),
     )
 
-    leave_household(session, telegram_user_id=member.telegram_id)
+    leave_household(session, telegram_user_id=member.id)
 
     binding = session.get(GroupBinding, -100)
     assert binding is not None

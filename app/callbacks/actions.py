@@ -5,6 +5,7 @@ import logging
 from datetime import UTC, datetime
 
 from app import handler_support, views
+from app.application.context import keyboard as to_keyboard
 from app.billing.meter import admit, commit
 from app.callback_dispatch import (
     answer as dispatch_answer,
@@ -30,6 +31,7 @@ from app.cook import (
     set_feedback,
 )
 from app.i18n import DEFAULT_LANG, t
+from app.messaging.adapters.legacy import action_entry
 from app.pantry_service import (
     NotOwnerOrMissing,
     active_pantry_names,
@@ -45,7 +47,6 @@ from app.renderer import (
     render_undo_result,
 )
 from app.shopping_service import add_missing, check_off, list_pending
-from app.telegram_ui import to_aiogram_keyboard
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ log = logging.getLogger(__name__)
 _authorized_callback_user = handler_support.authorized_callback_query_user
 
 
+@action_entry
 async def handle_callback(
     cb,
     *,
@@ -64,7 +66,7 @@ async def handle_callback(
     try:
         action = parse_callback(cb.data)
     except CommandError:
-        await cb.answer(t("toast.unrecognized_action", DEFAULT_LANG))
+        await cb.ack(t("toast.unrecognized_action", DEFAULT_LANG))
         return
 
     with session_factory() as session:
@@ -72,9 +74,9 @@ async def handle_callback(
         if user is None:
             log.info(
                 "unauthorized_update_rejected",
-                extra={"telegram_user_id": cb.from_user.id},
+                extra={"telegram_user_id": cb.actor_id},
             )
-            await cb.answer("not authorized", show_alert=False)
+            await cb.ack("not authorized", alert=False)
             return
         now = now_provider(user.tz)
         today = now.date()
@@ -110,13 +112,13 @@ async def handle_callback(
                 session, household_id=user.household_id, cook_id=cook_id
             )
             if cook is None or cook.status != "done":
-                await cb.answer(t("toast.cook_expired", user.lang))
+                await cb.ack(t("toast.cook_expired", user.lang))
                 return
             verdict = "liked" if action.verb == "cook_like" else "disliked"
             set_feedback(
                 session, cook=cook, feedback=verdict, now=now_provider(user.tz)
             )
-            await cb.answer(
+            await cb.ack(
                 t("toast.liked", user.lang)
                 if verdict == "liked"
                 else t("toast.disliked", user.lang)
@@ -130,7 +132,7 @@ async def handle_callback(
                 session, household_id=user.household_id, cook_id=cook_id
             )
             if cook is None or cook.status != "done":
-                await cb.answer(t("toast.cook_expired", user.lang))
+                await cb.ack(t("toast.cook_expired", user.lang))
                 return
             try:
                 raw_cards = _json.loads(cook.candidates_json or "[]")
@@ -138,7 +140,7 @@ async def handle_callback(
             except (TypeError, ValueError):
                 cards = []
             if not cards:
-                await cb.answer(t("toast.nothing_to_use", user.lang))
+                await cb.ack(t("toast.nothing_to_use", user.lang))
                 return
             index = cook.chosen_index or 0
             if index < 0 or index >= len(cards):
@@ -151,7 +153,7 @@ async def handle_callback(
                     candidate=candidate,
                     now=now_provider(user.tz),
                 )
-                await cb.answer(
+                await cb.ack(
                     t("toast.already_saved", user.lang)
                     if result.duplicate
                     else t("toast.saved", user.lang)
@@ -170,13 +172,13 @@ async def handle_callback(
                 now=now_provider(user.tz),
             )
             if add_result.added:
-                await cb.answer(
+                await cb.ack(
                     t("toast.added_to_shopping", user.lang, n=len(add_result.added))
                 )
             elif add_result.already:
-                await cb.answer(t("toast.already_on_list", user.lang))
+                await cb.ack(t("toast.already_on_list", user.lang))
             else:
-                await cb.answer(t("toast.have_everything", user.lang))
+                await cb.ack(t("toast.have_everything", user.lang))
             return
 
         if action.verb == "shop_done":
@@ -196,7 +198,7 @@ async def handle_callback(
                 translation_llm=translation_llm,
             )
             keyboard = (
-                to_aiogram_keyboard(
+                to_keyboard(
                     build_shopping_keyboard(
                         [i.id for i in remaining if i.id], lang=user.lang
                     )
@@ -205,7 +207,7 @@ async def handle_callback(
                 else None
             )
             await edit_or_resend(cb, view.text, keyboard)
-            await cb.answer(
+            await cb.ack(
                 t("toast.bought", user.lang)
                 if ok
                 else t("toast.already_done", user.lang)
@@ -219,7 +221,7 @@ async def handle_callback(
                 session, household_id=user.household_id, recipe_id=recipe_id
             )
             if saved is None:
-                await cb.answer(t("toast.not_found", user.lang))
+                await cb.ack(t("toast.not_found", user.lang))
                 return
             shopping = recook_shopping_list(
                 session, household_id=user.household_id, saved=saved, today=today
@@ -232,12 +234,12 @@ async def handle_callback(
                 user=user,
                 translation_llm=translation_llm,
             )
-            await cb.message.answer(view.text)
-            await cb.answer(t("toast.heres_plan", user.lang))
+            await cb.source.reply(view.text)
+            await cb.ack(t("toast.heres_plan", user.lang))
             return
 
         if action.verb == "show_all":
-            await cb.answer()
+            await cb.ack()
             await _refresh_digest_message(
                 cb, session, user.household_id, today, lang=user.lang, expanded=True,
             )
@@ -276,7 +278,7 @@ async def handle_callback(
                     now=now,
                 )
             await edit_or_resend(cb, render_undo_result(result, lang=user.lang))
-            await cb.answer(
+            await cb.ack(
                 t("toast.undone", user.lang)
                 if result.removed_ids
                 else t("toast.nothing_undone", user.lang)
@@ -292,7 +294,7 @@ async def handle_callback(
                     household_id=user.household_id,
                     item_id=item_id,
                     today=today,
-                    user_id=user.telegram_id,
+                    user_id=user.id,
                 )
             elif action.verb == "toss":
                 result = mark_tossed(
@@ -300,7 +302,7 @@ async def handle_callback(
                     household_id=user.household_id,
                     item_id=item_id,
                     today=today,
-                    user_id=user.telegram_id,
+                    user_id=user.id,
                 )
             elif action.verb == "snooze2":
                 result = snooze_item(
@@ -346,7 +348,7 @@ async def handle_callback(
             log.info(
                 "item_action_applied",
                 extra={
-                    "user_id": cb.from_user.id,
+                    "user_id": cb.actor_id,
                     "item_id": item_id,
                     "action": action.verb,
                 },

@@ -29,8 +29,11 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    telegram_bot_token: str = Field(alias="TELEGRAM_BOT_TOKEN")
-    allowed_telegram_user_id: int = Field(alias="ALLOWED_TELEGRAM_USER_ID")
+    telegram_bot_token: str = Field(default="", alias="TELEGRAM_BOT_TOKEN")
+    allowed_telegram_user_id: int = Field(default=0, alias="ALLOWED_TELEGRAM_USER_ID")
+    public_base_url: str = Field(default="", alias="PUBLIC_BASE_URL")
+    connection_admin_token: str = Field(default="", alias="CONNECTION_ADMIN_TOKEN", repr=False)
+    connection_secret_key: str = Field(default="", alias="CONNECTION_SECRET_KEY", repr=False)
     llm_provider: LLMProvider = Field(default="anthropic", alias="LLM_PROVIDER")
     anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     anthropic_model: str = Field(default="claude-sonnet-5-5", alias="ANTHROPIC_MODEL")
@@ -108,6 +111,27 @@ class Settings(BaseSettings):
             raise ValueError("PORT must be between 1 and 65535")
         if self.web_app_url and not self.web_app_url.startswith("https://"):
             raise ValueError("WEB_APP_URL must use HTTPS")
+        return self
+
+    @model_validator(mode="after")
+    def validate_messaging(self) -> "Settings":
+        if self.public_base_url:
+            parsed = urlsplit(self.public_base_url)
+            if (parsed.scheme != "https" or not parsed.hostname or parsed.username
+                    or parsed.password or parsed.query or parsed.fragment or parsed.path not in {"", "/"}):
+                raise ValueError("PUBLIC_BASE_URL must be an HTTPS origin")
+        if self.connection_admin_token and len(self.connection_admin_token) < 32:
+            raise ValueError("CONNECTION_ADMIN_TOKEN must contain at least 32 characters")
+        if self.connection_secret_key:
+            from cryptography.fernet import Fernet
+            try:
+                Fernet(self.connection_secret_key.encode())
+            except (ValueError, TypeError) as exc:
+                raise ValueError("CONNECTION_SECRET_KEY must be a Fernet key") from exc
+        if self.connection_admin_token and not self.connection_secret_key:
+            raise ValueError("CONNECTION_SECRET_KEY is required for connection administration")
+        if self.telegram_bot_token and not self.allowed_telegram_user_id and not self.hosted_features_enabled:
+            raise ValueError("ALLOWED_TELEGRAM_USER_ID is required for private Telegram access")
         return self
 
     @model_validator(mode="after")
@@ -205,6 +229,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_provider_key(self) -> "Settings":
+        if self.connection_admin_token and not self.telegram_bot_token and not any(self.has_credentials(p) for p in ALL_PROVIDERS):
+            return self  # Setup console can start before an LLM is configured.
         if not self.has_credentials(self.llm_provider):
             raise ValueError(
                 f"{self.llm_provider.upper()}_API_KEY is required when "

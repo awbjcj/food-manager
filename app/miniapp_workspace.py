@@ -241,14 +241,24 @@ class WorkspaceRuntime:
             if rendered_lang == workspace.lang:
                 continue
             with self.deps["session_factory"]() as session:
-                names = cached_names(session, lang=workspace.lang, texts=ingest_texts(summary))
+                names = cached_names(
+                    session, lang=workspace.lang, texts=ingest_texts(summary)
+                )
             card.text = render_ingest_reply(
-                summary, today=today, refined_ids=refined_ids,
-                lang=workspace.lang, names=names,
+                summary,
+                today=today,
+                refined_ids=refined_ids,
+                lang=workspace.lang,
+                names=names,
             )
             card.reply_markup = (
-                to_aiogram_keyboard(build_undo_keyboard(receipt_id=summary.receipt_id, lang=workspace.lang))
-                if summary.receipt_id is not None and summary.inserted_food_count else None
+                to_aiogram_keyboard(
+                    build_undo_keyboard(
+                        receipt_id=summary.receipt_id, lang=workspace.lang
+                    )
+                )
+                if summary.receipt_id is not None and summary.inserted_food_count
+                else None
             )
             card.revision = secrets.token_urlsafe(12)
             card.receipt_view = (summary, today, refined_ids, workspace.lang)
@@ -309,7 +319,9 @@ class WorkspaceRuntime:
                     TypeError,
                     ValueError,
                 ) as exc:
-                    raise web.HTTPBadRequest(text=t("miniapp.invalid_action", workspace.lang)) from exc
+                    raise web.HTTPBadRequest(
+                        text=t("miniapp.invalid_action", workspace.lang)
+                    ) from exc
             elif not getattr(message.reply_markup, "force_reply", False):
                 raise web.HTTPBadRequest(text=t("miniapp.no_reply", workspace.lang))
         elif kind == "command":
@@ -317,17 +329,19 @@ class WorkspaceRuntime:
                 *COMMANDS,
                 "plan_current",
             }:
-                raise web.HTTPBadRequest(text=t("miniapp.unknown_command", workspace.lang))
+                raise web.HTTPBadRequest(
+                    text=t("miniapp.unknown_command", workspace.lang)
+                )
         elif kind == "photo":
             if image is None:
-                raise web.HTTPBadRequest(text=t("miniapp.receipt_required", workspace.lang))
+                raise web.HTTPBadRequest(
+                    text=t("miniapp.receipt_required", workspace.lang)
+                )
         elif kind != "text" or not text.strip():
             raise web.HTTPBadRequest(text=t("miniapp.invalid_request", workspace.lang))
         # Retain retry IDs for the lifetime of this workspace, with a hard bound.
         if len(workspace.requests) >= 2000:
-            raise web.HTTPConflict(
-                text=t("miniapp.limit", workspace.lang)
-            )
+            raise web.HTTPConflict(text=t("miniapp.limit", workspace.lang))
         workspace.requests.add(request_id)
         workspace.notices = []
         workspace.error = None
@@ -348,6 +362,14 @@ class WorkspaceRuntime:
             return image
 
         def on_receipt_rendered(message, summary, today, refined_ids, lang):
+            from app.application.context import CommandContext
+            from app.messaging.adapters.legacy import TelegramMessenger
+
+            if isinstance(message, CommandContext):
+                assert isinstance(message.transport, TelegramMessenger)
+                message = message.transport.messages[
+                    (message.conversation_key, message.message_key)
+                ]
             message.receipt_view = (summary, today, refined_ids, lang)
 
         deps = {
@@ -404,6 +426,11 @@ class WorkspaceRuntime:
                     handler, names = COMMANDS[command]
                     await invoke(handler, names, event)
             elif kind == "callback":
+                from app.messaging.adapters.legacy import (
+                    TelegramMessenger,
+                    action_context,
+                )
+
                 callback = AppCallback(
                     data=callback_data,
                     message=source_message,
@@ -411,12 +438,12 @@ class WorkspaceRuntime:
                     workspace=workspace,
                 )
                 context = CallbackContext(
-                    callback=callback,
+                    callback=action_context(callback),
                     session_factory=deps["session_factory"],
                     now_provider=deps["now_provider"],
                     clients=deps["clients"],
                     translation_llm=deps["translation_llm"],
-                    bot=transport,  # type: ignore[arg-type]
+                    bot=TelegramMessenger(bot=transport),
                     spawn=spawn,
                     recipe_sources=deps["recipe_sources"],
                 )
@@ -468,9 +495,7 @@ class WorkspaceRuntime:
                     event,
                 )
             else:
-                await event.answer(
-                    t("miniapp.assistant_unavailable", workspace.lang)
-                )
+                await event.answer(t("miniapp.assistant_unavailable", workspace.lang))
             # Receipt refinement and cook generation can spawn further work.
             index = 0
             while index < len(children):

@@ -9,6 +9,8 @@
 
 一个 Telegram 机器人和 Mini App，用于跟踪家庭食品库、将购物小票转换为结构化条目、规划膳食，并在食物过期前提醒所有家庭成员。支持 Anthropic、OpenAI、Gemini 和 DeepSeek，共享家庭、Telegram Stars 订阅，以及英语、中文、法语和西班牙语。
 
+自行部署时，部署负责人还可通过[连接设置控制台](docs/messaging-connections.zh-CN.md)接入 Slack 和 WhatsApp。各连接共用食品库流程和家庭权限；Mini App 与 Stars 支付仍通过 Telegram 使用。
+
 ## 试用托管机器人
 
 在线服务地址：[@foodie_manager_bot](https://t.me/foodie_manager_bot)。无需运行服务器，即可体验小票扫描、家庭共享食品库、膳食计划、临期提醒和 Telegram Mini App。你可以先使用免费套餐；需要更多收据导入次数、AI 操作次数或家庭成员席位时，再邀请家庭成员或使用 Telegram Stars 升级。

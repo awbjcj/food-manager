@@ -133,7 +133,9 @@ def redeem_invite(
     """
     moment = _utc_naive(now)
 
-    if session.get(User, telegram_user_id) is not None:
+    from app.messaging.identity_service import telegram_user
+    existing = telegram_user(session, telegram_user_id)
+    if existing is not None and (existing.membership_active or existing.banned):
         raise AlreadyMember()
 
     invite = session.exec(
@@ -147,7 +149,7 @@ def redeem_invite(
 
     _require_free_seat(session, household_id=invite.household_id, now=moment)
 
-    user = User(
+    user = existing or User(
         telegram_id=telegram_user_id,
         chat_id=chat_id,
         household_id=invite.household_id,
@@ -157,8 +159,13 @@ def redeem_invite(
         role="member",
         created_at=moment,
     )
+    user.household_id = invite.household_id
+    if existing is None and session.get(User, user.id) is not None:
+        user.id = secrets.randbits(62)
+    user.membership_active = True
+    user.role = "member"
     invite.uses += 1
-    invite.redeemed_by = telegram_user_id
+    invite.redeemed_by = user.id
     invite.redeemed_at = moment
     session.add(user)
     session.add(invite)
@@ -169,7 +176,7 @@ def redeem_invite(
 
 def seats_used(session: Session, *, household_id: int) -> int:
     return len(
-        session.exec(select(User).where(User.household_id == household_id)).all()
+        session.exec(select(User).where(User.household_id == household_id, User.membership_active == True)).all()
     )
 
 
@@ -205,10 +212,10 @@ class Member:
 def list_members(session: Session, *, household_id: int) -> list[Member]:
     """Return household members, owner first, then by telegram_id."""
     users = session.exec(
-        select(User).where(User.household_id == household_id)
+        select(User).where(User.household_id == household_id, User.membership_active == True)
     ).all()
-    ordered = sorted(users, key=lambda u: (u.role != "owner", u.telegram_id))
-    return [Member(telegram_id=u.telegram_id, role=u.role) for u in ordered]
+    ordered = sorted(users, key=lambda u: (u.role != "owner", u.id))
+    return [Member(telegram_id=u.id, role=u.role) for u in ordered]
 
 
 def remove_member(
@@ -226,17 +233,18 @@ def remove_member(
     if target_id == actor_id:
         raise CannotRemoveSelf()
     target = session.get(User, target_id)
-    if target is None or target.household_id != household_id:
+    if target is None or not target.membership_active or target.household_id != household_id:
         raise MemberNotFound()
-    removed = Member(telegram_id=target.telegram_id, role=target.role)
+    removed = Member(telegram_id=target.id, role=target.role)
     transfer_group_bindings(
         session,
         household_id=household_id,
-        from_user_id=target.telegram_id,
-        to_user_id=actor.telegram_id,
+        from_user_id=target.id,
+        to_user_id=actor.id,
     )
-    _revoke_invites_from(session, created_by=target.telegram_id)
-    session.delete(target)
+    _revoke_invites_from(session, created_by=target.id)
+    from app.messaging.identity_service import revoke_membership
+    revoke_membership(session, target)
     session.commit()
     return removed
 
@@ -261,8 +269,9 @@ def leave_household(session: Session, *, telegram_user_id: int) -> None:
         session,
         household_id=user.household_id,
         from_user_id=telegram_user_id,
-        to_user_id=owner.telegram_id,
+        to_user_id=owner.id,
     )
     _revoke_invites_from(session, created_by=telegram_user_id)
-    session.delete(user)
+    from app.messaging.identity_service import revoke_membership
+    revoke_membership(session, user)
     session.commit()

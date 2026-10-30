@@ -14,7 +14,9 @@ TOKEN = "123456:TEST_TOKEN"
 NOW = datetime(2026, 8, 18, 16, 0, tzinfo=UTC)
 
 
-def _signed(*, auth_date: datetime = NOW, user_id: int = 42) -> str:
+def _signed(
+    *, auth_date: datetime = NOW, user_id: int = 42, bot_token: str = TOKEN
+) -> str:
     values = {
         "auth_date": str(int(auth_date.timestamp())),
         "query_id": "AAE-test",
@@ -29,7 +31,7 @@ def _signed(*, auth_date: datetime = NOW, user_id: int = 42) -> str:
         ),
     }
     check = "\n".join(f"{key}={values[key]}" for key in sorted(values))
-    secret = hmac.new(b"WebAppData", TOKEN.encode(), hashlib.sha256).digest()
+    secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     values["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
     return urlencode(values)
 
@@ -39,6 +41,12 @@ def test_validate_init_data_returns_signed_telegram_identity():
     assert identity.telegram_id == 42
     assert identity.display_name == "Alex Chen"
     assert identity.language_code == "en"
+
+
+@pytest.mark.parametrize("bot_token", ["", " ", "\t\n"])
+def test_validate_init_data_rejects_forgery_with_unconfigured_token(bot_token):
+    with pytest.raises(MiniAppAuthError, match="unavailable"):
+        validate_init_data(_signed(bot_token=bot_token), bot_token=bot_token, now=NOW)
 
 
 def test_validate_init_data_rejects_tampering():

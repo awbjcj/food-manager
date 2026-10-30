@@ -61,6 +61,26 @@ def find_user(session: Session, actor: ActorRef) -> User | None:
     return session.get(User, identity.user_id) if identity else None
 
 
+def resolve_existing_user(
+    session: Session, *, actor: ActorRef, connection: MessagingConnection
+) -> User | None:
+    """Telegram user IDs identify the same account across this deployment's bots."""
+    user = find_user(session, actor)
+    if connection.provider != "telegram":
+        return user
+    try:
+        canonical = telegram_user(session, int(actor.external_user_id))
+    except ValueError:
+        raise MessagingError(
+            ErrorCode.INVALID_INPUT, "Invalid Telegram user ID"
+        ) from None
+    if canonical is not None and user is not None and canonical.id != user.id:
+        raise MessagingError(
+            ErrorCode.CONFLICT, "Telegram identity belongs to another account"
+        )
+    return canonical if canonical is not None else user
+
+
 def authorize(
     session: Session,
     *,
@@ -77,21 +97,20 @@ def authorize(
         raise MessagingError(ErrorCode.FORBIDDEN, "Connection is disabled")
     settings = json.loads(connection.settings_json)
     bootstrap = actor.external_user_id == settings.get("bootstrapUserId")
-    user = find_user(session, actor)
-    if user is None and connection.provider == "telegram":
-        try:
-            user = telegram_user(session, int(actor.external_user_id))
-        except ValueError:
-            pass
-        if user is not None:
-            session.add(
-                ExternalIdentity(
-                    connection_id=actor.connection_id,
-                    external_user_id=actor.external_user_id,
-                    user_id=user.id,
-                )
+    user = resolve_existing_user(session, actor=actor, connection=connection)
+    if (
+        user is not None
+        and session.get(ExternalIdentity, (actor.connection_id, actor.external_user_id))
+        is None
+    ):
+        session.add(
+            ExternalIdentity(
+                connection_id=actor.connection_id,
+                external_user_id=actor.external_user_id,
+                user_id=user.id,
             )
-            session.flush()
+        )
+        session.flush()
     if user and user.banned:
         raise MessagingError(ErrorCode.FORBIDDEN, "Account is unavailable")
     if not hosted and not bootstrap:

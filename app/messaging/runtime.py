@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -242,6 +243,7 @@ class MessagingRuntime:
         recipe_sources=(),
         intent_agent=None,
         composer=None,
+        reschedule: Callable[[User], None] | None = None,
         http=None,
         now=lambda: datetime.now(UTC),
     ):
@@ -259,6 +261,7 @@ class MessagingRuntime:
         self.http = http or httpx.AsyncClient(timeout=20)
         self.owns_http = http is None
         self.now = now
+        self.reschedule = reschedule or (lambda _user: None)
         self.bots: dict[str, tuple[int, Bot]] = {}
         self.tasks = []
         self.polling = {}
@@ -814,7 +817,7 @@ class MessagingRuntime:
                 "clients": self.clients,
                 "now_provider": lambda tz: self.now().astimezone(ZoneInfo(tz)),
                 "on_user_created": lambda _: None,
-                "reschedule": lambda _: None,
+                "reschedule": self.reschedule,
                 "unschedule": lambda _: None,
                 "translation_llm": self.clients.translation,
                 "recipe_sources": self.recipe_sources,

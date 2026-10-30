@@ -18,7 +18,7 @@ from tests.fakes import FakePaymentProvider
 TOKEN = "123456:TEST_TOKEN"
 
 
-def _auth(user_id: int) -> str:
+def _auth(user_id: int, *, bot_token: str = TOKEN) -> str:
     values = {
         "auth_date": str(int(datetime.now(UTC).timestamp())),
         "user": json.dumps(
@@ -27,7 +27,7 @@ def _auth(user_id: int) -> str:
         ),
     }
     check = "\n".join(f"{key}={values[key]}" for key in sorted(values))
-    secret = hmac.new(b"WebAppData", TOKEN.encode(), hashlib.sha256).digest()
+    secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     values["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
     return f"tma {urlencode(values)}"
 
@@ -86,6 +86,38 @@ def web_state(tmp_path, sqlite_db_path):
         yield sessions, payments, app
     finally:
         engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_telegram_free_server_rejects_forged_auth_on_all_private_routes(web_state, tmp_path):
+    sessions, payments, _app = web_state
+    app = build_web_app(
+        session_factory=sessions,
+        bot_token="",
+        payments=payments,
+        billing_enabled=False,
+        available_providers=(),
+        bot_username=None,
+        static_dir=tmp_path / "missing-static",
+    )
+    headers = {"Authorization": _auth(42, bot_token="")}
+    async with TestClient(TestServer(app)) as client:
+        for method, path, body in (
+            ("GET", "/api/account", None),
+            ("GET", "/api/workspace", None),
+            ("PATCH", "/api/account", {"householdName": "forged"}),
+            ("POST", "/api/workspace/actions", {"kind": "command", "command": "pantry"}),
+            ("POST", "/api/workspace/photo", None),
+            ("POST", "/api/checkout", {"sku": "family_monthly"}),
+            ("POST", "/api/subscription/cancel", {}),
+        ):
+            response = await client.request(method, path, headers=headers, json=body)
+            assert response.status == 401, (method, path, await response.text())
+        assert (await client.get("/healthz")).status == 200
+    with sessions() as session:
+        household = session.get(Household, 1)
+        assert household is not None and household.name == "The Chen kitchen"
+    assert payments.checkouts == []
 
 
 @pytest.mark.asyncio

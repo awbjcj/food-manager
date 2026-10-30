@@ -596,6 +596,8 @@ async def _amain(settings: Settings) -> None:
     def reschedule(user) -> None:
         schedule_user_digest(scheduler, user, send=send)
 
+    messaging_runtime.reschedule = reschedule
+
     def unschedule(telegram_id: int) -> None:
         unschedule_user_digest(scheduler, telegram_id)
 

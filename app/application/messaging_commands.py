@@ -27,9 +27,9 @@ from app.messaging.identity_service import (
     authorize,
     confirm_link,
     create_link,
-    find_user,
     observe_destination,
     redeem_link,
+    resolve_existing_user,
     select_destination,
 )
 from app.messaging.queue_service import enqueue
@@ -37,8 +37,8 @@ from app.models import ConversationBinding, ExternalIdentity, HouseholdInvite, U
 from app.pending_service import utc_naive
 
 
-def join(session, *, incoming, token, now, provider):
-    user = find_user(session, incoming.actor)
+def join(session, *, incoming, connection, token, now, provider):
+    user = resolve_existing_user(session, actor=incoming.actor, connection=connection)
     if user and (user.banned or user.membership_active):
         raise AlreadyMember()
     invite = session.exec(
@@ -58,8 +58,15 @@ def join(session, *, incoming, token, now, provider):
             llm_provider=provider,
             created_at=utc_naive(now),
         )
-        session.add(user)
-        session.flush()
+    if connection.provider == "telegram":
+        user.telegram_id = int(incoming.actor.external_user_id)
+        user.chat_id = int(incoming.conversation.external_conversation_id)
+    session.add(user)
+    session.flush()
+    if (
+        session.get(ExternalIdentity, (connection.id, incoming.actor.external_user_id))
+        is None
+    ):
         session.add(
             ExternalIdentity(
                 connection_id=incoming.actor.connection_id,
@@ -106,6 +113,7 @@ async def run_identity_command(runtime, session, incoming, *, operation):
     if name not in commands:
         return False
     now, settings, user = runtime.now(), runtime.settings, None
+    reschedule_user = None
     try:
         from app.messaging.connection_service import require_connection
 
@@ -127,6 +135,7 @@ async def run_identity_command(runtime, session, incoming, *, operation):
             user = join(
                 session,
                 incoming=incoming,
+                connection=connection,
                 token=parts[1],
                 now=now,
                 provider=settings.llm_provider,
@@ -186,6 +195,8 @@ async def run_identity_command(runtime, session, incoming, *, operation):
                     user.tz = parse_tz(arg)
                 else:
                     user.digest_hour = parse_digest_at(arg)
+                if name in {"tz", "digest_at"}:
+                    reschedule_user = user
                 text = t(
                     "messaging.settings",
                     user.lang,
@@ -306,6 +317,7 @@ async def run_identity_command(runtime, session, incoming, *, operation):
     except (MessagingError, CommandError, InviteError) as exc:
         session.rollback()
         user = None
+        reschedule_user = None
         text = (
             exc.message
             if isinstance(exc, MessagingError)
@@ -322,4 +334,6 @@ async def run_identity_command(runtime, session, incoming, *, operation):
         now=now,
     )
     session.commit()
+    if reschedule_user is not None:
+        runtime.reschedule(reschedule_user)
     return True

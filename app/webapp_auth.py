@@ -35,6 +35,8 @@ def validate_init_data(
 ) -> MiniAppIdentity:
     """Validate signed ``Telegram.WebApp.initData`` and return its user."""
 
+    if not bot_token.strip():
+        raise MiniAppAuthError("Telegram authentication is unavailable")
     if not raw:
         raise MiniAppAuthError("missing Telegram init data")
     pairs = parse_qsl(raw, keep_blank_values=True, strict_parsing=True)
@@ -47,9 +49,7 @@ def validate_init_data(
 
     check_string = "\n".join(f"{key}={values[key]}" for key in sorted(values))
     secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
-    expected_hash = hmac.new(
-        secret, check_string.encode(), hashlib.sha256
-    ).hexdigest()
+    expected_hash = hmac.new(secret, check_string.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(received_hash, expected_hash):
         raise MiniAppAuthError("invalid init data signature")
 
